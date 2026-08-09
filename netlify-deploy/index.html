@@ -445,11 +445,38 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 </head>
 <body>
 
+<!-- LOGIN GATE — blocks the app until a valid session token exists.
+     Hidden by default; JS shows it if login is required. -->
+<div id="authGate" style="display:none;position:fixed;inset:0;background:var(--black);z-index:9999;align-items:center;justify-content:center">
+  <div style="width:340px;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:28px">
+    <div style="text-align:center;margin-bottom:20px">
+      <div style="font-size:20px;font-weight:800"><span style="color:var(--blue)">Inkable</span> Studios</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">Dashboard</div>
+    </div>
+    <div id="authFirstTimeNotice" style="display:none;font-size:11px;color:var(--muted);background:var(--dark);border-radius:8px;padding:10px 12px;margin-bottom:14px;line-height:1.5">
+      No password has been set yet. Create one now — this is the one password that protects everything in this Dashboard, so keep it somewhere safe.
+    </div>
+    <div class="jdc-field" style="margin-bottom:12px">
+      <label id="authPasswordLabel">Password</label>
+      <input type="password" id="authPasswordInput" style="width:100%;background:var(--dark);border:1px solid var(--border);border-radius:6px;padding:9px 12px;color:var(--text);font-size:13px;font-family:'DM Sans',sans-serif;outline:none" onkeydown="if(event.key==='Enter')submitAuthGate()"/>
+    </div>
+    <div id="authConfirmField" style="display:none" class="jdc-field" style="margin-bottom:12px">
+      <label>Confirm Password</label>
+      <input type="password" id="authConfirmInput" style="width:100%;background:var(--dark);border:1px solid var(--border);border-radius:6px;padding:9px 12px;color:var(--text);font-size:13px;font-family:'DM Sans',sans-serif;outline:none" onkeydown="if(event.key==='Enter')submitAuthGate()"/>
+    </div>
+    <div id="authError" style="display:none;font-size:11.5px;color:var(--red);margin-bottom:12px"></div>
+    <button class="btn btn-primary" style="width:100%" onclick="submitAuthGate()" id="authSubmitBtn">Log In</button>
+  </div>
+</div>
+
+<div id="appShell" style="display:none">
+
 <!-- TOPBAR -->
 <div class="topbar">
   <div class="topbar-brand">
     <div class="topbar-logo"><span>Inkable</span> Studios</div>
-    <div class="topbar-version">Dashboard v2.6.1-drivefork</div>
+    <div class="topbar-version">Dashboard v2.9</div>
+    <div class="topbar-version" id="syncStatusIndicator" style="margin-left:8px">☁ …</div>
   </div>
   <div class="topbar-right">
 <button class="btn btn-ghost" onclick="openSettings()" title="Pricing settings">⚙️ Settings</button>
@@ -546,6 +573,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
           <div class="col-doc">Actions</div>
         </div>
         <div id="projects-list"></div>
+        <input type="file" id="rowProofFileInput" style="display:none" onchange="handleRowProofFileSelected(this)"/>
       </div>
     </div>
 
@@ -1059,6 +1087,7 @@ function setJobMeta(id,data){
   const m=getMeta();
   m[id]=data;
   saveMeta(m);
+  syncJobMetaToServer(id,data);
 }
 
 // ── Payments — decoupled from production status. A job can be marked
@@ -1085,6 +1114,7 @@ function addClientLogEntry(clientId,type,note,jobId){
     jobId:jobId||'',
   });
   localStorage.setItem(CLIENTS_KEY,JSON.stringify(clients));
+  syncClientToServer(clients[idx]);
 }
 function deleteClientLogEntry(clientId,entryId){
   const clients=getClients();
@@ -1092,6 +1122,7 @@ function deleteClientLogEntry(clientId,entryId){
   if(idx<0)return;
   clients[idx].log=(clients[idx].log||[]).filter(e=>e.id!==entryId);
   localStorage.setItem(CLIENTS_KEY,JSON.stringify(clients));
+  syncClientToServer(clients[idx]);
 }
 function getLastContactDate(clientId){
   const log=getClientLog(clientId);
@@ -1190,6 +1221,7 @@ function addClient(data){
   };
   clients.push(client);
   localStorage.setItem(CLIENTS_KEY,JSON.stringify(clients));
+  syncClientToServer(client);
   return client;
 }
 
@@ -1373,7 +1405,7 @@ function renderProjects(){
       <div class="job-date">${p.savedAt||'—'}</div>
       <div class="job-date" style="color:${meta.installDate?'var(--text)':'var(--muted2)'}">${meta.installDate?new Date(meta.installDate+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}):'—'}</div>
       <div onclick="event.stopPropagation()">
-        <button class="action-btn proof-btn${meta.proofLink?' has-proof':''}" onclick="${meta.proofLink?`window.open('${meta.proofLink}','_blank')`:`openJobModal('${p.id}')`}" title="${meta.proofLink?'View proof':'Upload proof'}">📎</button>
+        <button class="action-btn proof-btn${meta.proofLink?' has-proof':''}" id="proofbtn-${p.id}" onclick="${meta.proofLink?`window.open('${meta.proofLink}','_blank')`:`triggerRowProofUpload('${p.id}')`}" title="${meta.proofLink?'View proof':'Upload proof'}">📎</button>
       </div>
       <div onclick="event.stopPropagation()" style="position:relative">
         <button class="action-btn" onclick="toggleActionMenu('${p.id}',event)" style="font-weight:700;letter-spacing:.05em">⋯</button>
@@ -1567,6 +1599,7 @@ function deleteProjectConfirm(id){
 
   const updated=projects.filter(pr=>pr.id!==id);
   localStorage.setItem(SAVED_KEY,JSON.stringify(updated));
+  syncProjectDeleteToServer(id);
 
   // Clean up the associated status/tags/notes/payments too, so nothing
   // orphaned is left behind under this job's id.
@@ -1626,6 +1659,7 @@ function saveClientForm(){
         name:data.name.trim(),phone:data.phone.trim(),addr:data.addr.trim(),
         city:data.city.trim(),state:data.state.trim(),zip:data.zip.trim(),notes:data.notes.trim()};
       localStorage.setItem(CLIENTS_KEY,JSON.stringify(clients));
+      syncClientToServer(clients[idx]);
     }
   }else{
     addClient(data);
@@ -1816,6 +1850,7 @@ function deleteClientConfirm(id){
   if(!confirm(warn))return;
   const updated=clients.filter(c=>c.id!==id);
   localStorage.setItem(CLIENTS_KEY,JSON.stringify(updated));
+  syncClientDeleteToServer(id);
   renderClients();
   renderProjects();
 }
@@ -2239,8 +2274,154 @@ function refreshAll(){
   renderProjects();
 }
 
+// ── Login gate — protects the app shell using the real /api/auth
+// endpoint. The app's actual data still lives in local storage for now
+// (that's the next piece of work), but this genuinely protects the API
+// we already have live, and sets up the pattern for when everything else
+// gets wired to it too.
+const AUTH_TOKEN_KEY='inkable_auth_token';
+let authMode='login';
+
+function decodeTokenPayload(token){
+  try{
+    const body=token.split('.')[0];
+    const json=atob(body.replace(/-/g,'+').replace(/_/g,'/'));
+    return JSON.parse(json);
+  }catch(e){ return null; }
+}
+function showAuthError(msg){
+  const el=document.getElementById('authError');
+  el.textContent=msg;
+  el.style.display='block';
+}
+function showApp(){
+  document.getElementById('authGate').style.display='none';
+  document.getElementById('appShell').style.display='block';
+}
+async function checkAuthOnLoad(){
+  const token=localStorage.getItem(AUTH_TOKEN_KEY);
+  const payload=token?decodeTokenPayload(token):null;
+  if(payload&&payload.exp>Date.now()){
+    showApp();
+    return;
+  }
+  await showAuthGate();
+}
+async function showAuthGate(){
+  document.getElementById('authGate').style.display='flex';
+  document.getElementById('appShell').style.display='none';
+  try{
+    const res=await fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'status'})});
+    const data=await res.json();
+    if(!data.configured){
+      authMode='setup';
+      document.getElementById('authFirstTimeNotice').style.display='block';
+      document.getElementById('authConfirmField').style.display='block';
+      document.getElementById('authPasswordLabel').textContent='Create Password';
+      document.getElementById('authSubmitBtn').textContent='Create Password \u0026 Log In';
+    }else{
+      authMode='login';
+    }
+  }catch(e){
+    showAuthError('Can\'t reach the server — check your connection and try again.');
+  }
+}
+async function submitAuthGate(){
+  const password=document.getElementById('authPasswordInput').value;
+  document.getElementById('authError').style.display='none';
+  if(!password){ showAuthError('Enter a password.'); return; }
+
+  if(authMode==='setup'){
+    const confirmPw=document.getElementById('authConfirmInput').value;
+    if(password.length<6){ showAuthError('Password must be at least 6 characters.'); return; }
+    if(password!==confirmPw){ showAuthError('Passwords don\'t match.'); return; }
+    try{
+      const res=await fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'set-password',newPassword:password})});
+      const data=await res.json();
+      if(!res.ok){ showAuthError(data.error||'Could not set password.'); return; }
+      localStorage.setItem(AUTH_TOKEN_KEY,data.token);
+      showApp();
+    }catch(e){ showAuthError('Can\'t reach the server — check your connection.'); }
+    return;
+  }
+
+  try{
+    const res=await fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'login',password})});
+    const data=await res.json();
+    if(!res.ok){ showAuthError(data.error||'Incorrect password.'); return; }
+    localStorage.setItem(AUTH_TOKEN_KEY,data.token);
+    showApp();
+  }catch(e){ showAuthError('Can\'t reach the server — check your connection.'); }
+}
+function logout(){
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+  location.reload();
+}
+
+// ── Cloud sync — Netlify DB backend. localStorage stays the fast, always-
+// available cache; every write here ALSO pushes to the server, and the app
+// pulls the latest from the server once on load. This is what makes
+// multiple devices safe to use — the database applies each change as its
+// own precise update, so two devices editing different things can't wipe
+// out each other's work the way a single shared file would.
+const CLOUD_API_BASE='https://inkable-dashboard.netlify.app/api';
+let cloudSyncOk=null; // null = not attempted yet, true/false after first try
+
+function updateSyncIndicator(ok){
+  cloudSyncOk=ok;
+  const el=document.getElementById('syncStatusIndicator');
+  if(!el)return;
+  if(ok){ el.textContent='☁ Synced'; el.style.color='var(--green)'; el.title='Cloud sync is working — this device\'s changes are saved to the server.'; }
+  else{ el.textContent='☁ Offline'; el.style.color='var(--amber)'; el.title='Could not reach the server — changes are saved on THIS DEVICE ONLY until sync recovers. Do not assume other devices see this yet.'; }
+}
+
+async function cloudPush(path,method,body){
+  try{
+    const opts={method,headers:{'Content-Type':'application/json'}};
+    if(body!==undefined)opts.body=JSON.stringify(body);
+    const res=await fetch(CLOUD_API_BASE+path,opts);
+    if(!res.ok)throw new Error('Server returned '+res.status);
+    updateSyncIndicator(true);
+    return await res.json();
+  }catch(err){
+    console.warn('Cloud sync failed for',path,err);
+    updateSyncIndicator(false);
+    return null;
+  }
+}
+function syncClientToServer(client){ cloudPush('/clients','POST',client); }
+function syncClientDeleteToServer(id){ cloudPush('/clients?id='+encodeURIComponent(id),'DELETE'); }
+function syncProjectToServer(project){ cloudPush('/projects','POST',project); }
+function syncProjectDeleteToServer(id){ cloudPush('/projects?id='+encodeURIComponent(id),'DELETE'); }
+function syncJobMetaToServer(projectId,data){ cloudPush('/job-meta','POST',{projectId,...data}); }
+function syncPricingToServer(data){ cloudPush('/pricing','POST',data); }
+
+// Pulls the server's current data on load and makes it the local cache.
+// If the server can't be reached, the app just keeps using whatever was
+// already in localStorage — never blocks on this.
+async function pullFromServerOnLoad(){
+  try{
+    const res=await fetch(CLOUD_API_BASE+'/sync-all');
+    if(!res.ok)throw new Error('Server returned '+res.status);
+    const data=await res.json();
+    localStorage.setItem(CLIENTS_KEY,JSON.stringify(data.clients||[]));
+    localStorage.setItem(SAVED_KEY,JSON.stringify(data.projects||[]));
+    localStorage.setItem(META_KEY,JSON.stringify(data.jobMeta||{}));
+    if(data.pricing&&Object.keys(data.pricing).length)localStorage.setItem(PRICING_KEY,JSON.stringify(data.pricing));
+    updateSyncIndicator(true);
+    renderProjects();
+    if(typeof renderSales==='function')renderSales();
+    if(typeof renderClients==='function')renderClients();
+    if(typeof renderReports==='function')renderReports();
+  }catch(err){
+    console.warn('Initial cloud sync failed — using whatever is already on this device:',err);
+    updateSyncIndicator(false);
+  }
+}
+
 // ── Init ──────────────────────────────────────────────────────────────
 renderProjects();
+pullFromServerOnLoad();
 
 // If a Drive Client ID is already saved, get the auth client ready so
 // "Connect" works immediately — this doesn't grant access on its own,
@@ -2437,7 +2618,7 @@ function handleRestoreFile(event){
   const file=event.target.files?.[0];
   if(!file)return;
   const reader=new FileReader();
-  reader.onload=()=>{
+  reader.onload=async ()=>{
     let backup;
     try{ backup=JSON.parse(reader.result); }
     catch(e){ alert('That file isn\'t valid — it doesn\'t look like a proper backup file.'); event.target.value=''; return; }
@@ -2451,7 +2632,7 @@ function handleRestoreFile(event){
     const projCount=(backup.data.inkable_saved_estimates||[]).length;
     const clientCount=(backup.data.inkable_clients||[]).length;
     const madeOn=backup.exportedAt||'an unknown date';
-    const warn=`Restore this backup?\n\nBackup made: ${madeOn}\nContains: ${projCount} project(s), ${clientCount} client(s)\n\nThis REPLACES everything currently in the tool. Anything created since this backup was made will be permanently lost. This can't be undone.`;
+    const warn=`Restore this backup?\n\nBackup made: ${madeOn}\nContains: ${projCount} project(s), ${clientCount} client(s)\n\nThis REPLACES everything currently in the tool — on THIS DEVICE AND in the cloud, once synced. Anything created since this backup was made will be permanently lost. This can't be undone.`;
     if(!confirm(warn)){ event.target.value=''; return; }
 
     Object.keys(BACKUP_KEYS).forEach(key=>{
@@ -2464,8 +2645,25 @@ function handleRestoreFile(event){
       }
     });
 
+    // Push the restored data to the server BEFORE reloading — otherwise
+    // the reload's normal "pull latest from server" step would immediately
+    // overwrite what was just restored with whatever the server still has.
     event.target.value='';
-    alert('Backup restored. The page will reload now.');
+    alert('Backup restored. Syncing to the cloud, then the page will reload…');
+    try{
+      const clients=JSON.parse(localStorage.getItem(CLIENTS_KEY)||'[]');
+      const projects=JSON.parse(localStorage.getItem(SAVED_KEY)||'[]');
+      const jobMeta=JSON.parse(localStorage.getItem(META_KEY)||'{}');
+      const pricing=JSON.parse(localStorage.getItem(PRICING_KEY)||'{}');
+      await Promise.all([
+        ...clients.map(c=>cloudPush('/clients','POST',c)),
+        ...projects.map(p=>cloudPush('/projects','POST',p)),
+        ...Object.keys(jobMeta).map(pid=>cloudPush('/job-meta','POST',{projectId:pid,...jobMeta[pid]})),
+        Object.keys(pricing).length?cloudPush('/pricing','POST',pricing):Promise.resolve(),
+      ]);
+    }catch(err){
+      console.warn('Restore: cloud sync had errors, continuing with reload anyway:',err);
+    }
     location.reload();
   };
   reader.onerror=()=>{ alert('Could not read that file.'); event.target.value=''; };
@@ -2588,6 +2786,38 @@ async function uploadProofFile(jobId,file){
   });
   const linkData=await linkRes.json();
   return {link:linkData.webViewLink,fileId:uploaded.id};
+}
+
+// Row-level proof upload — clicking the paperclip directly in the
+// Projects list, with no proof yet, should go straight to a file picker,
+// not require opening the job first. Reuses the same upload pipeline the
+// Job Modal uses, just triggered from the list row instead.
+function triggerRowProofUpload(jobId){
+  if(!isDriveConnected()){
+    alert('Connect Google Drive first — Settings → Proofs / Drive → Connect Google Drive.');
+    return;
+  }
+  const input=document.getElementById('rowProofFileInput');
+  input.dataset.jobId=jobId;
+  input.click();
+}
+function handleRowProofFileSelected(inputEl){
+  const jobId=inputEl.dataset.jobId;
+  if(!jobId)return;
+  const btn=document.getElementById('proofbtn-'+jobId);
+  if(btn){ btn.textContent='⏳'; btn.disabled=true; }
+  const file=inputEl.files?.[0];
+  if(!file){ if(btn){btn.textContent='📎';btn.disabled=false;} return; }
+  uploadProofFile(jobId,file).then(({link})=>{
+    const meta=getJobMeta(jobId);
+    setJobMeta(jobId,{...meta,proofLink:link});
+    renderProjects();
+  }).catch(err=>{
+    console.error('Proof upload error:',err);
+    alert('Proof upload failed: '+err.message);
+    if(btn){ btn.textContent='📎'; btn.disabled=false; }
+  });
+  inputEl.value='';
 }
 
 function handleProofFileSelected(jobId,inputEl){
@@ -2802,6 +3032,7 @@ function saveSettings(){
   const existing=getPricingData();
   const merged={...existing,...s};
   localStorage.setItem(PRICING_KEY,JSON.stringify(merged));
+  syncPricingToServer(merged);
 
   // If the pricer is open, refresh its material dropdowns + totals so the
   // new prices apply immediately without needing to reopen the job.
@@ -3914,6 +4145,7 @@ function savePricerProject(){
   if(existing>=0){rawList[existing]=entry;}
   else{rawList.unshift(entry);}
   localStorage.setItem(SAVED_KEY,JSON.stringify(rawList));
+  syncProjectToServer(entry);
 
   // Flash save button
   const btn=document.getElementById('pricerSaveBtn');
@@ -3938,6 +4170,7 @@ function savePdfSnapshot(projectId,type,base64){
   if(!list[idx].exportedPdfs)list[idx].exportedPdfs={};
   list[idx].exportedPdfs[type]={data:base64,savedAt:new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})};
   localStorage.setItem(SAVED_KEY,JSON.stringify(list));
+  syncProjectToServer(list[idx]);
 }
 function base64ToBlob(base64){
   const parts=base64.split(',');
@@ -4974,6 +5207,14 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
 
     <!-- DATA TAB -->
     <div class="settings-tab-panel" id="stab-data">
+      <div style="background:var(--dark);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-weight:700;font-size:13px;margin-bottom:2px">Session</div>
+          <div style="font-size:11px;color:var(--muted)">You're logged in on this device.</div>
+        </div>
+        <button class="btn btn-ghost" style="border-color:var(--red);color:var(--red)" onclick="logout()">Log Out</button>
+      </div>
+
       <div class="settings-section-title">Backup &amp; restore</div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.6">
         Everything in this tool — every project, client, payment, and rate — lives only in this browser. Nothing is stored anywhere else. If this browser's data ever gets cleared, or you switch devices, there's no way to get it back unless you've exported a backup first.
@@ -5030,6 +5271,8 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
     </div>
 
   </div>
+</div>
+
 </div>
 
 </body>
