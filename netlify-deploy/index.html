@@ -475,7 +475,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 <div class="topbar">
   <div class="topbar-brand">
     <div class="topbar-logo"><span>Inkable</span> Studios</div>
-    <div class="topbar-version">Dashboard v2.10</div>
+    <div class="topbar-version">Dashboard v2.11</div>
     <div class="topbar-version" id="syncStatusIndicator" style="margin-left:8px">☁ …</div>
   </div>
   <div class="topbar-right">
@@ -2248,7 +2248,23 @@ function toggleActionMenu(id,e){
   // Close all other menus
   document.querySelectorAll('[id^="menu-"]').forEach(m=>{if(m.id!=='menu-'+id)m.style.display='none';});
   const m=document.getElementById('menu-'+id);
-  if(m)m.style.display=m.style.display==='none'?'block':'none';
+  if(!m)return;
+  const opening=m.style.display==='none'||!m.style.display;
+  if(opening){
+    // The menu used to be position:absolute inside a scrollable list —
+    // any row near the bottom (or once the list is scrolled at all) would
+    // have its dropdown clipped by the list's own overflow:auto instead of
+    // floating freely. Fixed positioning, calculated from the actual
+    // button on screen, sidesteps that entirely.
+    const btnRect=e.currentTarget.getBoundingClientRect();
+    m.style.position='fixed';
+    m.style.top=(btnRect.bottom+4)+'px';
+    m.style.right=(window.innerWidth-btnRect.right)+'px';
+    m.style.left='auto';
+    m.style.display='block';
+  }else{
+    m.style.display='none';
+  }
 }
 // Close menus on outside click
 document.addEventListener('click',()=>{
@@ -2297,6 +2313,7 @@ function showAuthError(msg){
 function showApp(){
   document.getElementById('authGate').style.display='none';
   document.getElementById('appShell').style.display='block';
+  pullFromServerOnLoad();
 }
 async function checkAuthOnLoad(){
   const token=localStorage.getItem(AUTH_TOKEN_KEY);
@@ -2377,7 +2394,10 @@ function updateSyncIndicator(ok){
 
 async function cloudPush(path,method,body){
   try{
-    const opts={method,headers:{'Content-Type':'application/json'}};
+    const token=localStorage.getItem(AUTH_TOKEN_KEY);
+    const headers={'Content-Type':'application/json'};
+    if(token)headers['Authorization']='Bearer '+token;
+    const opts={method,headers};
     if(body!==undefined)opts.body=JSON.stringify(body);
     const res=await fetch(CLOUD_API_BASE+path,opts);
     if(!res.ok)throw new Error('Server returned '+res.status);
@@ -2401,7 +2421,9 @@ function syncPricingToServer(data){ cloudPush('/pricing','POST',data); }
 // already in localStorage — never blocks on this.
 async function pullFromServerOnLoad(){
   try{
-    const res=await fetch(CLOUD_API_BASE+'/sync-all');
+    const token=localStorage.getItem(AUTH_TOKEN_KEY);
+    const headers=token?{'Authorization':'Bearer '+token}:{};
+    const res=await fetch(CLOUD_API_BASE+'/sync-all',{headers});
     if(!res.ok)throw new Error('Server returned '+res.status);
     const data=await res.json();
     localStorage.setItem(CLIENTS_KEY,JSON.stringify(data.clients||[]));
@@ -2422,7 +2444,6 @@ async function pullFromServerOnLoad(){
 // ── Init ──────────────────────────────────────────────────────────────
 renderProjects();
 checkAuthOnLoad();
-pullFromServerOnLoad();
 
 // If a Drive Client ID is already saved, get the auth client ready so
 // "Connect" works immediately — this doesn't grant access on its own,
@@ -4170,7 +4191,17 @@ function savePdfSnapshot(projectId,type,base64){
   if(idx<0)return;
   if(!list[idx].exportedPdfs)list[idx].exportedPdfs={};
   list[idx].exportedPdfs[type]={data:base64,savedAt:new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})};
-  localStorage.setItem(SAVED_KEY,JSON.stringify(list));
+  try{
+    localStorage.setItem(SAVED_KEY,JSON.stringify(list));
+  }catch(err){
+    // Local storage is genuinely full (a real ~5-10MB browser limit, and
+    // PDF snapshots are the largest thing stored here). Don't let this
+    // block the actual PDF the user is trying to download right now —
+    // just skip keeping a local copy of it. Cloud sync below is unaffected
+    // since it's a separate call, not stored in this same local blob.
+    console.warn('Could not save a local PDF snapshot — storage is full:',err);
+    return;
+  }
   syncProjectToServer(list[idx]);
 }
 function base64ToBlob(base64){
