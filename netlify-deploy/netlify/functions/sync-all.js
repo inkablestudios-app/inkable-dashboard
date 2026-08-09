@@ -1,4 +1,5 @@
 import { getDatabase } from "@netlify/database";
+import { requireAuth } from "./_shared/auth.js";
 
 const db = getDatabase();
 
@@ -8,6 +9,10 @@ const db = getDatabase();
 // pricing.js) so each save stays a small, precise operation, not a full
 // re-upload of everything.
 export default async (req) => {
+  if (!requireAuth(req)) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   if (req.method !== "GET") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }

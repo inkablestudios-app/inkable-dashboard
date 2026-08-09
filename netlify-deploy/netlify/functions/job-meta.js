@@ -1,8 +1,13 @@
 import { getDatabase } from "@netlify/database";
+import { requireAuth } from "./_shared/auth.js";
 
 const db = getDatabase();
 
 export default async (req) => {
+  if (!requireAuth(req)) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const method = req.method;
   const url = new URL(req.url);
 
