@@ -475,7 +475,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 <div class="topbar">
   <div class="topbar-brand">
     <div class="topbar-logo"><span>Inkable</span> Studios</div>
-    <div class="topbar-version">Dashboard v2.11</div>
+    <div class="topbar-version">Dashboard v2.12</div>
     <div class="topbar-version" id="syncStatusIndicator" style="margin-left:8px">☁ …</div>
   </div>
   <div class="topbar-right">
@@ -2291,10 +2291,9 @@ function refreshAll(){
 }
 
 // ── Login gate — protects the app shell using the real /api/auth
-// endpoint. The app's actual data still lives in local storage for now
-// (that's the next piece of work), but this genuinely protects the API
-// we already have live, and sets up the pattern for when everything else
-// gets wired to it too.
+// endpoint. The app's data syncs to a real Netlify DB backend (see the
+// cloud sync section further down) — local storage is the fast cache,
+// not the source of truth.
 const AUTH_TOKEN_KEY='inkable_auth_token';
 let authMode='login';
 
@@ -4190,19 +4189,24 @@ function savePdfSnapshot(projectId,type,base64){
   const idx=list.findIndex(p=>p.id===projectId);
   if(idx<0)return;
   if(!list[idx].exportedPdfs)list[idx].exportedPdfs={};
-  list[idx].exportedPdfs[type]={data:base64,savedAt:new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})};
+  const savedAt=new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+
+  // The actual PDF bytes go to the cloud, never into local storage — this
+  // is the real fix for the quota problem, not just catching the error.
+  // Build the full record (WITH the bytes) only in memory, for this one
+  // sync call.
+  const fullForSync={...list[idx],exportedPdfs:{...list[idx].exportedPdfs,[type]:{data:base64,savedAt}}};
+  syncProjectToServer(fullForSync);
+
+  // What actually gets written to this device just remembers that a PDF
+  // exists and when — enough to show "View Estimate" as available, without
+  // storing hundreds of KB of base64 for every document on every device.
+  list[idx].exportedPdfs[type]={savedAt,storedInCloud:true};
   try{
     localStorage.setItem(SAVED_KEY,JSON.stringify(list));
   }catch(err){
-    // Local storage is genuinely full (a real ~5-10MB browser limit, and
-    // PDF snapshots are the largest thing stored here). Don't let this
-    // block the actual PDF the user is trying to download right now —
-    // just skip keeping a local copy of it. Cloud sync below is unaffected
-    // since it's a separate call, not stored in this same local blob.
-    console.warn('Could not save a local PDF snapshot — storage is full:',err);
-    return;
+    console.warn('Could not update the local project cache after a PDF save:',err);
   }
-  syncProjectToServer(list[idx]);
 }
 function base64ToBlob(base64){
   const parts=base64.split(',');
@@ -4466,14 +4470,13 @@ function gatherPricerPDFDataFromSaved(p){
 }
 
 // ── Regenerate a PDF for an already-saved project (Projects tab menu) ──
-function generateSavedPDF(projectId,type){
+async function generateSavedPDF(projectId,type){
   try{
     const p=getProjects().find(pr=>pr.id===projectId);
     if(!p){ alert('That project could not be found — it may have been deleted.'); return; }
 
-    // If this exact PDF was already generated and stored, hand back that
-    // exact file — it's what was actually sent, and stays accurate even if
-    // rates/settings have changed since.
+    // Old-style projects (from before this migration) may still have the
+    // actual bytes sitting in the local cache — use them directly if so.
     const snapshot=p.exportedPdfs?.[type];
     if(snapshot?.data){
       const fname=(pdfSlug(p.name)?pdfSlug(p.name)+'_':'')+pdfSlug(type==='invoice'?(p.state?.form?.invNo||''):(p.estNo||''))+'.pdf';
@@ -4481,8 +4484,31 @@ function generateSavedPDF(projectId,type){
       return;
     }
 
-    // Nothing stored yet (never generated before, or an older project from
-    // before this feature existed) — build it fresh, then store it so the
+    // The normal case now — a PDF exists, but only its metadata lives
+    // locally (the bytes live in the cloud). Fetch that one project fresh,
+    // WITH its bytes, rather than pulling everyone's PDFs down just to
+    // view one.
+    if(snapshot?.storedInCloud){
+      const token=localStorage.getItem(AUTH_TOKEN_KEY);
+      const headers=token?{'Authorization':'Bearer '+token}:{};
+      try{
+        const res=await fetch(CLOUD_API_BASE+'/projects?id='+encodeURIComponent(projectId),{headers});
+        if(res.ok){
+          const fresh=await res.json();
+          const freshSnap=fresh.exportedPdfs?.[type];
+          if(freshSnap?.data){
+            const fname=(pdfSlug(fresh.name)?pdfSlug(fresh.name)+'_':'')+pdfSlug(type==='invoice'?(fresh.state?.form?.invNo||''):(fresh.estNo||''))+'.pdf';
+            downloadBlob(base64ToBlob(freshSnap.data),fname);
+            return;
+          }
+        }
+        console.warn('Cloud copy of this PDF could not be fetched — regenerating fresh instead.');
+      }catch(err){
+        console.warn('Cloud copy of this PDF could not be fetched — regenerating fresh instead.',err);
+      }
+    }
+
+    // Nothing usable found anywhere — build it fresh, then store it so the
     // next view is instant and consistent.
     const {jsPDF}=window.jspdf;
     const doc=new jsPDF({unit:'pt',format:'letter'});
