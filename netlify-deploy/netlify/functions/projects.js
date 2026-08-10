@@ -3,6 +3,19 @@ import { requireAuth } from "./_shared/auth.js";
 
 const db = getDatabase();
 
+// Strips the actual PDF bytes out of exportedPdfs, keeping just the
+// metadata (that a PDF exists, and when). Used for the bulk list endpoint
+// so pulling "all projects" stays small — the actual bytes are only ever
+// fetched on demand, for one project at a time, via ?id=.
+function stripPdfBytes(exportedPdfs) {
+  if (!exportedPdfs) return {};
+  const out = {};
+  for (const [type, snap] of Object.entries(exportedPdfs)) {
+    out[type] = { savedAt: snap.savedAt, storedInCloud: true };
+  }
+  return out;
+}
+
 export default async (req) => {
   if (!requireAuth(req)) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -13,12 +26,26 @@ export default async (req) => {
 
   try {
     if (method === "GET") {
+      const id = url.searchParams.get("id");
+
+      if (id) {
+        // Single project, WITH the actual PDF bytes — this is the on-demand
+        // fetch used when someone clicks "View Estimate" etc.
+        const rows = await db.sql`SELECT * FROM projects WHERE id = ${id}`;
+        if (!rows.length) return Response.json({ error: "Not found" }, { status: 404 });
+        const r = rows[0];
+        return Response.json({
+          id: r.id, name: r.name, estNo: r.est_no, projectNum: r.project_num,
+          clientId: r.client_id, savedAt: r.saved_at, docType: r.doc_type,
+          state: r.state, exportedPdfs: r.exported_pdfs,
+        });
+      }
+
       const rows = await db.sql`SELECT * FROM projects ORDER BY saved_at DESC`;
-      // Reshape back to the flat structure the app already expects.
       const out = rows.map(r => ({
         id: r.id, name: r.name, estNo: r.est_no, projectNum: r.project_num,
         clientId: r.client_id, savedAt: r.saved_at, docType: r.doc_type,
-        state: r.state, exportedPdfs: r.exported_pdfs,
+        state: r.state, exportedPdfs: stripPdfBytes(r.exported_pdfs),
       }));
       return Response.json(out);
     }
