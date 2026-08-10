@@ -475,7 +475,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 <div class="topbar">
   <div class="topbar-brand">
     <div class="topbar-logo"><span>Inkable</span> Studios</div>
-    <div class="topbar-version">Dashboard v2.12</div>
+    <div class="topbar-version">Dashboard v2.13</div>
     <div class="topbar-version" id="syncStatusIndicator" style="margin-left:8px">☁ …</div>
   </div>
   <div class="topbar-right">
@@ -4222,6 +4222,15 @@ function downloadBlob(blob,filename){
   document.body.appendChild(a);a.click();document.body.removeChild(a);
   setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
+// "View Estimate/Invoice" should show the PDF, not force a save-as-file
+// download — opens it in a new tab using the browser's own PDF viewer.
+// The URL is only valid for this session, so it's not shareable as-is —
+// just a way to look at it.
+function viewBlob(blob){
+  const url=URL.createObjectURL(blob);
+  window.open(url,'_blank');
+  setTimeout(()=>URL.revokeObjectURL(url),60000);
+}
 
 // Shared print helper — opens a clean, light-background print view (the
 // dashboard's dark theme would waste ink and print poorly) with a simple
@@ -4479,8 +4488,7 @@ async function generateSavedPDF(projectId,type){
     // actual bytes sitting in the local cache — use them directly if so.
     const snapshot=p.exportedPdfs?.[type];
     if(snapshot?.data){
-      const fname=(pdfSlug(p.name)?pdfSlug(p.name)+'_':'')+pdfSlug(type==='invoice'?(p.state?.form?.invNo||''):(p.estNo||''))+'.pdf';
-      downloadBlob(base64ToBlob(snapshot.data),fname);
+      viewBlob(base64ToBlob(snapshot.data));
       return;
     }
 
@@ -4497,8 +4505,7 @@ async function generateSavedPDF(projectId,type){
           const fresh=await res.json();
           const freshSnap=fresh.exportedPdfs?.[type];
           if(freshSnap?.data){
-            const fname=(pdfSlug(fresh.name)?pdfSlug(fresh.name)+'_':'')+pdfSlug(type==='invoice'?(fresh.state?.form?.invNo||''):(fresh.estNo||''))+'.pdf';
-            downloadBlob(base64ToBlob(freshSnap.data),fname);
+            viewBlob(base64ToBlob(freshSnap.data));
             return;
           }
         }
@@ -4518,10 +4525,8 @@ async function generateSavedPDF(projectId,type){
     if(type==='invoice') drawInvoicePDF(doc,W,H,M,d);
     else drawEstimatePDF(doc,W,H,M,d);
 
-    const fname=(pdfSlug(d.clientName)?pdfSlug(d.clientName)+'_':'')+pdfSlug(d.jobName)+'_'+
-      pdfSlug(type==='invoice'?d.invNo:d.estNo)+'.pdf';
     savePdfSnapshot(projectId,type,doc.output('datauristring'));
-    doc.save(fname);
+    viewBlob(doc.output('blob'));
   }catch(err){
     console.error('PDF generation error:',err);
     alert('PDF generation failed: '+err.message+'\nCheck the console for details.');
