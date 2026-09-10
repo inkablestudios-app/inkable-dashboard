@@ -475,7 +475,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 <div class="topbar">
   <div class="topbar-brand">
     <div class="topbar-logo"><span>Inkable</span> Studios</div>
-    <div class="topbar-version">Dashboard v2.15</div>
+    <div class="topbar-version">Dashboard v2.16</div>
     <div class="topbar-version" id="syncStatusIndicator" style="margin-left:8px">☁ …</div>
   </div>
   <div class="topbar-right">
@@ -2308,6 +2308,18 @@ function saveJobMeta(){
   renderReports();
 }
 
+// The pricer's "Other" dropdown — Download Estimate / Download PDF, tucked
+// away since generating a fresh PDF from here is now a secondary action
+// (Projects' View Estimate/Invoice covers the common case of just looking
+// at what's already been sent).
+function togglePricerOtherMenu(){
+  const m=document.getElementById('menu-pricer-other');
+  if(!m)return;
+  const opening=m.style.display==='none'||!m.style.display;
+  document.querySelectorAll('[id^="menu-"]').forEach(el=>{if(el!==m)el.style.display='none';});
+  m.style.display=opening?'block':'none';
+}
+
 function toggleActionMenu(id,e){
   e.stopPropagation();
   // Close all other menus
@@ -3704,6 +3716,19 @@ function updateDoneColumn(){
 function toggleDimUnit(btn){
   const isFt=btn.classList.toggle('active');
   btn.textContent=isFt?'ft':'in';
+  // Convert the actual displayed number too, not just the label — typing
+  // 24 while in inches and then switching to feet should show 2, not
+  // silently leave 24 sitting there now meaning something 12x different.
+  const field=btn.closest('.line-field');
+  const isWidth=btn.classList.contains('li-w-ft');
+  const input=field?.querySelector(isWidth?'.li-w':'.li-h');
+  if(input&&input.value!==''){
+    const val=parseFloat(input.value);
+    if(!isNaN(val)){
+      const converted=isFt?val/12:val*12;
+      input.value=Math.round(converted*1000)/1000;
+    }
+  }
   recalc();
 }
 
@@ -5056,10 +5081,13 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
         </div>
       </div>
     </div>
-    <div style="display:flex;gap:8px">
+    <div style="display:flex;gap:8px;position:relative">
       <button onclick="savePricerProject()" class="btn btn-ghost" id="pricerSaveBtn">💾 Save</button>
-      <button onclick="generatePricerPDF('estimate')" class="btn btn-ghost">📄 Estimate PDF</button>
-      <button onclick="generatePricerPDF('invoice')" class="btn btn-primary">🧾 Invoice PDF</button>
+      <button onclick="event.stopPropagation();togglePricerOtherMenu()" class="btn btn-primary">Other ▾</button>
+      <div id="menu-pricer-other" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:4px;z-index:100;min-width:170px;box-shadow:0 4px 16px #00000088">
+        <div onclick="generatePricerPDF('estimate')" class="menu-item">📄 Download Estimate</div>
+        <div onclick="generatePricerPDF('invoice')" class="menu-item">🧾 Download PDF</div>
+      </div>
     </div>
   </div>
 
