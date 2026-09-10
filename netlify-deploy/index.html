@@ -476,7 +476,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 <div class="topbar">
   <div class="topbar-brand">
     <div class="topbar-logo"><span>Inkable</span> Studios</div>
-    <div class="topbar-version">Dashboard v2.17</div>
+    <div class="topbar-version">Dashboard v2.18</div>
     <div class="topbar-version" id="syncStatusIndicator" style="margin-left:8px">☁ …</div>
   </div>
   <div class="topbar-right">
@@ -648,6 +648,38 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
       </div>
     </div>
 
+    <!-- EXPENSE MODAL — a real cost added to a job after the fact, for
+         when things drift mid-production (extra materials, unplanned
+         hardware, a sub charging more than quoted). Reports' Money Out
+         picks this up automatically once recorded. -->
+    <div class="modal-overlay" id="expenseModal">
+      <div class="modal" style="width:360px">
+        <div class="modal-header">
+          <h2>Add Expense</h2>
+          <button class="modal-close" onclick="closeExpenseModal()">✕</button>
+        </div>
+        <div class="modal-body">
+          <div id="expJobLine" style="font-size:11px;color:var(--muted);margin-bottom:14px">—</div>
+          <div class="jdc-field" style="margin-bottom:10px">
+            <label>Description</label>
+            <input type="text" id="expDescription" placeholder="e.g. Extra vinyl roll"/>
+          </div>
+          <div class="jdc-field" style="margin-bottom:10px">
+            <label>Amount</label>
+            <input type="number" id="expAmount" min="0" step="0.01" placeholder="0.00"/>
+          </div>
+          <div class="jdc-field" style="margin-bottom:16px">
+            <label>Date</label>
+            <input type="text" id="expDate"/>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn btn-ghost" onclick="closeExpenseModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="submitExpense()">Save Expense</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ── CLIENTS TAB ── -->
     <div class="tab-content" id="tab-clients">
       <div class="page-header">
@@ -789,7 +821,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
     <div class="tab-content" id="tab-reports">
       <div class="page-header">
         <div class="page-title">Reports</div>
-        <button class="btn btn-ghost" onclick="printReportsSummary()">🖨 Print</button>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost" onclick="printTaxReport()">🧾 Tax Report</button>
+          <button class="btn btn-ghost" onclick="printReportsSummary()">🖨 Print</button>
+        </div>
       </div>
       <div style="padding:0 28px;margin-top:16px;display:flex;gap:8px" id="reports-period-row">
         <button class="filter-pill active" data-period="week" onclick="setReportsPeriod('week',this)">This Week</button>
@@ -832,6 +867,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
           <div class="report-stat">
             <span class="report-stat-label">Setup + Hardware</span>
             <span class="report-stat-val" id="r-exp-other">$0</span>
+          </div>
+          <div class="report-stat">
+            <span class="report-stat-label">Extra expenses <span style="font-weight:400;text-transform:none;color:var(--muted2);font-size:9px">(added after pricing)</span></span>
+            <span class="report-stat-val" id="r-exp-extra" style="color:var(--amber)">$0</span>
           </div>
           <div class="report-stat" style="border-top:1px solid var(--border);margin-top:4px;padding-top:8px">
             <span class="report-stat-label" style="font-weight:700;color:var(--text)">Total expenses</span>
@@ -990,6 +1029,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
         </div>
         <div id="modal-log-list" style="max-height:130px;overflow-y:auto"></div>
       </div>
+      <div class="modal-field" id="modal-expenses-section">
+        <label>Extra Expenses <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">(added after pricing)</span></label>
+        <div id="modal-expenses-list" style="max-height:110px;overflow-y:auto;margin-bottom:8px"></div>
+        <button onclick="openExpenseModal(currentJobId)" class="btn btn-ghost" style="padding:6px 12px;font-size:11px;width:100%">+ Add Expense</button>
+      </div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
@@ -1131,7 +1175,7 @@ function saveMeta(m){ localStorage.setItem(META_KEY,JSON.stringify(m)); }
 
 function getJobMeta(id){
   const m=getMeta();
-  return m[id]||{status:'send',tags:[],notes:'',payments:[],installDate:'',proofLink:''};
+  return m[id]||{status:'send',tags:[],notes:'',payments:[],installDate:'',proofLink:'',expenses:[]};
 }
 function setJobMeta(id,data){
   const m=getMeta();
@@ -1535,12 +1579,14 @@ function renderSales(){
     const status=getPaymentStatus(p.id,total);
     const badgeClass=status==='paid'?'pay-paid':status==='partial'?'pay-partial':'pay-unpaid';
     const badgeLabel=status==='paid'?'Paid':status==='partial'?'Partial':'Unpaid';
+    const extraExpenses=getTotalExpenses(p.id);
 
     return `<div class="sales-row">
       <div>
         <div style="font-weight:700;font-size:13px;color:var(--text)">${clientName}</div>
         <div style="font-size:11px;font-family:'DM Mono',monospace;color:var(--muted)">${p.estNo||'—'}</div>
         <div style="font-size:11px;color:var(--muted);margin-top:2px">${p.name||''}</div>
+        ${extraExpenses>0?`<div style="font-size:10.5px;color:var(--amber);margin-top:3px">+ $${extraExpenses.toFixed(2)} in extra expenses</div>`:''}
       </div>
       <div class="amount">$${total.toFixed(2)}</div>
       <div class="amount" style="color:var(--green)">$${paid.toFixed(2)}</div>
@@ -1548,6 +1594,7 @@ function renderSales(){
       <div><span class="pay-badge ${badgeClass}">${badgeLabel}</span></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
         <button class="pay-record-btn" onclick="openPaymentModal('${p.id}')">+ Payment</button>
+        <button class="pay-record-btn" onclick="openExpenseModal('${p.id}')" style="border-color:var(--amber);color:var(--amber)">+ Expense</button>
         ${paid>0?`<button class="pay-record-btn" onclick="generateReceiptPDF('${p.id}')">🧾 Receipt</button>`:''}
         <button onclick="deleteProjectConfirm('${p.id}')" title="Delete" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:2px 4px">🗑</button>
       </div>
@@ -1596,6 +1643,76 @@ function submitPayment(){
   const date=document.getElementById('pmtDate').value;
   addPayment(paymentModalProjectId,amount,method,date);
   closePaymentModal();
+  renderSales();
+  renderReports();
+}
+
+// ── Expenses — a real cost recorded against a specific job after pricing,
+// for when production drifts from the original estimate. Lives in job
+// meta alongside payments, same storage pattern, same sync path.
+function getExpenses(id){
+  return getJobMeta(id).expenses||[];
+}
+function addExpense(id,description,amount,date){
+  const meta=getJobMeta(id);
+  const expenses=[...(meta.expenses||[])];
+  expenses.push({
+    id:Date.now().toString(),
+    description:(description||'').trim(),
+    amount:parseFloat(amount)||0,
+    date:date||new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}),
+  });
+  setJobMeta(id,{...meta,expenses});
+}
+function removeExpense(id,expenseId){
+  const meta=getJobMeta(id);
+  const expenses=(meta.expenses||[]).filter(e=>e.id!==expenseId);
+  setJobMeta(id,{...meta,expenses});
+}
+function getTotalExpenses(id){
+  return getExpenses(id).reduce((s,e)=>s+e.amount,0);
+}
+
+let expenseModalProjectId=null;
+let expenseModalReturnToJob=null;
+function openExpenseModal(projectId){
+  expenseModalProjectId=projectId;
+  // If this was opened from inside the Job Modal, close it for now and
+  // remember to come back once the expense is saved (or cancelled) —
+  // same pattern as Client Detail handing off to its sub-modals.
+  const jobModal=document.getElementById('jobModal');
+  const jobModalWasOpen=jobModal.classList.contains('open');
+  expenseModalReturnToJob=jobModalWasOpen?projectId:null;
+  if(jobModalWasOpen)jobModal.classList.remove('open');
+
+  const p=getProjects().find(pr=>pr.id===projectId);
+  const clients=getClients();
+  const cl=p?clients.find(c=>c.id===p.clientId):null;
+  const clientName=cl?cl.name:(p?.state?.form?.billingName||'—');
+  document.getElementById('expJobLine').textContent=clientName+' — '+(p?.estNo||'');
+  document.getElementById('expDescription').value='';
+  document.getElementById('expAmount').value='';
+  document.getElementById('expDate').value=new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  document.getElementById('expenseModal').classList.add('open');
+}
+function closeExpenseModal(){
+  document.getElementById('expenseModal').classList.remove('open');
+  expenseModalProjectId=null;
+  if(expenseModalReturnToJob){
+    const returnId=expenseModalReturnToJob;
+    expenseModalReturnToJob=null;
+    openJobModal(returnId);
+  }
+}
+function submitExpense(){
+  if(!expenseModalProjectId)return;
+  const description=document.getElementById('expDescription').value.trim();
+  const amount=parseFloat(document.getElementById('expAmount').value)||0;
+  if(!description){ alert('Add a short description for this expense.'); return; }
+  if(amount<=0){ alert('Enter an amount greater than $0.'); return; }
+  const date=document.getElementById('expDate').value;
+  addExpense(expenseModalProjectId,description,amount,date);
+  closeExpenseModal();
   renderSales();
   renderReports();
 }
@@ -1856,6 +1973,25 @@ function renderJobLogList(jobId){
     <button onclick="removeJobLogEntry('${p.clientId}','${entry.id}')" title="Delete entry" style="background:none;border:none;color:var(--muted2);cursor:pointer;font-size:11px;padding:2px;flex-shrink:0">🗑</button>
   </div>`).join('');
 }
+function renderExpensesList(jobId){
+  const listEl=document.getElementById('modal-expenses-list');
+  if(!listEl)return;
+  const entries=getExpenses(jobId);
+  if(!entries.length){
+    listEl.innerHTML='<div style="font-size:11px;color:var(--muted2);padding:4px 0">No extra expenses recorded for this job.</div>';
+    return;
+  }
+  listEl.innerHTML=entries.map(entry=>`<div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:8px">
+    <div style="flex:1">
+      <div style="font-size:11.5px;color:var(--text)">${entry.description}</div>
+      <div style="font-size:10px;color:var(--muted)">${entry.date}</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+      <span style="font-size:12px;color:var(--amber);font-weight:700">$${entry.amount.toFixed(2)}</span>
+      <button onclick="removeExpense('${jobId}','${entry.id}');renderExpensesList('${jobId}');renderSales();renderReports()" title="Delete expense" style="background:none;border:none;color:var(--muted2);cursor:pointer;font-size:11px;padding:2px">🗑</button>
+    </div>
+  </div>`).join('');
+}
 function submitJobLogEntry(){
   if(!currentJobId)return;
   const p=getProjects().find(pr=>pr.id===currentJobId);
@@ -2005,6 +2141,7 @@ function renderReports(){
   s('r-exp-design','$'+rep.expenses.design.toFixed(2));
   s('r-exp-install','$'+rep.expenses.install.toFixed(2));
   s('r-exp-other','$'+(rep.expenses.setup+rep.expenses.hardware).toFixed(2));
+  s('r-exp-extra','$'+rep.expenses.extra.toFixed(2));
   s('r-exp-total','$'+rep.expenses.total.toFixed(2));
   const profitEl=document.getElementById('r-profit');
   if(profitEl){
@@ -2073,8 +2210,9 @@ function renderLeadSourceBreakdown(clients){
 // Cost side mirrors the pricer's live Margin panel (myCost rates), applied
 // to saved data instead of the live DOM.
 function getJobFinancials(p){
+  const extra=getTotalExpenses(p.id);
   const empty={revenue:0,taxable:0,tax:0,paid:0,balance:0,
-    cost:{materials:0,design:0,install:0,setup:0,hardware:0,total:0},profit:0};
+    cost:{materials:0,design:0,install:0,setup:0,hardware:0,extra,total:extra},profit:-extra};
   const f=p.state?.form;
   if(!f||!f.pricerData)return empty;
 
@@ -2096,14 +2234,16 @@ function getJobFinancials(p){
   const installCost=installCostBasisTotal;
   const setupCost=setupHrs*rates.myCostSetup;
   const hardwareCost=(parseFloat(pd.hardwareCost)||0)+(parseFloat(pd.subsCost)||0);
-  const totalCost=rawMat+designCost+installCost+setupCost+hardwareCost;
+  // Extra expenses — real costs recorded after the fact (production
+  // drift), separate from anything the original pricing estimated.
+  const totalCost=rawMat+designCost+installCost+setupCost+hardwareCost+extra;
 
   const paid=getAmountPaid(p.id);
   const balance=Math.max(0,d.total-paid);
 
   return{
     revenue:d.total,taxable:d.taxable,tax:d.tax,paid,balance,
-    cost:{materials:rawMat,design:designCost,install:installCost,setup:setupCost,hardware:hardwareCost,total:totalCost},
+    cost:{materials:rawMat,design:designCost,install:installCost,setup:setupCost,hardware:hardwareCost,extra,total:totalCost},
     profit:d.taxable-totalCost, // pre-tax revenue minus what the job actually cost you
   };
 }
@@ -2166,19 +2306,26 @@ function dateInRange(dateStr,range){
 function computeReportsDataForRange(range){
   const projects=getProjects();
   let revenueCollected=0,taxCollected=0;
-  const expenses={materials:0,design:0,install:0,setup:0,hardware:0,total:0};
+  const expenses={materials:0,design:0,install:0,setup:0,hardware:0,extra:0,total:0};
   let outstandingBalance=0,unpaidCount=0,unpaidTotal=0,partialCount=0,paidCount=0;
 
   projects.forEach(p=>{
     const fin=getJobFinancials(p);
     if(dateInRange(p.savedAt,range)){
+      // Original pricing estimate — recognized when the job itself was
+      // saved, same as always. "Extra" is deliberately excluded here since
+      // it's recognized by each expense's own date instead, just below —
+      // it's real spending that happened whenever it happened, not
+      // whenever the job was first priced.
       expenses.materials+=fin.cost.materials;
       expenses.design+=fin.cost.design;
       expenses.install+=fin.cost.install;
       expenses.setup+=fin.cost.setup;
       expenses.hardware+=fin.cost.hardware;
-      expenses.total+=fin.cost.total;
     }
+    getExpenses(p.id).forEach(exp=>{
+      if(dateInRange(exp.date,range))expenses.extra+=exp.amount;
+    });
     const taxRatio=fin.revenue>0?fin.tax/fin.revenue:0;
     getPayments(p.id).forEach(pmt=>{
       if(dateInRange(pmt.date,range)){
@@ -2192,6 +2339,7 @@ function computeReportsDataForRange(range){
     else if(status==='partial')partialCount++;
     else if(status==='paid')paidCount++;
   });
+  expenses.total=expenses.materials+expenses.design+expenses.install+expenses.setup+expenses.hardware+expenses.extra;
 
   return{
     revenueCollected,taxCollected,expenses,
@@ -2275,6 +2423,7 @@ function openJobModal(id){
   activeTags={rush:meta.tags?.includes('rush'),hold:meta.tags?.includes('hold')};
   updateTagButtons();
   renderJobLogList(id);
+  renderExpensesList(id);
   renderProofSection(id);
   document.getElementById('jobModal').classList.add('open');
 }
@@ -4503,6 +4652,7 @@ function printReportsSummary(){
       <tr><td>Design labor</td><td class="num">$${rep.expenses.design.toFixed(2)}</td></tr>
       <tr><td>Install labor</td><td class="num">$${rep.expenses.install.toFixed(2)}</td></tr>
       <tr><td>Setup + Hardware</td><td class="num">$${(rep.expenses.setup+rep.expenses.hardware).toFixed(2)}</td></tr>
+      <tr><td>Extra expenses (added after pricing)</td><td class="num">$${rep.expenses.extra.toFixed(2)}</td></tr>
       <tr><td><b>Total expenses</b></td><td class="num"><b>$${rep.expenses.total.toFixed(2)}</b></td></tr>
     </tbody></table>
     <div class="summary">
@@ -4517,6 +4667,65 @@ function printReportsSummary(){
       <tr><td>Fully paid jobs</td><td class="num">${rep.paidCount}</td></tr>
     </tbody></table>`;
   openPrintWindow('Reports — Inkable Studios',periodLabels[currentReportsPeriod]||'This Week',body);
+}
+
+// Texas sales tax returns are due the 20th of the month following the
+// filing period, regardless of whether you're assigned monthly, quarterly,
+// or annual filing — only the PERIOD length changes, the 20th-of-next-month
+// rule stays the same. This computes the actual calendar due date for
+// whichever period is currently selected in Reports.
+function getTaxFilingDueDate(period){
+  const now=new Date();
+  let periodEnd;
+  if(period==='month'){
+    periodEnd=new Date(now.getFullYear(),now.getMonth()+1,0);
+  }else if(period==='quarter'){
+    const q=Math.floor(now.getMonth()/3);
+    periodEnd=new Date(now.getFullYear(),q*3+3,0);
+  }else if(period==='year'){
+    periodEnd=new Date(now.getFullYear(),11,31);
+  }else{
+    return null; // Week/All Time don't correspond to a real filing period.
+  }
+  return new Date(periodEnd.getFullYear(),periodEnd.getMonth()+1,20);
+}
+
+function printTaxReport(){
+  const period=currentReportsPeriod;
+  const periodLabels={week:'This Week',month:'This Month',quarter:'This Quarter',year:'This Year',all:'All Time'};
+  const dueDate=getTaxFilingDueDate(period);
+
+  if(!dueDate){
+    alert('Pick "This Month," "This Quarter," or "This Year" up top first — a tax filing period has to be one of those, not '+periodLabels[period]+'.');
+    return;
+  }
+
+  const rep=computeReportsData(period);
+  const grossSales=rep.revenueCollected;
+  const taxableSales=grossSales-rep.taxCollected;
+  const dueDateStr=dueDate.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
+  const range=getPeriodRange(period);
+  const periodStartStr=range.start.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
+
+  const body=`
+    <div style="background:#fff8e6;border:1px solid #f0d98c;border-radius:6px;padding:12px 14px;margin-bottom:20px;font-size:11px;line-height:1.6">
+      This summarizes what's recorded in the Dashboard for this period — it isn't a filed return, and it doesn't know your actual assigned filing frequency (monthly, quarterly, or annual) or whether you owe tax on anything outside this system. Confirm both directly with the Texas Comptroller or your accountant before filing.
+    </div>
+    <table><thead><tr><th>Filing Period</th><th class="num"></th></tr></thead><tbody>
+      <tr><td>Period</td><td class="num">${periodLabels[period]}</td></tr>
+      <tr><td>Covers</td><td class="num">${periodStartStr} — today</td></tr>
+      <tr><td><b>Return due (20th of next month)</b></td><td class="num"><b>${dueDateStr}</b></td></tr>
+    </tbody></table>
+    <br/>
+    <table><thead><tr><th>Sales Summary</th><th class="num"></th></tr></thead><tbody>
+      <tr><td>Gross sales collected</td><td class="num">$${grossSales.toFixed(2)}</td></tr>
+      <tr><td>Taxable sales (gross minus tax)</td><td class="num">$${taxableSales.toFixed(2)}</td></tr>
+      <tr><td><b>Sales tax collected (8.25%)</b></td><td class="num"><b>$${rep.taxCollected.toFixed(2)}</b></td></tr>
+    </tbody></table>
+    <div class="summary">
+      <div class="summary-row total"><span>Estimated tax due</span><span>$${rep.taxCollected.toFixed(2)}</span></div>
+    </div>`;
+  openPrintWindow('Tax Summary — Inkable Studios',periodLabels[period]+' · Due '+dueDateStr,body);
 }
 
 // ── PDF generation (Estimate + Invoice) ─────────────────────────────────
@@ -5158,8 +5367,8 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
       </div>
     </div>
     <div style="display:flex;gap:8px;position:relative">
-      <button onclick="event.stopPropagation();togglePricerOtherMenu()" class="btn btn-primary">Other ▾</button>
-      <button onclick="savePricerProject()" class="btn btn-ghost" id="pricerSaveBtn">💾 Save</button>
+      <button onclick="event.stopPropagation();togglePricerOtherMenu()" class="btn btn-ghost">Other ▾</button>
+      <button onclick="savePricerProject()" class="btn btn-primary" id="pricerSaveBtn">💾 Save</button>
       <div id="menu-pricer-other" style="display:none;position:absolute;left:0;top:100%;margin-top:4px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:4px;z-index:100;min-width:170px;box-shadow:0 4px 16px #00000088">
         <div onclick="generatePricerPDF('estimate')" class="menu-item">📄 Download Estimate</div>
         <div onclick="generatePricerPDF('invoice')" class="menu-item">🧾 Download PDF</div>
