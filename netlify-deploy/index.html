@@ -475,7 +475,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 <div class="topbar">
   <div class="topbar-brand">
     <div class="topbar-logo"><span>Inkable</span> Studios</div>
-    <div class="topbar-version">Dashboard v2.13</div>
+    <div class="topbar-version">Dashboard v2.15</div>
     <div class="topbar-version" id="syncStatusIndicator" style="margin-left:8px">☁ …</div>
   </div>
   <div class="topbar-right">
@@ -695,6 +695,19 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
               <input type="text" id="cf-zip" placeholder="77494"/>
             </div>
           </div>
+          <div class="jdc-field" style="margin-bottom:12px">
+            <label>Lead Source <span style="font-weight:400;text-transform:none">optional</span></label>
+            <select id="cf-lead-source" style="width:100%;background:var(--dark);border:1px solid var(--border);border-radius:6px;padding:7px 9px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;outline:none">
+              <option value="">— Not set —</option>
+              <option value="referral">Referral</option>
+              <option value="instagram">Instagram</option>
+              <option value="facebook">Facebook</option>
+              <option value="google">Google</option>
+              <option value="walkin">Walk-in</option>
+              <option value="repeat">Repeat Customer</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
           <div class="jdc-field" style="margin-bottom:16px">
             <label>Notes</label>
             <textarea id="cf-notes" placeholder="Optional"></textarea>
@@ -887,6 +900,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
           </div>
         </div>
 
+        <div class="report-card" style="grid-column:span 2;border-left:3px solid var(--purple)">
+          <h3>Leads by Source <span style="font-weight:400;text-transform:none;color:var(--muted);font-size:9px">(all clients, not period-based)</span></h3>
+          <div id="reports-lead-sources" style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:8px"></div>
+        </div>
+
         <div class="report-card" style="grid-column:span 2">
           <h3 id="reports-chart-title">Revenue vs Expenses — Last 6 Months</h3>
           <div id="reports-chart" style="margin-top:8px"></div>
@@ -1020,6 +1038,19 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
             <label>Zip</label>
             <input type="text" id="cp-zip" placeholder="77494"/>
           </div>
+        </div>
+        <div class="modal-field" style="margin-top:10px">
+          <label>Lead Source <span style="font-weight:400;text-transform:none">optional</span></label>
+          <select id="cp-lead-source" style="width:100%;background:var(--dark);border:1px solid var(--border);border-radius:6px;padding:7px 9px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;outline:none">
+            <option value="">— Not set —</option>
+            <option value="referral">Referral</option>
+            <option value="instagram">Instagram</option>
+            <option value="facebook">Facebook</option>
+            <option value="google">Google</option>
+            <option value="walkin">Walk-in</option>
+            <option value="repeat">Repeat Customer</option>
+            <option value="other">Other</option>
+          </select>
         </div>
         <div style="display:flex;gap:8px;margin-top:6px">
           <button onclick="cpBack()" class="btn btn-ghost" style="flex:1;justify-content:center">← Back</button>
@@ -1218,6 +1249,7 @@ function addClient(data){
     state:(data.state||'').trim(),
     zip:(data.zip||'').trim(),
     notes:(data.notes||'').trim(),
+    leadSource:(data.leadSource||'').trim(),
   };
   clients.push(client);
   localStorage.setItem(CLIENTS_KEY,JSON.stringify(clients));
@@ -1240,6 +1272,7 @@ function openCustomerPicker(onSelect){
   document.getElementById('cp-city').value='';
   document.getElementById('cp-state').value='';
   document.getElementById('cp-zip').value='';
+  document.getElementById('cp-lead-source').value='';
   document.getElementById('customerModal').classList.add('open');
 }
 
@@ -1304,6 +1337,7 @@ function cpCreateAndContinue(){
     city:document.getElementById('cp-city').value,
     state:document.getElementById('cp-state').value,
     zip:document.getElementById('cp-zip').value,
+    leadSource:document.getElementById('cp-lead-source').value,
   });
   const cb=cpOnSelect;
   closeCustomerPicker();
@@ -1626,10 +1660,11 @@ function openClientForm(clientId){
     document.getElementById('cf-city').value=client.city||'';
     document.getElementById('cf-state').value=client.state||'';
     document.getElementById('cf-zip').value=client.zip||'';
+    document.getElementById('cf-lead-source').value=client.leadSource||'';
     document.getElementById('cf-notes').value=client.notes||'';
   }else{
     title.textContent='New Client';
-    ['cf-name','cf-phone','cf-addr','cf-city','cf-state','cf-zip','cf-notes'].forEach(id=>{document.getElementById(id).value='';});
+    ['cf-name','cf-phone','cf-addr','cf-city','cf-state','cf-zip','cf-lead-source','cf-notes'].forEach(id=>{document.getElementById(id).value='';});
   }
   document.getElementById('clientFormModal').classList.add('open');
 }
@@ -1647,6 +1682,7 @@ function saveClientForm(){
     city:document.getElementById('cf-city').value,
     state:document.getElementById('cf-state').value,
     zip:document.getElementById('cf-zip').value,
+    leadSource:document.getElementById('cf-lead-source').value,
     notes:document.getElementById('cf-notes').value,
   };
   if(clientFormEditingId){
@@ -1657,7 +1693,8 @@ function saveClientForm(){
     if(idx>=0){
       clients[idx]={...clients[idx],
         name:data.name.trim(),phone:data.phone.trim(),addr:data.addr.trim(),
-        city:data.city.trim(),state:data.state.trim(),zip:data.zip.trim(),notes:data.notes.trim()};
+        city:data.city.trim(),state:data.state.trim(),zip:data.zip.trim(),
+        leadSource:data.leadSource.trim(),notes:data.notes.trim()};
       localStorage.setItem(CLIENTS_KEY,JSON.stringify(clients));
       syncClientToServer(clients[idx]);
     }
@@ -1700,6 +1737,7 @@ function openClientDetail(clientId){
   document.getElementById('clientDetailBody').innerHTML=`
     <div style="font-size:13px;color:var(--text);margin-bottom:2px">${client.phone||'<span style=\"color:var(--muted2)\">No phone</span>'}</div>
     <div style="font-size:13px;color:var(--text);margin-bottom:8px">${addrLine||'<span style="color:var(--muted2)">No address</span>'}</div>
+    ${client.leadSource?`<div style="font-size:11px;color:var(--blue);margin-bottom:8px">Source: ${LEAD_SOURCE_LABELS[client.leadSource]||client.leadSource}</div>`:''}
     ${client.notes?`<div style="font-size:12px;color:var(--muted);background:var(--dark);border-radius:6px;padding:8px 10px;margin-bottom:8px">${client.notes}</div>`:''}
     <div style="font-size:11px;color:${daysAgo!==null&&daysAgo>21?'var(--amber)':'var(--muted)'};margin-bottom:14px">${contactLine}</div>
     <div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Jobs (${projects.length})</div>
@@ -1729,6 +1767,7 @@ function deleteClientFromDetail(){
 
 let clientLogClientId=null;
 const LOG_TYPE_LABELS={call:'📞 Call',text:'💬 Text',email:'✉️ Email',inperson:'🤝 In Person'};
+const LEAD_SOURCE_LABELS={referral:'Referral',instagram:'Instagram',facebook:'Facebook',google:'Google',walkin:'Walk-in',repeat:'Repeat Customer',other:'Other'};
 
 function openClientLog(clientId){
   const client=getClients().find(c=>c.id===clientId);
@@ -1982,6 +2021,32 @@ function renderReports(){
   s('r-clients',clients.length);
   s('r-done',done.length);
   s('r-est-inv',estimates+' / '+invoices);
+  renderLeadSourceBreakdown(clients);
+}
+
+function renderLeadSourceBreakdown(clients){
+  const el=document.getElementById('reports-lead-sources');
+  if(!el)return;
+  const counts={};
+  let unset=0;
+  clients.forEach(c=>{
+    if(c.leadSource){ counts[c.leadSource]=(counts[c.leadSource]||0)+1; }
+    else{ unset++; }
+  });
+  const entries=Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+  if(!entries.length&&!unset){
+    el.innerHTML='<div style="font-size:12px;color:var(--muted2)">No clients yet.</div>';
+    return;
+  }
+  el.innerHTML=entries.map(([key,count])=>`
+    <div>
+      <div style="font-size:20px;font-weight:800;color:var(--text)">${count}</div>
+      <div style="font-size:10.5px;color:var(--muted)">${LEAD_SOURCE_LABELS[key]||key}</div>
+    </div>`).join('')
+    +(unset?`<div>
+      <div style="font-size:20px;font-weight:800;color:var(--muted2)">${unset}</div>
+      <div style="font-size:10.5px;color:var(--muted2)">Not set</div>
+    </div>`:'');
 }
 
 // ── Full financial picture for one job — revenue AND cost, for Reports.
@@ -4620,6 +4685,18 @@ function drawEstimatePDF(doc,W,H,M,d){
     doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(50);
     const nLines=doc.splitTextToSize(d.notes,W-2*M);
     doc.text(nLines,M,y,{lineHeightFactor:1.4});
+    y+=nLines.length*13+6;
+  }
+
+  // Terms & Conditions — shown on the Estimate too now, not just the
+  // Invoice, so the client sees them BEFORE paying anything, not after.
+  if(d.terms){
+    if(y+40>footTop-20){ doc.addPage(); y=drawEstimateChrome(doc,W,H,M,d); }
+    doc.setFont('helvetica','bold');doc.setFontSize(9.5);doc.setTextColor(0);
+    doc.text('TERMS & CONDITIONS:',M,y);y+=13;
+    doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(60);
+    const tLines=doc.splitTextToSize(d.terms,W-2*M);
+    doc.text(tLines,M,y,{lineHeightFactor:1.4});
   }
 
   // Light footer
