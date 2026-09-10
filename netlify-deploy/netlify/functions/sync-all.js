@@ -30,12 +30,18 @@ export default async (req) => {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
   try {
-    const [clients, projectRows, metaRows, pricingRows] = await Promise.all([
+    const [clientRows, projectRows, metaRows, pricingRows] = await Promise.all([
       db.sql`SELECT * FROM clients ORDER BY name`,
       db.sql`SELECT * FROM projects ORDER BY saved_at DESC`,
       db.sql`SELECT * FROM job_meta`,
       db.sql`SELECT data FROM pricing_settings WHERE id = 1`,
     ]);
+
+    const clients = clientRows.map(r => ({
+      id: r.id, name: r.name, phone: r.phone, addr: r.addr, city: r.city,
+      state: r.state, zip: r.zip, notes: r.notes, log: r.log,
+      leadSource: r.lead_source,
+    }));
 
     const projects = projectRows.map(r => ({
       id: r.id, name: r.name, estNo: r.est_no, projectNum: r.project_num,
