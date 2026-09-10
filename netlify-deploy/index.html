@@ -185,9 +185,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 .line-dims-new{display:grid;grid-template-columns:1fr 1fr 64px;gap:7px;margin-bottom:7px}
 .dim-label-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:3px}
 .dim-label-row label{margin:0!important}
-.unit-pill{display:flex;border:1px solid var(--border);border-radius:5px;overflow:hidden}
-.up-btn{padding:2px 7px;font-size:9px;font-weight:700;background:var(--dark);color:var(--muted);border:none;cursor:pointer;font-family:'DM Sans',sans-serif}
-.up-btn.active{background:var(--blue);color:#fff}
+.li-unit-toggle{display:flex;border:1px solid var(--border);border-radius:5px;overflow:hidden}
+.li-unit-btn{padding:2px 8px;font-size:9px;font-weight:700;background:var(--dark);color:var(--muted);border:none;border-right:1px solid var(--border);cursor:pointer;font-family:'DM Sans',sans-serif}
+.li-unit-btn:last-child{border-right:none}
+.li-unit-btn.active{background:var(--blue);color:#fff}
 .unit-toggle{height:29px;background:var(--dark);border:1px solid var(--border);border-radius:6px;color:var(--muted);font-size:10px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;padding:0}
 .unit-toggle.active{background:var(--blue);color:#fff;border-color:var(--blue)}
 .line-subtotal{font-size:11px;font-family:'DM Mono',monospace;color:var(--blue);text-align:right;margin-top:5px}
@@ -475,7 +476,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 <div class="topbar">
   <div class="topbar-brand">
     <div class="topbar-logo"><span>Inkable</span> Studios</div>
-    <div class="topbar-version">Dashboard v2.16</div>
+    <div class="topbar-version">Dashboard v2.17</div>
     <div class="topbar-version" id="syncStatusIndicator" style="margin-left:8px">☁ …</div>
   </div>
   <div class="topbar-right">
@@ -745,6 +746,24 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
           </div>
           <div id="clientLogList" style="max-height:300px;overflow-y:auto"></div>
         </div>
+      </div>
+    </div>
+
+    <!-- INTEGRATED DOCUMENT VIEWER — Estimate/Invoice/Receipt PDFs and Proof
+         links all open here now instead of a bare new tab, with an escape
+         hatch to still pop it out to a full tab whenever that's actually
+         wanted (printing, zooming, or if inline rendering ever misbehaves
+         on a given device). -->
+    <div class="modal-overlay" id="docViewerModal">
+      <div class="modal" style="width:min(900px,92vw);max-width:92vw;height:min(88vh,900px);max-height:88vh;display:flex;flex-direction:column;padding:0;overflow:hidden">
+        <div class="modal-header" style="padding:14px 18px">
+          <h2 id="docViewerTitle" style="font-size:14px">Document</h2>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn btn-ghost" style="padding:5px 12px;font-size:11px" onclick="openDocViewerInNewTab()">↗ Open in new tab</button>
+            <button class="modal-close" onclick="closeDocViewer()">✕</button>
+          </div>
+        </div>
+        <iframe id="docViewerFrame" style="flex:1;width:100%;border:none;background:#525659" title="Document viewer"></iframe>
       </div>
     </div>
 
@@ -1439,14 +1458,14 @@ function renderProjects(){
       <div class="job-date">${p.savedAt||'—'}</div>
       <div class="job-date" style="color:${meta.installDate?'var(--text)':'var(--muted2)'}">${meta.installDate?new Date(meta.installDate+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}):'—'}</div>
       <div onclick="event.stopPropagation()">
-        <button class="action-btn proof-btn${meta.proofLink?' has-proof':''}" id="proofbtn-${p.id}" onclick="${meta.proofLink?`window.open('${meta.proofLink}','_blank')`:`triggerRowProofUpload('${p.id}')`}" title="${meta.proofLink?'View proof':'Upload proof'}">📎</button>
+        <button class="action-btn proof-btn${meta.proofLink?' has-proof':''}" id="proofbtn-${p.id}" onclick="${meta.proofLink?`openDocViewer('Proof — ${(p.estNo||p.name||'').replace(/'/g,"\\'")}','${meta.proofLink}',false)`:`triggerRowProofUpload('${p.id}')`}" title="${meta.proofLink?'View proof':'Upload proof'}">📎</button>
       </div>
       <div onclick="event.stopPropagation()" style="position:relative">
         <button class="action-btn" onclick="toggleActionMenu('${p.id}',event)" style="font-weight:700;letter-spacing:.05em">⋯</button>
         <div id="menu-${p.id}" style="display:none;position:absolute;right:0;top:100%;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:4px;z-index:100;min-width:160px;box-shadow:0 4px 16px #00000088">
           <div onclick="viewDoc('${p.id}','estimate')" class="menu-item">📄 View Estimate</div>
           <div onclick="viewDoc('${p.id}','invoice')" class="menu-item">🧾 View Invoice</div>
-          ${meta.proofLink?`<div onclick="window.open('${meta.proofLink}','_blank')" class="menu-item">📎 View Proof</div>`:''}
+          ${meta.proofLink?`<div onclick="openDocViewer('Proof — ${(p.estNo||p.name||'').replace(/'/g,"\\'")}','${meta.proofLink}',false)" class="menu-item">📎 View Proof</div>`:''}
           <div style="height:1px;background:var(--border);margin:4px 0"></div>
           <div onclick="editInPricer('${p.id}')" class="menu-item">✏️ Edit</div>
           <div style="height:1px;background:var(--border);margin:4px 0"></div>
@@ -3383,10 +3402,11 @@ function loadPricerFromSaved(project){
   setTimeout(recalc,0);
 }
 
-function applyDimUnit(btn,isFt){
-  if(!btn)return;
-  btn.classList.toggle('active',!!isFt);
-  btn.textContent=isFt?'ft':'in';
+function applyDimUnit(field,groupClass,isFt){
+  if(!field)return;
+  field.querySelectorAll('.'+groupClass).forEach(b=>{
+    b.classList.toggle('active',(b.dataset.unit==='ft')===!!isFt);
+  });
 }
 
 function addLineItemFromSaved(line){
@@ -3405,8 +3425,8 @@ function addLineItemFromSaved(line){
   if(line.lam)el.querySelector('.li-lam').value=line.lam;
   el.querySelector('.li-w').value=line.w||'';
   el.querySelector('.li-h').value=line.h||'';
-  applyDimUnit(el.querySelector('.li-w-ft'),line.wFt);
-  applyDimUnit(el.querySelector('.li-h-ft'),line.hFt);
+  applyDimUnit(el.querySelector('.li-w')?.closest('.line-field'),'li-w-unit',line.wFt);
+  applyDimUnit(el.querySelector('.li-h')?.closest('.line-field'),'li-h-unit',line.hFt);
   el.querySelector('.li-qty').value=line.qty||'1';
 
   if(line.sub){
@@ -3418,8 +3438,8 @@ function addLineItemFromSaved(line){
     toggleSubSize(el.id);
     el.querySelector('.li-sub-w').value=line.subW||'';
     el.querySelector('.li-sub-h').value=line.subH||'';
-    applyDimUnit(el.querySelector('.li-sub-w-ft'),line.subWFt);
-    applyDimUnit(el.querySelector('.li-sub-h-ft'),line.subHFt);
+    applyDimUnit(el.querySelector('.li-sub-w')?.closest('.line-field'),'li-subw-unit',line.subWFt);
+    applyDimUnit(el.querySelector('.li-sub-h')?.closest('.line-field'),'li-subh-unit',line.subHFt);
   }
   if(line.subThickness)el.querySelector('.li-sub-thickness').value=line.subThickness;
 
@@ -3572,14 +3592,20 @@ function addLineItem(){
       <div class="line-field" style="margin:0">
         <div class="dim-label-row">
           <label style="margin:0">Width</label>
-          <div class="unit-pill"><button type="button" class="up-btn li-w-ft" onclick="toggleDimUnit(this)">in</button></div>
+          <div class="li-unit-toggle">
+            <button type="button" class="li-unit-btn active li-w-unit" data-unit="in" onclick="setDimUnit(this)">in</button>
+            <button type="button" class="li-unit-btn li-w-unit" data-unit="ft" onclick="setDimUnit(this)">ft</button>
+          </div>
         </div>
         <input type="number" class="li-w" min="0" step="0.1" placeholder="0" oninput="recalc()"/>
       </div>
       <div class="line-field" style="margin:0">
         <div class="dim-label-row">
           <label style="margin:0">Height</label>
-          <div class="unit-pill"><button type="button" class="up-btn li-h-ft" onclick="toggleDimUnit(this)">in</button></div>
+          <div class="li-unit-toggle">
+            <button type="button" class="li-unit-btn active li-h-unit" data-unit="in" onclick="setDimUnit(this)">in</button>
+            <button type="button" class="li-unit-btn li-h-unit" data-unit="ft" onclick="setDimUnit(this)">ft</button>
+          </div>
         </div>
         <input type="number" class="li-h" min="0" step="0.1" placeholder="0" oninput="recalc()"/>
       </div>
@@ -3595,15 +3621,25 @@ function addLineItem(){
       </label>
       <div class="li-sub-size-fields" style="display:none;gap:8px">
         <div class="line-field" style="margin:0;flex:1">
-          <label style="font-size:9px">Sub width</label>
+          <div class="dim-label-row">
+            <label style="font-size:9px;margin:0">Sub width</label>
+            <div class="li-unit-toggle">
+              <button type="button" class="li-unit-btn active li-subw-unit" data-unit="in" onclick="setDimUnit(this)">in</button>
+              <button type="button" class="li-unit-btn li-subw-unit" data-unit="ft" onclick="setDimUnit(this)">ft</button>
+            </div>
+          </div>
           <input type="number" class="li-sub-w" min="0" step="0.1" placeholder="0" oninput="recalc()"/>
         </div>
-        <button type="button" class="unit-toggle li-sub-w-ft" onclick="toggleDimUnit(this)" style="margin-top:14px">in</button>
         <div class="line-field" style="margin:0;flex:1">
-          <label style="font-size:9px">Sub height</label>
+          <div class="dim-label-row">
+            <label style="font-size:9px;margin:0">Sub height</label>
+            <div class="li-unit-toggle">
+              <button type="button" class="li-unit-btn active li-subh-unit" data-unit="in" onclick="setDimUnit(this)">in</button>
+              <button type="button" class="li-unit-btn li-subh-unit" data-unit="ft" onclick="setDimUnit(this)">ft</button>
+            </div>
+          </div>
           <input type="number" class="li-sub-h" min="0" step="0.1" placeholder="0" oninput="recalc()"/>
         </div>
-        <button type="button" class="unit-toggle li-sub-h-ft" onclick="toggleDimUnit(this)" style="margin-top:14px">in</button>
       </div>
       <div class="line-field" style="margin:6px 0 0">
         <label style="font-size:9px">Thickness (optional)</label>
@@ -3713,15 +3749,27 @@ function updateDoneColumn(){
   if(emptyEl)emptyEl.style.display=doneEls.length?'none':'block';
 }
 
-function toggleDimUnit(btn){
-  const isFt=btn.classList.toggle('active');
-  btn.textContent=isFt?'ft':'in';
-  // Convert the actual displayed number too, not just the label — typing
-  // 24 while in inches and then switching to feet should show 2, not
-  // silently leave 24 sitting there now meaning something 12x different.
+const DIM_UNIT_GROUPS={
+  'li-w-unit':'.li-w', 'li-h-unit':'.li-h',
+  'li-subw-unit':'.li-sub-w', 'li-subh-unit':'.li-sub-h',
+};
+function setDimUnit(btn){
+  const groupClass=Object.keys(DIM_UNIT_GROUPS).find(g=>btn.classList.contains(g));
+  if(!groupClass)return;
   const field=btn.closest('.line-field');
-  const isWidth=btn.classList.contains('li-w-ft');
-  const input=field?.querySelector(isWidth?'.li-w':'.li-h');
+  if(!field)return;
+
+  const wasFt=field.querySelector('.'+groupClass+'.active')?.dataset.unit==='ft';
+  const isFt=btn.dataset.unit==='ft';
+  if(isFt===wasFt)return; // already the selected unit, nothing to do
+
+  field.querySelectorAll('.'+groupClass).forEach(b=>b.classList.toggle('active',b===btn));
+
+  // Convert the actual displayed number too, not just which button is
+  // highlighted — typing 24 while in inches and then switching to feet
+  // should show 2, not silently leave 24 sitting there now meaning
+  // something 12x different.
+  const input=field.querySelector(DIM_UNIT_GROUPS[groupClass]);
   if(input&&input.value!==''){
     const val=parseFloat(input.value);
     if(!isNaN(val)){
@@ -3852,7 +3900,8 @@ function applyInstallSuggestion(lineId){
 // ── Calculations ──────────────────────────────────────────────────────
 function getDimIn(input, lineEl, dim){
   const v=parseFloat(input.value)||0;
-  const ftBtn=lineEl.querySelector('.li-'+dim+'-ft');
+  const groupClass=dim==='w'?'li-w-unit':dim==='h'?'li-h-unit':dim==='sub-w'?'li-subw-unit':'li-subh-unit';
+  const ftBtn=lineEl.querySelector('.'+groupClass+'[data-unit="ft"]');
   return ftBtn&&ftBtn.classList.contains('active')?v*12:v;
 }
 
@@ -4211,8 +4260,8 @@ function savePricerProject(){
         w:el.querySelector('.li-w').value,
         h:el.querySelector('.li-h').value,
         qty:el.querySelector('.li-qty').value,
-        wFt:el.querySelector('.li-w-ft')?.classList.contains('active'),
-        hFt:el.querySelector('.li-h-ft')?.classList.contains('active'),
+        wFt:el.querySelector('.li-w-unit[data-unit="ft"]')?.classList.contains('active'),
+        hFt:el.querySelector('.li-h-unit[data-unit="ft"]')?.classList.contains('active'),
         designChk:el.querySelector('.li-design-chk')?.checked,
         designLevel:el.dataset.designLevel||'standard',
         designHrs:el.querySelector('.li-design-hrs')?.value||'0',
@@ -4227,8 +4276,8 @@ function savePricerProject(){
         subSameSize:el.querySelector('.li-sub-samesize')?.checked!==false,
         subW:el.querySelector('.li-sub-w')?.value||'',
         subH:el.querySelector('.li-sub-h')?.value||'',
-        subWFt:el.querySelector('.li-sub-w-ft')?.classList.contains('active'),
-        subHFt:el.querySelector('.li-sub-h-ft')?.classList.contains('active'),
+        subWFt:el.querySelector('.li-subw-unit[data-unit="ft"]')?.classList.contains('active'),
+        subHFt:el.querySelector('.li-subh-unit[data-unit="ft"]')?.classList.contains('active'),
         subThickness:el.querySelector('.li-sub-thickness')?.value||'',
       })),
       setupHrs:document.getElementById('setupHrs').value,
@@ -4312,14 +4361,41 @@ function downloadBlob(blob,filename){
   document.body.appendChild(a);a.click();document.body.removeChild(a);
   setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
-// "View Estimate/Invoice" should show the PDF, not force a save-as-file
-// download — opens it in a new tab using the browser's own PDF viewer.
-// The URL is only valid for this session, so it's not shareable as-is —
-// just a way to look at it.
-function viewBlob(blob){
+// "View Estimate/Invoice/Receipt" shows the PDF inline, in-app, rather
+// than forcing a new tab — the new tab is still one click away from
+// inside the viewer itself, for printing, zooming, or on a device where
+// inline rendering doesn't behave.
+function viewBlob(blob,title){
   const url=URL.createObjectURL(blob);
-  window.open(url,'_blank');
-  setTimeout(()=>URL.revokeObjectURL(url),60000);
+  openDocViewer(title||'Document Preview',url,true);
+}
+
+let docViewerUrl=null;
+let docViewerIsBlob=false;
+function openDocViewer(title,url,isBlob){
+  // Release whatever the previous view was pointing at, if it was a blob
+  // we created — otherwise these would quietly pile up over a session.
+  if(docViewerIsBlob&&docViewerUrl)URL.revokeObjectURL(docViewerUrl);
+  docViewerUrl=url;
+  docViewerIsBlob=!!isBlob;
+  document.getElementById('docViewerTitle').textContent=title;
+  document.getElementById('docViewerFrame').src=url;
+  document.getElementById('docViewerModal').classList.add('open');
+}
+function closeDocViewer(){
+  document.getElementById('docViewerModal').classList.remove('open');
+  document.getElementById('docViewerFrame').src='about:blank';
+  // Give any in-flight new-tab open (triggered right before closing) a
+  // moment before the blob is released, rather than revoking instantly.
+  if(docViewerIsBlob&&docViewerUrl){
+    const urlToRevoke=docViewerUrl;
+    setTimeout(()=>URL.revokeObjectURL(urlToRevoke),5000);
+  }
+  docViewerUrl=null;
+  docViewerIsBlob=false;
+}
+function openDocViewerInNewTab(){
+  if(docViewerUrl)window.open(docViewerUrl,'_blank');
 }
 
 // Shared print helper — opens a clean, light-background print view (the
@@ -4573,12 +4649,13 @@ async function generateSavedPDF(projectId,type){
   try{
     const p=getProjects().find(pr=>pr.id===projectId);
     if(!p){ alert('That project could not be found — it may have been deleted.'); return; }
+    const docTitle=(type==='invoice'?'Invoice':'Estimate')+' — '+(p.estNo||p.name||'');
 
     // Old-style projects (from before this migration) may still have the
     // actual bytes sitting in the local cache — use them directly if so.
     const snapshot=p.exportedPdfs?.[type];
     if(snapshot?.data){
-      viewBlob(base64ToBlob(snapshot.data));
+      viewBlob(base64ToBlob(snapshot.data),docTitle);
       return;
     }
 
@@ -4595,7 +4672,7 @@ async function generateSavedPDF(projectId,type){
           const fresh=await res.json();
           const freshSnap=fresh.exportedPdfs?.[type];
           if(freshSnap?.data){
-            viewBlob(base64ToBlob(freshSnap.data));
+            viewBlob(base64ToBlob(freshSnap.data),docTitle);
             return;
           }
         }
@@ -4616,7 +4693,7 @@ async function generateSavedPDF(projectId,type){
     else drawEstimatePDF(doc,W,H,M,d);
 
     savePdfSnapshot(projectId,type,doc.output('datauristring'));
-    viewBlob(doc.output('blob'));
+    viewBlob(doc.output('blob'),docTitle);
   }catch(err){
     console.error('PDF generation error:',err);
     alert('PDF generation failed: '+err.message+'\nCheck the console for details.');
@@ -4966,9 +5043,8 @@ function generateReceiptPDF(projectId){
     const {jsPDF}=window.jspdf;
     const doc=new jsPDF({unit:'pt',format:'letter'});
     drawReceiptPDF(doc,612,792,40,d);
-    const fname=(pdfSlug(d.clientName)?pdfSlug(d.clientName)+'_':'')+'Receipt_'+pdfSlug(d.invNo)+'.pdf';
     savePdfSnapshot(projectId,'receipt',doc.output('datauristring'));
-    doc.save(fname);
+    viewBlob(doc.output('blob'),'Receipt — '+(d.invNo||''));
   }catch(err){
     console.error('Receipt generation error:',err);
     alert('Receipt generation failed: '+err.message);
@@ -5082,9 +5158,9 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
       </div>
     </div>
     <div style="display:flex;gap:8px;position:relative">
-      <button onclick="savePricerProject()" class="btn btn-ghost" id="pricerSaveBtn">💾 Save</button>
       <button onclick="event.stopPropagation();togglePricerOtherMenu()" class="btn btn-primary">Other ▾</button>
-      <div id="menu-pricer-other" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:4px;z-index:100;min-width:170px;box-shadow:0 4px 16px #00000088">
+      <button onclick="savePricerProject()" class="btn btn-ghost" id="pricerSaveBtn">💾 Save</button>
+      <div id="menu-pricer-other" style="display:none;position:absolute;left:0;top:100%;margin-top:4px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:4px;z-index:100;min-width:170px;box-shadow:0 4px 16px #00000088">
         <div onclick="generatePricerPDF('estimate')" class="menu-item">📄 Download Estimate</div>
         <div onclick="generatePricerPDF('invoice')" class="menu-item">🧾 Download PDF</div>
       </div>
