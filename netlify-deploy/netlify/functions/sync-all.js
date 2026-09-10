@@ -54,6 +54,7 @@ export default async (req) => {
       jobMeta[r.project_id] = {
         status: r.status, tags: r.tags, notes: r.notes,
         installDate: r.install_date, proofLink: r.proof_link, payments: r.payments,
+        expenses: r.expenses,
       };
     });
 
