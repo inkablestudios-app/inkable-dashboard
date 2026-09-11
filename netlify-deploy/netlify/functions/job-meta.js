@@ -16,12 +16,16 @@ export default async (req) => {
       // Reshape into the {projectId: {status, tags, notes, ...}} map the
       // app uses. install_date, proof_link, and expenses are multi-word
       // or newer columns that need explicit reshaping to camelCase.
+      // The column is named is_excluded (not "excluded") specifically to
+      // avoid any collision with Postgres's own EXCLUDED pseudo-table used
+      // in the upsert below — same value, safer name.
       const out = {};
       rows.forEach(r => {
         out[r.project_id] = {
           status: r.status, tags: r.tags, notes: r.notes,
           installDate: r.install_date, proofLink: r.proof_link,
           payments: r.payments, expenses: r.expenses,
+          excluded: r.is_excluded,
         };
       });
       return Response.json(out);
@@ -31,20 +35,22 @@ export default async (req) => {
       const m = await req.json();
       if (!m.projectId) return Response.json({ error: "projectId is required" }, { status: 400 });
       const [row] = await db.sql`
-        INSERT INTO job_meta (project_id, status, tags, notes, install_date, proof_link, payments, expenses, updated_at)
+        INSERT INTO job_meta (project_id, status, tags, notes, install_date, proof_link, payments, expenses, is_excluded, updated_at)
         VALUES (${m.projectId}, ${m.status || "send"}, ${JSON.stringify(m.tags || [])}, ${m.notes || ""},
                 ${m.installDate || ""}, ${m.proofLink || ""}, ${JSON.stringify(m.payments || [])},
-                ${JSON.stringify(m.expenses || [])}, NOW())
+                ${JSON.stringify(m.expenses || [])}, ${!!m.excluded}, NOW())
         ON CONFLICT (project_id) DO UPDATE SET
           status=EXCLUDED.status, tags=EXCLUDED.tags, notes=EXCLUDED.notes,
           install_date=EXCLUDED.install_date, proof_link=EXCLUDED.proof_link,
-          payments=EXCLUDED.payments, expenses=EXCLUDED.expenses, updated_at=NOW()
+          payments=EXCLUDED.payments, expenses=EXCLUDED.expenses,
+          is_excluded=EXCLUDED.is_excluded, updated_at=NOW()
         RETURNING *
       `;
       return Response.json({
         status: row.status, tags: row.tags, notes: row.notes,
         installDate: row.install_date, proofLink: row.proof_link,
         payments: row.payments, expenses: row.expenses,
+        excluded: row.is_excluded,
       });
     }
 
