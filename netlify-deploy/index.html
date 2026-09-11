@@ -36,6 +36,7 @@ button,.action-btn,.menu-item,.filter-pill,.pay-record-btn,.jt-btn,.li-lv-btn,.l
   --status-proof:#06b6d4;--status-approved:#10b981;--status-prod:#f97316;--status-done:#6b7280;
 }
 body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);height:100vh;overflow:hidden;display:flex;flex-direction:column}
+#appShell{flex-direction:column;flex:1;min-height:0}
 
 /* ── TOPBAR ── */
 .topbar{background:var(--dark);border-bottom:1px solid var(--border);padding:0 28px;display:flex;align-items:center;justify-content:space-between;height:56px;position:sticky;top:0;z-index:200;flex-shrink:0}
@@ -476,7 +477,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 <div class="topbar">
   <div class="topbar-brand">
     <div class="topbar-logo"><span>Inkable</span> Studios</div>
-    <div class="topbar-version">Dashboard v2.18</div>
+    <div class="topbar-version">Dashboard v2.20</div>
     <div class="topbar-version" id="syncStatusIndicator" style="margin-left:8px">☁ …</div>
   </div>
   <div class="topbar-right">
@@ -655,18 +656,19 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
     <div class="modal-overlay" id="expenseModal">
       <div class="modal" style="width:360px">
         <div class="modal-header">
-          <h2>Add Expense</h2>
+          <h2 id="expModalTitle">Add Expense</h2>
           <button class="modal-close" onclick="closeExpenseModal()">✕</button>
         </div>
         <div class="modal-body">
-          <div id="expJobLine" style="font-size:11px;color:var(--muted);margin-bottom:14px">—</div>
+          <div id="expJobLine" style="font-size:11px;color:var(--muted);margin-bottom:6px">—</div>
+          <div id="expRunningTotal" style="font-size:11px;color:var(--amber);margin-bottom:14px">Current extra expenses on this job: $0.00</div>
           <div class="jdc-field" style="margin-bottom:10px">
             <label>Description</label>
             <input type="text" id="expDescription" placeholder="e.g. Extra vinyl roll"/>
           </div>
           <div class="jdc-field" style="margin-bottom:10px">
-            <label>Amount</label>
-            <input type="number" id="expAmount" min="0" step="0.01" placeholder="0.00"/>
+            <label>Amount <span style="font-weight:400;text-transform:none;color:var(--muted)">(negative for a credit or correction)</span></label>
+            <input type="number" id="expAmount" step="0.01" placeholder="0.00"/>
           </div>
           <div class="jdc-field" style="margin-bottom:16px">
             <label>Date</label>
@@ -674,7 +676,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
           </div>
           <div style="display:flex;gap:8px;justify-content:flex-end">
             <button class="btn btn-ghost" onclick="closeExpenseModal()">Cancel</button>
-            <button class="btn btn-primary" onclick="submitExpense()">Save Expense</button>
+            <button class="btn btn-primary" onclick="submitExpense()" id="expSubmitBtn">Save Expense</button>
           </div>
         </div>
       </div>
@@ -821,11 +823,17 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
     <div class="tab-content" id="tab-reports">
       <div class="page-header">
         <div class="page-title">Reports</div>
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-ghost" onclick="printTaxReport()">🧾 Tax Report</button>
+        <div style="display:flex;gap:8px;position:relative">
+          <button class="btn btn-ghost" onclick="event.stopPropagation();toggleTaxReportMenu()">🧾 Tax Report ▾</button>
+          <div id="menu-tax-report" style="display:none;position:absolute;right:88px;top:100%;margin-top:4px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:4px;z-index:100;min-width:150px;box-shadow:0 4px 16px #00000088">
+            <div onclick="printTaxReport('month')" class="menu-item">This Month</div>
+            <div onclick="printTaxReport('quarter')" class="menu-item">This Quarter</div>
+            <div onclick="printTaxReport('year')" class="menu-item">This Year</div>
+          </div>
           <button class="btn btn-ghost" onclick="printReportsSummary()">🖨 Print</button>
         </div>
       </div>
+      <div style="padding:4px 28px 0;font-size:11px;color:var(--muted)" id="tax-due-reminder"></div>
       <div style="padding:0 28px;margin-top:16px;display:flex;gap:8px" id="reports-period-row">
         <button class="filter-pill active" data-period="week" onclick="setReportsPeriod('week',this)">This Week</button>
         <button class="filter-pill" data-period="month" onclick="setReportsPeriod('month',this)">This Month</button>
@@ -1502,14 +1510,14 @@ function renderProjects(){
       <div class="job-date">${p.savedAt||'—'}</div>
       <div class="job-date" style="color:${meta.installDate?'var(--text)':'var(--muted2)'}">${meta.installDate?new Date(meta.installDate+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}):'—'}</div>
       <div onclick="event.stopPropagation()">
-        <button class="action-btn proof-btn${meta.proofLink?' has-proof':''}" id="proofbtn-${p.id}" onclick="${meta.proofLink?`openDocViewer('Proof — ${(p.estNo||p.name||'').replace(/'/g,"\\'")}','${meta.proofLink}',false)`:`triggerRowProofUpload('${p.id}')`}" title="${meta.proofLink?'View proof':'Upload proof'}">📎</button>
+        <button class="action-btn proof-btn${meta.proofLink?' has-proof':''}" id="proofbtn-${p.id}" onclick="${meta.proofLink?`openDocViewer('Proof — ${(p.estNo||p.name||'').replace(/'/g,"\\'")}',getDriveEmbedUrl('${meta.proofLink}'),false)`:`triggerRowProofUpload('${p.id}')`}" title="${meta.proofLink?'View proof':'Upload proof'}">📎</button>
       </div>
       <div onclick="event.stopPropagation()" style="position:relative">
         <button class="action-btn" onclick="toggleActionMenu('${p.id}',event)" style="font-weight:700;letter-spacing:.05em">⋯</button>
         <div id="menu-${p.id}" style="display:none;position:absolute;right:0;top:100%;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:4px;z-index:100;min-width:160px;box-shadow:0 4px 16px #00000088">
           <div onclick="viewDoc('${p.id}','estimate')" class="menu-item">📄 View Estimate</div>
           <div onclick="viewDoc('${p.id}','invoice')" class="menu-item">🧾 View Invoice</div>
-          ${meta.proofLink?`<div onclick="openDocViewer('Proof — ${(p.estNo||p.name||'').replace(/'/g,"\\'")}','${meta.proofLink}',false)" class="menu-item">📎 View Proof</div>`:''}
+          ${meta.proofLink?`<div onclick="openDocViewer('Proof — ${(p.estNo||p.name||'').replace(/'/g,"\\'")}',getDriveEmbedUrl('${meta.proofLink}'),false)" class="menu-item">📎 View Proof</div>`:''}
           <div style="height:1px;background:var(--border);margin:4px 0"></div>
           <div onclick="editInPricer('${p.id}')" class="menu-item">✏️ Edit</div>
           <div style="height:1px;background:var(--border);margin:4px 0"></div>
@@ -1586,7 +1594,7 @@ function renderSales(){
         <div style="font-weight:700;font-size:13px;color:var(--text)">${clientName}</div>
         <div style="font-size:11px;font-family:'DM Mono',monospace;color:var(--muted)">${p.estNo||'—'}</div>
         <div style="font-size:11px;color:var(--muted);margin-top:2px">${p.name||''}</div>
-        ${extraExpenses>0?`<div style="font-size:10.5px;color:var(--amber);margin-top:3px">+ $${extraExpenses.toFixed(2)} in extra expenses</div>`:''}
+        ${extraExpenses!==0?`<div style="font-size:10.5px;color:${extraExpenses>0?'var(--amber)':'var(--green)'};margin-top:3px">${extraExpenses>0?'+ $'+extraExpenses.toFixed(2)+' in extra expenses':'- $'+Math.abs(extraExpenses).toFixed(2)+' net credit'}</div>`:''}
       </div>
       <div class="amount">$${total.toFixed(2)}</div>
       <div class="amount" style="color:var(--green)">$${paid.toFixed(2)}</div>
@@ -1664,6 +1672,13 @@ function addExpense(id,description,amount,date){
   });
   setJobMeta(id,{...meta,expenses});
 }
+function updateExpense(id,expenseId,description,amount,date){
+  const meta=getJobMeta(id);
+  const expenses=(meta.expenses||[]).map(e=>e.id===expenseId
+    ?{...e,description:(description||'').trim(),amount:parseFloat(amount)||0,date:date||e.date}
+    :e);
+  setJobMeta(id,{...meta,expenses});
+}
 function removeExpense(id,expenseId){
   const meta=getJobMeta(id);
   const expenses=(meta.expenses||[]).filter(e=>e.id!==expenseId);
@@ -1674,9 +1689,11 @@ function getTotalExpenses(id){
 }
 
 let expenseModalProjectId=null;
+let expenseModalEditId=null;
 let expenseModalReturnToJob=null;
-function openExpenseModal(projectId){
+function openExpenseModal(projectId,editId){
   expenseModalProjectId=projectId;
+  expenseModalEditId=editId||null;
   // If this was opened from inside the Job Modal, close it for now and
   // remember to come back once the expense is saved (or cancelled) —
   // same pattern as Client Detail handing off to its sub-modals.
@@ -1690,14 +1707,27 @@ function openExpenseModal(projectId){
   const cl=p?clients.find(c=>c.id===p.clientId):null;
   const clientName=cl?cl.name:(p?.state?.form?.billingName||'—');
   document.getElementById('expJobLine').textContent=clientName+' — '+(p?.estNo||'');
-  document.getElementById('expDescription').value='';
-  document.getElementById('expAmount').value='';
-  document.getElementById('expDate').value=new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+
+  const existing=editId?getExpenses(projectId).find(e=>e.id===editId):null;
+  document.getElementById('expModalTitle').textContent=existing?'Edit Expense':'Add Expense';
+  document.getElementById('expSubmitBtn').textContent=existing?'Save Changes':'Save Expense';
+  document.getElementById('expDescription').value=existing?existing.description:'';
+  document.getElementById('expAmount').value=existing?existing.amount:'';
+  document.getElementById('expDate').value=existing?existing.date:new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+
+  // The running total should reflect what's already on the job WITHOUT
+  // double-counting the entry currently being edited — otherwise editing
+  // an expense would misleadingly show it counted twice while you work on it.
+  const total=getTotalExpenses(projectId)-(existing?existing.amount:0);
+  const totalEl=document.getElementById('expRunningTotal');
+  totalEl.textContent=(existing?'Other extra expenses on this job: $':'Current extra expenses on this job: $')+total.toFixed(2);
+
   document.getElementById('expenseModal').classList.add('open');
 }
 function closeExpenseModal(){
   document.getElementById('expenseModal').classList.remove('open');
   expenseModalProjectId=null;
+  expenseModalEditId=null;
   if(expenseModalReturnToJob){
     const returnId=expenseModalReturnToJob;
     expenseModalReturnToJob=null;
@@ -1707,11 +1737,16 @@ function closeExpenseModal(){
 function submitExpense(){
   if(!expenseModalProjectId)return;
   const description=document.getElementById('expDescription').value.trim();
-  const amount=parseFloat(document.getElementById('expAmount').value)||0;
+  const amountRaw=document.getElementById('expAmount').value;
+  const amount=parseFloat(amountRaw);
   if(!description){ alert('Add a short description for this expense.'); return; }
-  if(amount<=0){ alert('Enter an amount greater than $0.'); return; }
+  if(amountRaw===''||isNaN(amount)||amount===0){ alert('Enter an amount — positive for a cost, negative for a credit or correction.'); return; }
   const date=document.getElementById('expDate').value;
-  addExpense(expenseModalProjectId,description,amount,date);
+  if(expenseModalEditId){
+    updateExpense(expenseModalProjectId,expenseModalEditId,description,amount,date);
+  }else{
+    addExpense(expenseModalProjectId,description,amount,date);
+  }
   closeExpenseModal();
   renderSales();
   renderReports();
@@ -1981,16 +2016,19 @@ function renderExpensesList(jobId){
     listEl.innerHTML='<div style="font-size:11px;color:var(--muted2);padding:4px 0">No extra expenses recorded for this job.</div>';
     return;
   }
-  listEl.innerHTML=entries.map(entry=>`<div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:8px">
+  listEl.innerHTML=entries.map(entry=>{
+    const isCredit=entry.amount<0;
+    return `<div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:8px">
     <div style="flex:1">
-      <div style="font-size:11.5px;color:var(--text)">${entry.description}</div>
+      <div style="font-size:11.5px;color:var(--text)">${entry.description}${isCredit?' <span style="color:var(--green);font-size:9.5px">(credit)</span>':''}</div>
       <div style="font-size:10px;color:var(--muted)">${entry.date}</div>
     </div>
-    <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
-      <span style="font-size:12px;color:var(--amber);font-weight:700">$${entry.amount.toFixed(2)}</span>
+    <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+      <span style="font-size:12px;color:${isCredit?'var(--green)':'var(--amber)'};font-weight:700">${isCredit?'-':''}$${Math.abs(entry.amount).toFixed(2)}</span>
+      <button onclick="openExpenseModal('${jobId}','${entry.id}')" title="Edit expense" style="background:none;border:none;color:var(--muted2);cursor:pointer;font-size:11px;padding:2px">✏️</button>
       <button onclick="removeExpense('${jobId}','${entry.id}');renderExpensesList('${jobId}');renderSales();renderReports()" title="Delete expense" style="background:none;border:none;color:var(--muted2);cursor:pointer;font-size:11px;padding:2px">🗑</button>
     </div>
-  </div>`).join('');
+  </div>`;}).join('');
 }
 function submitJobLogEntry(){
   if(!currentJobId)return;
@@ -2114,6 +2152,7 @@ function renderTrendChart(){
 }
 
 function renderReports(){
+  renderTaxDueReminder();
   const projects=getProjects();
   const clients=getClients();
   const meta=projects.map(p=>({...p,meta:getJobMeta(p.id)}));
@@ -2556,7 +2595,7 @@ function showAuthError(msg){
 }
 function showApp(){
   document.getElementById('authGate').style.display='none';
-  document.getElementById('appShell').style.display='block';
+  document.getElementById('appShell').style.display='flex';
   pullFromServerOnLoad();
 }
 async function checkAuthOnLoad(){
@@ -3113,7 +3152,7 @@ function renderProofSection(jobId){
   if(meta.proofLink){
     el.innerHTML=`
       <div style="font-size:12px;color:var(--green);margin-bottom:6px">✓ Proof uploaded</div>
-      <a href="${meta.proofLink}" target="_blank" rel="noopener" style="font-size:11px;color:var(--blue);word-break:break-all">${meta.proofLink}</a>
+      <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px" onclick="openDocViewer('Proof — ${(getProjects().find(p=>p.id===jobId)?.estNo||'')}',getDriveEmbedUrl('${meta.proofLink}'),false)">👁 View Proof</button>
       <div style="margin-top:8px">
         <input type="file" id="proofFileInput" style="display:none" onchange="handleProofFileSelected('${jobId}',this)"/>
         <button class="btn btn-ghost" style="font-size:10.5px;padding:4px 10px" onclick="document.getElementById('proofFileInput').click()">Replace file</button>
@@ -4521,6 +4560,19 @@ function viewBlob(blob,title){
 
 let docViewerUrl=null;
 let docViewerIsBlob=false;
+// Google Drive's normal "view" link (what webViewLink returns) explicitly
+// refuses to load inside anyone else's iframe — that's Drive's own
+// security header, not something a permission setting can change. Drive
+// has a SEPARATE "preview" link format built specifically for embedding,
+// same file, same access, just without that block. This converts one to
+// the other; if the link isn't actually a Drive file link for some
+// reason, it's returned unchanged rather than guessed at.
+function getDriveEmbedUrl(url){
+  const match=url.match(/\/file\/d\/([^/]+)/);
+  if(!match)return url;
+  return `https://drive.google.com/file/d/${match[1]}/preview`;
+}
+
 function openDocViewer(title,url,isBlob){
   // Release whatever the previous view was pointing at, if it was a blob
   // we created — otherwise these would quietly pile up over a session.
@@ -4690,15 +4742,43 @@ function getTaxFilingDueDate(period){
   return new Date(periodEnd.getFullYear(),periodEnd.getMonth()+1,20);
 }
 
-function printTaxReport(){
-  const period=currentReportsPeriod;
-  const periodLabels={week:'This Week',month:'This Month',quarter:'This Quarter',year:'This Year',all:'All Time'};
-  const dueDate=getTaxFilingDueDate(period);
+// For the always-visible reminder specifically — NOT the same question as
+// "when is the quarter I'm currently in due." In the ~20-day window after a
+// quarter ends but before ITS return is actually due, "now" already
+// belongs to the NEXT quarter, so naively asking for "this quarter's due
+// date" would wrongly point months further out than the deadline that's
+// actually closest. This checks the previous quarter's due date first,
+// and only moves on to the next one once that's actually passed.
+function getNextQuarterlyDueDate(){
+  const now=new Date();
+  const q=Math.floor(now.getMonth()/3);
+  const prevQuarterEnd=new Date(now.getFullYear(),q*3,0);
+  const prevDue=new Date(prevQuarterEnd.getFullYear(),prevQuarterEnd.getMonth()+1,20);
+  if(now<=prevDue)return prevDue;
+  return getTaxFilingDueDate('quarter');
+}
 
-  if(!dueDate){
-    alert('Pick "This Month," "This Quarter," or "This Year" up top first — a tax filing period has to be one of those, not '+periodLabels[period]+'.');
-    return;
-  }
+function renderTaxDueReminder(){
+  const el=document.getElementById('tax-due-reminder');
+  if(!el)return;
+  const due=getNextQuarterlyDueDate();
+  const dueStr=due.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  const daysLeft=Math.ceil((due-new Date())/(1000*60*60*24));
+  const urgent=daysLeft<=14;
+  el.innerHTML=`📅 Next Texas sales tax filing due: <span style="color:${urgent?'var(--red)':'var(--text)'};font-weight:600">${dueStr}</span> <span style="color:var(--muted2)">(${daysLeft} day${daysLeft===1?'':'s'} — assumes quarterly filing)</span>`;
+}
+
+function toggleTaxReportMenu(){
+  const m=document.getElementById('menu-tax-report');
+  if(!m)return;
+  const opening=m.style.display==='none'||!m.style.display;
+  document.querySelectorAll('[id^="menu-"]').forEach(el=>{if(el!==m)el.style.display='none';});
+  m.style.display=opening?'block':'none';
+}
+
+function printTaxReport(period){
+  const periodLabels={month:'This Month',quarter:'This Quarter',year:'This Year'};
+  const dueDate=getTaxFilingDueDate(period);
 
   const rep=computeReportsData(period);
   const grossSales=rep.revenueCollected;
