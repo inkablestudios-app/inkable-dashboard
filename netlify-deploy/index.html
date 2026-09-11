@@ -477,7 +477,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 <div class="topbar">
   <div class="topbar-brand">
     <div class="topbar-logo"><span>Inkable</span> Studios</div>
-    <div class="topbar-version">Dashboard v2.20</div>
+    <div class="topbar-version">Dashboard v2.22</div>
     <div class="topbar-version" id="syncStatusIndicator" style="margin-left:8px">☁ …</div>
   </div>
   <div class="topbar-right">
@@ -678,6 +678,23 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
             <button class="btn btn-ghost" onclick="closeExpenseModal()">Cancel</button>
             <button class="btn btn-primary" onclick="submitExpense()" id="expSubmitBtn">Save Expense</button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MANAGE EXPENSES MODAL — reachable directly from the Sales row,
+         since that's where expenses get added but editing/deleting used
+         to only be possible buried inside the Job Modal. Same list, same
+         edit/delete, just accessible from where the need actually is. -->
+    <div class="modal-overlay" id="expenseListModal">
+      <div class="modal" style="width:400px">
+        <div class="modal-header">
+          <h2 id="expListModalTitle">Expenses</h2>
+          <button class="modal-close" onclick="closeExpenseListModal()">✕</button>
+        </div>
+        <div class="modal-body">
+          <div id="expense-list-modal-body" style="max-height:280px;overflow-y:auto;margin-bottom:14px"></div>
+          <button onclick="openExpenseModal(expenseListModalJobId)" class="btn btn-primary" style="width:100%">+ Add Expense</button>
         </div>
       </div>
     </div>
@@ -1183,13 +1200,23 @@ function saveMeta(m){ localStorage.setItem(META_KEY,JSON.stringify(m)); }
 
 function getJobMeta(id){
   const m=getMeta();
-  return m[id]||{status:'send',tags:[],notes:'',payments:[],installDate:'',proofLink:'',expenses:[]};
+  return m[id]||{status:'send',tags:[],notes:'',payments:[],installDate:'',proofLink:'',expenses:[],excluded:false};
 }
 function setJobMeta(id,data){
   const m=getMeta();
   m[id]=data;
   saveMeta(m);
   syncJobMetaToServer(id,data);
+}
+// Marks a job as excluded from Reports totals — for comped jobs, personal
+// projects, anything that happened but shouldn't count toward the real
+// business numbers. The job itself stays fully visible everywhere else;
+// this only affects what Reports adds up.
+function toggleJobExclusion(id){
+  const meta=getJobMeta(id);
+  setJobMeta(id,{...meta,excluded:!meta.excluded});
+  renderSales();
+  renderReports();
 }
 
 // ── Payments — decoupled from production status. A job can be marked
@@ -1209,7 +1236,7 @@ function addClientLogEntry(clientId,type,note,jobId){
   if(idx<0)return;
   if(!clients[idx].log)clients[idx].log=[];
   clients[idx].log.unshift({
-    id:Date.now().toString(),
+    id:'log_'+Date.now()+'_'+Math.floor(Math.random()*100000),
     date:new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}),
     type:type||'call',
     note:(note||'').trim(),
@@ -1244,7 +1271,7 @@ function getPayments(id){
 function addPayment(id,amount,method,date){
   const meta=getJobMeta(id);
   if(!meta.payments)meta.payments=[];
-  meta.payments.push({id:Date.now().toString(),amount:parseFloat(amount)||0,method:method||'Cash',date:date||new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})});
+  meta.payments.push({id:'pmt_'+Date.now()+'_'+Math.floor(Math.random()*100000),amount:parseFloat(amount)||0,method:method||'Cash',date:date||new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})});
   setJobMeta(id,meta);
 }
 function removePayment(id,paymentId){
@@ -1588,13 +1615,14 @@ function renderSales(){
     const badgeClass=status==='paid'?'pay-paid':status==='partial'?'pay-partial':'pay-unpaid';
     const badgeLabel=status==='paid'?'Paid':status==='partial'?'Partial':'Unpaid';
     const extraExpenses=getTotalExpenses(p.id);
+    const excluded=getJobMeta(p.id).excluded;
 
-    return `<div class="sales-row">
+    return `<div class="sales-row" style="${excluded?'opacity:0.5':''}">
       <div>
-        <div style="font-weight:700;font-size:13px;color:var(--text)">${clientName}</div>
+        <div style="font-weight:700;font-size:13px;color:var(--text)">${clientName}${excluded?' <span style="background:var(--muted2);color:var(--dark);font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;letter-spacing:0.03em;vertical-align:middle">EXCLUDED</span>':''}</div>
         <div style="font-size:11px;font-family:'DM Mono',monospace;color:var(--muted)">${p.estNo||'—'}</div>
         <div style="font-size:11px;color:var(--muted);margin-top:2px">${p.name||''}</div>
-        ${extraExpenses!==0?`<div style="font-size:10.5px;color:${extraExpenses>0?'var(--amber)':'var(--green)'};margin-top:3px">${extraExpenses>0?'+ $'+extraExpenses.toFixed(2)+' in extra expenses':'- $'+Math.abs(extraExpenses).toFixed(2)+' net credit'}</div>`:''}
+        ${extraExpenses!==0?`<div onclick="event.stopPropagation();openExpenseListModal('${p.id}')" style="font-size:10.5px;color:${extraExpenses>0?'var(--amber)':'var(--green)'};margin-top:3px;cursor:pointer;text-decoration:underline;text-underline-offset:2px" title="View or edit expenses">${extraExpenses>0?'+ $'+extraExpenses.toFixed(2)+' in extra expenses':'- $'+Math.abs(extraExpenses).toFixed(2)+' net credit'}</div>`:''}
       </div>
       <div class="amount">$${total.toFixed(2)}</div>
       <div class="amount" style="color:var(--green)">$${paid.toFixed(2)}</div>
@@ -1604,6 +1632,7 @@ function renderSales(){
         <button class="pay-record-btn" onclick="openPaymentModal('${p.id}')">+ Payment</button>
         <button class="pay-record-btn" onclick="openExpenseModal('${p.id}')" style="border-color:var(--amber);color:var(--amber)">+ Expense</button>
         ${paid>0?`<button class="pay-record-btn" onclick="generateReceiptPDF('${p.id}')">🧾 Receipt</button>`:''}
+        <button class="pay-record-btn" onclick="toggleJobExclusion('${p.id}')" style="border-color:var(--muted2);color:var(--muted)" title="${excluded?'Include this job in Reports totals again':'Exclude this job from Reports totals (comped job, personal project, etc.) without deleting it'}">${excluded?'✓ Include':'🚫 Exclude'}</button>
         <button onclick="deleteProjectConfirm('${p.id}')" title="Delete" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:2px 4px">🗑</button>
       </div>
     </div>`;
@@ -1665,7 +1694,7 @@ function addExpense(id,description,amount,date){
   const meta=getJobMeta(id);
   const expenses=[...(meta.expenses||[])];
   expenses.push({
-    id:Date.now().toString(),
+    id:'exp_'+Date.now()+'_'+Math.floor(Math.random()*100000),
     description:(description||'').trim(),
     amount:parseFloat(amount)||0,
     date:date||new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}),
@@ -1691,16 +1720,22 @@ function getTotalExpenses(id){
 let expenseModalProjectId=null;
 let expenseModalEditId=null;
 let expenseModalReturnToJob=null;
+let expenseModalReturnToList=null;
 function openExpenseModal(projectId,editId){
   expenseModalProjectId=projectId;
   expenseModalEditId=editId||null;
-  // If this was opened from inside the Job Modal, close it for now and
-  // remember to come back once the expense is saved (or cancelled) —
-  // same pattern as Client Detail handing off to its sub-modals.
+  // If this was opened from inside the Job Modal OR the Manage Expenses
+  // popup, close whichever it was for now and remember to come back once
+  // the expense is saved (or cancelled) — same pattern as Client Detail
+  // handing off to its sub-modals.
   const jobModal=document.getElementById('jobModal');
   const jobModalWasOpen=jobModal.classList.contains('open');
+  const listModal=document.getElementById('expenseListModal');
+  const listModalWasOpen=listModal.classList.contains('open');
   expenseModalReturnToJob=jobModalWasOpen?projectId:null;
+  expenseModalReturnToList=listModalWasOpen?projectId:null;
   if(jobModalWasOpen)jobModal.classList.remove('open');
+  if(listModalWasOpen)listModal.classList.remove('open');
 
   const p=getProjects().find(pr=>pr.id===projectId);
   const clients=getClients();
@@ -1732,8 +1767,36 @@ function closeExpenseModal(){
     const returnId=expenseModalReturnToJob;
     expenseModalReturnToJob=null;
     openJobModal(returnId);
+  }else if(expenseModalReturnToList){
+    const returnId=expenseModalReturnToList;
+    expenseModalReturnToList=null;
+    openExpenseListModal(returnId);
   }
 }
+
+// ── Manage Expenses popup — the direct path from Sales, so editing or
+// deleting an expense doesn't require knowing to dig into the Job Modal.
+let expenseListModalJobId=null;
+function openExpenseListModal(jobId){
+  expenseListModalJobId=jobId;
+  const p=getProjects().find(pr=>pr.id===jobId);
+  document.getElementById('expListModalTitle').textContent='Expenses — '+(p?.estNo||'');
+  renderExpensesList(jobId,'expense-list-modal-body');
+  document.getElementById('expenseListModal').classList.add('open');
+}
+function closeExpenseListModal(){
+  document.getElementById('expenseListModal').classList.remove('open');
+  expenseListModalJobId=null;
+}
+// Keeps whichever expense list(s) are actually open in sync after an
+// edit or delete — the Job Modal's inline list and the standalone Manage
+// Expenses popup both show the same data, so both need refreshing
+// regardless of which one triggered the change.
+function refreshExpenseViews(jobId){
+  renderExpensesList(jobId,'modal-expenses-list');
+  renderExpensesList(jobId,'expense-list-modal-body');
+}
+
 function submitExpense(){
   if(!expenseModalProjectId)return;
   const description=document.getElementById('expDescription').value.trim();
@@ -2008,8 +2071,8 @@ function renderJobLogList(jobId){
     <button onclick="removeJobLogEntry('${p.clientId}','${entry.id}')" title="Delete entry" style="background:none;border:none;color:var(--muted2);cursor:pointer;font-size:11px;padding:2px;flex-shrink:0">🗑</button>
   </div>`).join('');
 }
-function renderExpensesList(jobId){
-  const listEl=document.getElementById('modal-expenses-list');
+function renderExpensesList(jobId,targetId){
+  const listEl=document.getElementById(targetId||'modal-expenses-list');
   if(!listEl)return;
   const entries=getExpenses(jobId);
   if(!entries.length){
@@ -2026,7 +2089,7 @@ function renderExpensesList(jobId){
     <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
       <span style="font-size:12px;color:${isCredit?'var(--green)':'var(--amber)'};font-weight:700">${isCredit?'-':''}$${Math.abs(entry.amount).toFixed(2)}</span>
       <button onclick="openExpenseModal('${jobId}','${entry.id}')" title="Edit expense" style="background:none;border:none;color:var(--muted2);cursor:pointer;font-size:11px;padding:2px">✏️</button>
-      <button onclick="removeExpense('${jobId}','${entry.id}');renderExpensesList('${jobId}');renderSales();renderReports()" title="Delete expense" style="background:none;border:none;color:var(--muted2);cursor:pointer;font-size:11px;padding:2px">🗑</button>
+      <button onclick="removeExpense('${jobId}','${entry.id}');refreshExpenseViews('${jobId}');renderSales();renderReports()" title="Delete expense" style="background:none;border:none;color:var(--muted2);cursor:pointer;font-size:11px;padding:2px">🗑</button>
     </div>
   </div>`;}).join('');
 }
@@ -2349,6 +2412,11 @@ function computeReportsDataForRange(range){
   let outstandingBalance=0,unpaidCount=0,unpaidTotal=0,partialCount=0,paidCount=0;
 
   projects.forEach(p=>{
+    // Excluded jobs (comped work, personal projects) stay fully visible
+    // everywhere else in the app — they just don't count toward any of
+    // Reports' totals, in either direction.
+    if(getJobMeta(p.id).excluded)return;
+
     const fin=getJobFinancials(p);
     if(dateInRange(p.savedAt,range)){
       // Original pricing estimate — recognized when the job itself was
@@ -4420,7 +4488,7 @@ function savePricerProject(){
   // Reuse the existing project's id when updating in place — a fresh id
   // every save would silently orphan its status/tags/notes/payments/PDF
   // snapshots, since those are all keyed by this id.
-  const id=existing>=0?list[existing].id:Date.now().toString();
+  const id=existing>=0?list[existing].id:'proj_'+Date.now()+'_'+Math.floor(Math.random()*100000);
 
   // Build minimal state object compatible with old tool format
   const state={form:{
