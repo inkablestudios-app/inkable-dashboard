@@ -33,7 +33,7 @@ button,.action-btn,.menu-item,.filter-pill,.pay-record-btn,.jt-btn,.li-lv-btn,.l
   --panel:#161616;--border:#222;--text:#e8e8e8;--muted:#666;--muted2:#444;
   --green:#22c55e;--amber:#f59e0b;--red:#ef4444;--purple:#a855f7;
   --status-send:#3b82f6;--status-art:#f59e0b;--status-prep:#8b5cf6;
-  --status-proof:#06b6d4;--status-approved:#10b981;--status-prod:#f97316;--status-done:#6b7280;
+  --status-proof:#06b6d4;--status-approved:#10b981;--status-prod:#f97316;--status-done:#6b7280;--status-revision:#ec4899;
 }
 body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);height:100vh;overflow:hidden;display:flex;flex-direction:column}
 #appShell{flex-direction:column;flex:1;min-height:0}
@@ -326,6 +326,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 .s-art{background:#451a0322;color:var(--status-art)}.s-art::before{background:var(--status-art)}
 .s-prep{background:#4c1d9522;color:var(--status-prep)}.s-prep::before{background:var(--status-prep)}
 .s-proof{background:#0e7490 22;color:var(--status-proof)}.s-proof::before{background:var(--status-proof)}
+.s-revision{background:#83185522;color:var(--status-revision)}.s-revision::before{background:var(--status-revision)}
 .s-approved{background:#06472522;color:var(--status-approved)}.s-approved::before{background:var(--status-approved)}
 .s-prod{background:#7c2d1222;color:var(--status-prod)}.s-prod::before{background:var(--status-prod)}
 .s-done{background:#ffffff08;color:var(--status-done)}.s-done::before{background:var(--status-done)}
@@ -477,7 +478,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 <div class="topbar">
   <div class="topbar-brand">
     <div class="topbar-logo"><span>Inkable</span> Studios</div>
-    <div class="topbar-version">Dashboard v2.22</div>
+    <div class="topbar-version">Dashboard v2.25</div>
     <div class="topbar-version" id="syncStatusIndicator" style="margin-left:8px">☁ …</div>
   </div>
   <div class="topbar-right">
@@ -502,7 +503,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
     </div>
     <div class="nav-item" onclick="switchTab('clients')">
       <span class="icon">👥</span> Clients
-      <span class="nav-badge" id="badge-clients">0</span>
     </div>
     <div class="nav-item" onclick="switchTab('reports')">
       <span class="icon">📊</span> Reports
@@ -556,6 +556,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
           <button class="filter-pill" data-status="art" onclick="setStatusFilter('art',this)">Awaiting Artwork</button>
           <button class="filter-pill" data-status="prep" onclick="setStatusFilter('prep',this)">Prepare Proof</button>
           <button class="filter-pill" data-status="proof" onclick="setStatusFilter('proof',this)">Send Proof</button>
+          <button class="filter-pill" data-status="revision" onclick="setStatusFilter('revision',this)">In Design Revision</button>
           <button class="filter-pill" data-status="approved" onclick="setStatusFilter('approved',this)">Proof Approved</button>
           <button class="filter-pill" data-status="prod" onclick="setStatusFilter('prod',this)">In Production</button>
           <button class="filter-pill" data-status="done" onclick="setStatusFilter('done',this)">Done</button>
@@ -757,6 +758,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
               <option value="google">Google</option>
               <option value="walkin">Walk-in</option>
               <option value="repeat">Repeat Customer</option>
+              <option value="salespitch">Sales Pitch</option>
               <option value="other">Other</option>
             </select>
           </div>
@@ -857,6 +859,12 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
         <button class="filter-pill" data-period="quarter" onclick="setReportsPeriod('quarter',this)">This Quarter</button>
         <button class="filter-pill" data-period="year" onclick="setReportsPeriod('year',this)">This Year</button>
         <button class="filter-pill" data-period="all" onclick="setReportsPeriod('all',this)">All Time</button>
+      </div>
+      <div style="padding:0 28px;margin-top:10px;display:flex;align-items:center;gap:10px" id="reports-history-row">
+        <button class="btn btn-ghost" style="padding:3px 10px;font-size:11px" onclick="navigateReportsPeriod(1)" id="reports-history-back">◀</button>
+        <span style="font-size:12px;color:var(--muted);font-weight:600;min-width:140px;text-align:center" id="reports-history-label">This Week</span>
+        <button class="btn btn-ghost" style="padding:3px 10px;font-size:11px" onclick="navigateReportsPeriod(-1)" id="reports-history-forward" disabled>▶</button>
+        <button class="btn btn-ghost" style="padding:3px 10px;font-size:10px;margin-left:4px;display:none" onclick="resetReportsHistory()" id="reports-history-reset">Back to current</button>
       </div>
       <div class="reports-grid" id="reports-content" style="margin-top:16px">
 
@@ -1013,6 +1021,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
           <option value="art">Awaiting Artwork</option>
           <option value="prep">Prepare Proof</option>
           <option value="proof">Send Proof</option>
+          <option value="revision">In Design Revision</option>
           <option value="approved">Proof Approved</option>
           <option value="prod">In Production</option>
           <option value="done">Done</option>
@@ -1137,6 +1146,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
             <option value="google">Google</option>
             <option value="walkin">Walk-in</option>
             <option value="repeat">Repeat Customer</option>
+            <option value="salespitch">Sales Pitch</option>
             <option value="other">Other</option>
           </select>
         </div>
@@ -1158,11 +1168,11 @@ const META_KEY = 'inkable_job_meta'; // dashboard-only metadata
 
 const STATUS_LABELS = {
   send: 'Send Estimate', art: 'Awaiting Artwork', prep: 'Prepare Proof',
-  proof: 'Send Proof', approved: 'Proof Approved', prod: 'In Production', done: 'Done'
+  proof: 'Send Proof', revision: 'In Design Revision', approved: 'Proof Approved', prod: 'In Production', done: 'Done'
 };
 const STATUS_CLASS = {
   send:'s-send', art:'s-art', prep:'s-prep',
-  proof:'s-proof', approved:'s-approved', prod:'s-prod', done:'s-done'
+  proof:'s-proof', revision:'s-revision', approved:'s-approved', prod:'s-prod', done:'s-done'
 };
 
 let currentFilter = 'all';
@@ -1589,15 +1599,20 @@ function updateStats(projects){
   document.getElementById('stat-prod').textContent=prod;
   document.getElementById('stat-done').textContent=done;
 
-  // Badges
-  document.getElementById('badge-projects').textContent=projects.length;
-  document.getElementById('badge-clients').textContent=getClients().length;
-  document.getElementById('badge-sales').textContent=projects.length;
+  // Sidebar badges — Projects shows what still needs attention (active,
+  // not-yet-done jobs), Sales shows what still needs to be collected
+  // (unpaid jobs specifically, not every job ever sold), Clients doesn't
+  // get one — a client count isn't really an "action needed" signal the
+  // way the other two are.
+  const unpaidCount=projects.filter(p=>getPaymentStatus(p.id,getProjectAmount(p))==='unpaid').length;
+  document.getElementById('badge-projects').textContent=active;
+  document.getElementById('badge-sales').textContent=unpaidCount;
 }
 
 // ── Sales ──────────────────────────────────────────────────────────────
 function renderSales(){
   const projects=getProjects();
+  updateStats(projects);
   const clients=getClients();
   const el=document.getElementById('sales-list');
   const empty=document.getElementById('sales-empty');
@@ -2001,7 +2016,7 @@ function deleteClientFromDetail(){
 
 let clientLogClientId=null;
 const LOG_TYPE_LABELS={call:'📞 Call',text:'💬 Text',email:'✉️ Email',inperson:'🤝 In Person'};
-const LEAD_SOURCE_LABELS={referral:'Referral',instagram:'Instagram',facebook:'Facebook',google:'Google',walkin:'Walk-in',repeat:'Repeat Customer',other:'Other'};
+const LEAD_SOURCE_LABELS={referral:'Referral',instagram:'Instagram',facebook:'Facebook',google:'Google',walkin:'Walk-in',repeat:'Repeat Customer',salespitch:'Sales Pitch',other:'Other'};
 
 function openClientLog(clientId){
   const client=getClients().find(c=>c.id===clientId);
@@ -2152,11 +2167,51 @@ function deleteClientConfirm(id){
 
 // ── Reports ────────────────────────────────────────────────────────────
 let currentReportsPeriod='week';
+let reportsPeriodOffset=0;
 function setReportsPeriod(period,btn){
   currentReportsPeriod=period;
+  reportsPeriodOffset=0; // switching period type always returns to "current"
   document.querySelectorAll('#reports-period-row .filter-pill').forEach(p=>p.classList.remove('active'));
   if(btn)btn.classList.add('active');
   renderReports();
+}
+// Browse history — 1 step back is the previous whole period (last month,
+// last quarter, etc.), 2 steps back is the one before that, and so on.
+// Not offered for Week (too granular to be useful this way) or All Time
+// (there's no "previous all time").
+function navigateReportsPeriod(direction){
+  if(['week','all'].includes(currentReportsPeriod))return;
+  const next=reportsPeriodOffset+direction;
+  if(next<0)return; // can't navigate into the future
+  reportsPeriodOffset=next;
+  renderReports();
+}
+function resetReportsHistory(){
+  reportsPeriodOffset=0;
+  renderReports();
+}
+function getReportsPeriodLabel(period,offset){
+  const range=getPeriodRange(period,offset);
+  if(period==='month')return range.start.toLocaleDateString('en-US',{month:'long',year:'numeric'});
+  if(period==='quarter'){
+    const q=Math.floor(range.start.getMonth()/3)+1;
+    return `Q${q} ${range.start.getFullYear()}`;
+  }
+  if(period==='year')return String(range.start.getFullYear());
+  return offset===0?'This Week':'';
+}
+
+function renderReportsHistoryNav(){
+  const row=document.getElementById('reports-history-row');
+  if(!row)return;
+  const supportsHistory=!['week','all'].includes(currentReportsPeriod);
+  row.style.display=supportsHistory?'flex':'none';
+  if(!supportsHistory)return;
+
+  document.getElementById('reports-history-label').textContent=
+    getReportsPeriodLabel(currentReportsPeriod,reportsPeriodOffset);
+  document.getElementById('reports-history-forward').disabled=reportsPeriodOffset===0;
+  document.getElementById('reports-history-reset').style.display=reportsPeriodOffset>0?'inline-block':'none';
 }
 
 function renderPeriodDelta(elId,current,previous,periodLabel){
@@ -2225,16 +2280,17 @@ function renderReports(){
   // has one honest answer.
   const done=meta.filter(p=>p.meta.status==='done');
   const active=meta.filter(p=>p.meta.status!=='done').length;
-  const needAction=meta.filter(p=>['send','proof'].includes(p.meta.status)).length;
+  const needAction=meta.filter(p=>['send','proof','revision'].includes(p.meta.status)).length;
   const inProd=meta.filter(p=>p.meta.status==='prod').length;
   const rush=meta.filter(p=>p.meta.tags?.includes('rush')).length;
   const estimates=projects.filter(p=>p.docType==='estimate'||!p.docType).length;
   const invoices=projects.filter(p=>p.docType==='invoice').length;
 
-  const rep=computeReportsData(currentReportsPeriod);
-  const prevRep=computePreviousPeriodData(currentReportsPeriod);
+  const rep=computeReportsData(currentReportsPeriod,reportsPeriodOffset);
+  const prevRep=computePreviousPeriodData(currentReportsPeriod,reportsPeriodOffset);
   const periodLabels={week:'last week',month:'last month',quarter:'last quarter',year:'last year'};
   const prevLabel=periodLabels[currentReportsPeriod]||'';
+  renderReportsHistoryNav();
 
   const s=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
   s('r-revenue','$'+rep.revenueCollected.toFixed(2));
@@ -2350,15 +2406,32 @@ function getJobFinancials(p){
   };
 }
 
-function getPeriodRange(period){
+function getPeriodRange(period,offset){
+  offset=offset||0;
   const now=new Date();
-  let start;
-  if(period==='week'){ start=new Date(now); start.setDate(now.getDate()-7); }
-  else if(period==='month'){ start=new Date(now.getFullYear(),now.getMonth(),1); }
-  else if(period==='quarter'){ const q=Math.floor(now.getMonth()/3); start=new Date(now.getFullYear(),q*3,1); }
-  else if(period==='year'){ start=new Date(now.getFullYear(),0,1); }
-  else{ start=new Date(0); }
-  return{start,end:now};
+  if(period==='week'){
+    const end=new Date(now); end.setDate(now.getDate()-offset*7);
+    const start=new Date(end); start.setDate(end.getDate()-7);
+    return{start,end:offset===0?now:end};
+  }
+  if(period==='month'){
+    const start=new Date(now.getFullYear(),now.getMonth()-offset,1);
+    const end=offset===0?now:new Date(now.getFullYear(),now.getMonth()-offset+1,0);
+    return{start,end};
+  }
+  if(period==='quarter'){
+    const q=Math.floor(now.getMonth()/3);
+    const startMonth=q*3-offset*3;
+    const start=new Date(now.getFullYear(),startMonth,1);
+    const end=offset===0?now:new Date(now.getFullYear(),startMonth+3,0);
+    return{start,end};
+  }
+  if(period==='year'){
+    const start=new Date(now.getFullYear()-offset,0,1);
+    const end=offset===0?now:new Date(now.getFullYear()-offset,11,31);
+    return{start,end};
+  }
+  return{start:new Date(0),end:now}; // 'all' has no meaningful offset
 }
 // The equivalent PRIOR window, same length/type — e.g. current is "This
 // Quarter", previous is the quarter before it. Used for the vs-last-period
@@ -2454,12 +2527,16 @@ function computeReportsDataForRange(range){
     outstandingBalance,unpaidCount,unpaidTotal,partialCount,paidCount,
   };
 }
-function computeReportsData(period){
-  return computeReportsDataForRange(getPeriodRange(period));
+function computeReportsData(period,offset){
+  return computeReportsDataForRange(getPeriodRange(period,offset));
 }
-function computePreviousPeriodData(period){
-  const range=getPreviousPeriodRange(period);
-  return range?computeReportsDataForRange(range):null;
+function computePreviousPeriodData(period,offset){
+  offset=offset||0;
+  if(period==='all')return null; // no meaningful "previous" for All Time
+  // "The period before whichever one is currently being viewed" is just
+  // one more step back than the current offset — reuses the same range
+  // logic rather than a separate parallel implementation.
+  return computeReportsDataForRange(getPeriodRange(period,offset+1));
 }
 
 // Last N months of Revenue/Expenses/Profit, for the trend chart — always
@@ -3224,7 +3301,11 @@ function renderProofSection(jobId){
       <div style="margin-top:8px">
         <input type="file" id="proofFileInput" style="display:none" onchange="handleProofFileSelected('${jobId}',this)"/>
         <button class="btn btn-ghost" style="font-size:10.5px;padding:4px 10px" onclick="document.getElementById('proofFileInput').click()">Replace file</button>
+      </div>
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)" id="clientLinkSection-${jobId}">
+        <div style="font-size:10.5px;color:var(--muted)">Checking for a client link…</div>
       </div>`;
+    loadClientLinkStatus(jobId);
     return;
   }
   if(!isDriveConnected()){
@@ -3235,6 +3316,72 @@ function renderProofSection(jobId){
     <input type="file" id="proofFileInput" style="display:none" onchange="handleProofFileSelected('${jobId}',this)"/>
     <button class="btn btn-primary" style="font-size:11px;padding:6px 12px" onclick="document.getElementById('proofFileInput').click()">Upload Proof</button>
     <div id="proofUploadStatus" style="font-size:10.5px;margin-top:6px"></div>`;
+}
+
+// ── Client proof-review link — a public page (no login) a client opens
+// to view the proof and approve or request changes. Reading/writing the
+// share status goes through /api/proof-share, which IS auth-protected
+// (only you can see who's viewed what); the client's own page hits a
+// completely separate, unauthenticated endpoint that only ever touches
+// the one project its token is tied to.
+function fmtShareDate(iso){
+  return iso?new Date(iso).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}):'';
+}
+async function loadClientLinkStatus(jobId){
+  const container=document.getElementById('clientLinkSection-'+jobId);
+  if(!container)return;
+  try{
+    const token=localStorage.getItem(AUTH_TOKEN_KEY);
+    const headers=token?{'Authorization':'Bearer '+token}:{};
+    const res=await fetch(CLOUD_API_BASE+'/proof-share?projectId='+encodeURIComponent(jobId),{headers});
+    if(!res.ok)throw new Error('Server returned '+res.status);
+    const data=await res.json();
+    renderClientLinkSection(jobId,data.exists?data:null);
+  }catch(err){
+    console.warn('Could not check client link status:',err);
+    container.innerHTML=`<button class="btn btn-primary" style="font-size:11px;padding:6px 12px" onclick="getOrCreateClientLink('${jobId}')">🔗 Get Client Link</button>`;
+  }
+}
+function renderClientLinkSection(jobId,data){
+  const container=document.getElementById('clientLinkSection-'+jobId);
+  if(!container)return;
+  if(!data){
+    container.innerHTML=`<button class="btn btn-primary" style="font-size:11px;padding:6px 12px" onclick="getOrCreateClientLink('${jobId}')">🔗 Get Client Link</button>`;
+    return;
+  }
+  const shareUrl='https://inkable-dashboard.netlify.app/proof.html?token='+data.token;
+  let statusHtml='';
+  if(data.response==='approved'){
+    statusHtml=`<div style="font-size:11px;color:var(--green);margin-top:6px">✓ Client approved on ${fmtShareDate(data.responseAt)}</div>`;
+  }else if(data.response==='changes'){
+    statusHtml=`<div style="font-size:11px;color:var(--amber);margin-top:6px">✎ Changes requested on ${fmtShareDate(data.responseAt)}${data.responseNote?': "'+data.responseNote+'"':''}</div>`;
+  }else if(data.viewCount>0){
+    statusHtml=`<div style="font-size:10.5px;color:var(--muted);margin-top:6px">Viewed ${data.viewCount}× — last on ${fmtShareDate(data.lastViewedAt)}, no response yet</div>`;
+  }else{
+    statusHtml=`<div style="font-size:10.5px;color:var(--muted2);margin-top:6px">Not viewed yet</div>`;
+  }
+  container.innerHTML=`
+    <div style="font-size:10.5px;color:var(--muted);margin-bottom:4px">Client review link</div>
+    <div style="display:flex;gap:6px">
+      <input type="text" readonly value="${shareUrl}" style="flex:1;font-size:10px;background:var(--dark);border:1px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--muted)" onclick="this.select()"/>
+      <button class="btn btn-ghost" style="font-size:10.5px;padding:5px 10px" onclick="navigator.clipboard.writeText('${shareUrl}');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)">Copy</button>
+    </div>
+    ${statusHtml}`;
+}
+async function getOrCreateClientLink(jobId){
+  const container=document.getElementById('clientLinkSection-'+jobId);
+  if(container)container.innerHTML=`<div style="font-size:10.5px;color:var(--muted)">Creating link…</div>`;
+  try{
+    const token=localStorage.getItem(AUTH_TOKEN_KEY);
+    const headers={'Content-Type':'application/json'};
+    if(token)headers['Authorization']='Bearer '+token;
+    const res=await fetch(CLOUD_API_BASE+'/proof-share',{method:'POST',headers,body:JSON.stringify({projectId:jobId})});
+    if(!res.ok)throw new Error('Server returned '+res.status);
+    await loadClientLinkStatus(jobId);
+  }catch(err){
+    console.error('Could not create client link:',err);
+    if(container)container.innerHTML=`<div style="font-size:10.5px;color:var(--red)">Couldn't create the link — check your connection and try again.</div><button class="btn btn-primary" style="font-size:11px;padding:6px 12px;margin-top:6px" onclick="getOrCreateClientLink('${jobId}')">Try Again</button>`;
+  }
 }
 
 function closeSettings(){
@@ -3683,6 +3830,15 @@ function addLineItemFromSaved(line){
   el.querySelector('.li-h').value=line.h||'';
   applyDimUnit(el.querySelector('.li-w')?.closest('.line-field'),'li-w-unit',line.wFt);
   applyDimUnit(el.querySelector('.li-h')?.closest('.line-field'),'li-h-unit',line.hFt);
+  syncTrueInches(el.querySelector('.li-w'));
+  syncTrueInches(el.querySelector('.li-h'));
+  // The saved value is now full precision (not rounded), which is exactly
+  // what we want feeding data-trueInches above — but showing all those
+  // decimals on screen would look messy, so round just the DISPLAY after
+  // the precise value has already been captured.
+  [el.querySelector('.li-w'),el.querySelector('.li-h')].forEach(inp=>{
+    if(inp&&inp.value!=='')inp.value=Math.round(parseFloat(inp.value)*1000)/1000;
+  });
   el.querySelector('.li-qty').value=line.qty||'1';
 
   if(line.sub){
@@ -3696,6 +3852,11 @@ function addLineItemFromSaved(line){
     el.querySelector('.li-sub-h').value=line.subH||'';
     applyDimUnit(el.querySelector('.li-sub-w')?.closest('.line-field'),'li-subw-unit',line.subWFt);
     applyDimUnit(el.querySelector('.li-sub-h')?.closest('.line-field'),'li-subh-unit',line.subHFt);
+    syncTrueInches(el.querySelector('.li-sub-w'));
+    syncTrueInches(el.querySelector('.li-sub-h'));
+    [el.querySelector('.li-sub-w'),el.querySelector('.li-sub-h')].forEach(inp=>{
+      if(inp&&inp.value!=='')inp.value=Math.round(parseFloat(inp.value)*1000)/1000;
+    });
   }
   if(line.subThickness)el.querySelector('.li-sub-thickness').value=line.subThickness;
 
@@ -3853,7 +4014,7 @@ function addLineItem(){
             <button type="button" class="li-unit-btn li-w-unit" data-unit="ft" onclick="setDimUnit(this)">ft</button>
           </div>
         </div>
-        <input type="number" class="li-w" min="0" step="0.1" placeholder="0" oninput="recalc()"/>
+        <input type="number" class="li-w" min="0" step="0.1" placeholder="0" oninput="syncTrueInches(this);recalc()"/>
       </div>
       <div class="line-field" style="margin:0">
         <div class="dim-label-row">
@@ -3863,7 +4024,7 @@ function addLineItem(){
             <button type="button" class="li-unit-btn li-h-unit" data-unit="ft" onclick="setDimUnit(this)">ft</button>
           </div>
         </div>
-        <input type="number" class="li-h" min="0" step="0.1" placeholder="0" oninput="recalc()"/>
+        <input type="number" class="li-h" min="0" step="0.1" placeholder="0" oninput="syncTrueInches(this);recalc()"/>
       </div>
     </div>
     <div class="line-field" style="margin-bottom:8px">
@@ -3884,7 +4045,7 @@ function addLineItem(){
               <button type="button" class="li-unit-btn li-subw-unit" data-unit="ft" onclick="setDimUnit(this)">ft</button>
             </div>
           </div>
-          <input type="number" class="li-sub-w" min="0" step="0.1" placeholder="0" oninput="recalc()"/>
+          <input type="number" class="li-sub-w" min="0" step="0.1" placeholder="0" oninput="syncTrueInches(this);recalc()"/>
         </div>
         <div class="line-field" style="margin:0;flex:1">
           <div class="dim-label-row">
@@ -3894,7 +4055,7 @@ function addLineItem(){
               <button type="button" class="li-unit-btn li-subh-unit" data-unit="ft" onclick="setDimUnit(this)">ft</button>
             </div>
           </div>
-          <input type="number" class="li-sub-h" min="0" step="0.1" placeholder="0" oninput="recalc()"/>
+          <input type="number" class="li-sub-h" min="0" step="0.1" placeholder="0" oninput="syncTrueInches(this);recalc()"/>
         </div>
       </div>
       <div class="line-field" style="margin:6px 0 0">
@@ -4009,29 +4170,66 @@ const DIM_UNIT_GROUPS={
   'li-w-unit':'.li-w', 'li-h-unit':'.li-h',
   'li-subw-unit':'.li-sub-w', 'li-subh-unit':'.li-sub-h',
 };
+
+// Keeps a lossless "true inches" value on the input itself, independent of
+// whatever's currently displayed. Without this, toggling in->ft->in on a
+// value like 10 (which never divides evenly into feet) would round for
+// display, then re-derive inches FROM that already-rounded number on the
+// way back — 10 -> 0.833ft -> 9.996in. Storing the true value once and
+// only ever recomputing the DISPLAY from it (never the reverse) means a
+// round trip always returns exactly what was typed.
+function fieldIsFt(field,groupClass){
+  return field.querySelector('.'+groupClass+'.active')?.dataset.unit==='ft';
+}
+function syncTrueInches(input){
+  const field=input.closest('.line-field');
+  if(!field)return;
+  const groupClass=Object.keys(DIM_UNIT_GROUPS).find(g=>DIM_UNIT_GROUPS[g]==='.'+input.className);
+  if(!groupClass)return;
+  const val=parseFloat(input.value);
+  if(isNaN(val)){ delete input.dataset.trueInches; return; }
+  input.dataset.trueInches=fieldIsFt(field,groupClass)?(val*12):val;
+}
+// For saving — returns the value at FULL precision (not the 3-decimal
+// display rounding), in whatever unit is currently shown. This is what
+// closes the other half of the round-trip bug: without this, the ROUNDED
+// display value is what got saved, so even a perfect in-session toggle
+// would still drift the next time the job was reopened.
+function getPreciseSaveValue(input){
+  if(!input)return '';
+  const trueInches=parseFloat(input.dataset.trueInches);
+  if(isNaN(trueInches))return input.value||'';
+  const field=input.closest('.line-field');
+  const groupClass=Object.keys(DIM_UNIT_GROUPS).find(g=>DIM_UNIT_GROUPS[g]==='.'+input.className);
+  const isFt=groupClass?fieldIsFt(field,groupClass):false;
+  return isFt?(trueInches/12):trueInches;
+}
+
 function setDimUnit(btn){
   const groupClass=Object.keys(DIM_UNIT_GROUPS).find(g=>btn.classList.contains(g));
   if(!groupClass)return;
   const field=btn.closest('.line-field');
   if(!field)return;
 
-  const wasFt=field.querySelector('.'+groupClass+'.active')?.dataset.unit==='ft';
+  const wasFt=fieldIsFt(field,groupClass);
   const isFt=btn.dataset.unit==='ft';
   if(isFt===wasFt)return; // already the selected unit, nothing to do
 
   field.querySelectorAll('.'+groupClass).forEach(b=>b.classList.toggle('active',b===btn));
 
-  // Convert the actual displayed number too, not just which button is
-  // highlighted — typing 24 while in inches and then switching to feet
-  // should show 2, not silently leave 24 sitting there now meaning
-  // something 12x different.
   const input=field.querySelector(DIM_UNIT_GROUPS[groupClass]);
   if(input&&input.value!==''){
-    const val=parseFloat(input.value);
-    if(!isNaN(val)){
-      const converted=isFt?val/12:val*12;
-      input.value=Math.round(converted*1000)/1000;
+    // Trust the stored exact value if one exists (it will, for any field
+    // that's had a value typed into it) — only fall back to deriving it
+    // from the current display for a field that's never fired an input
+    // event yet, which shouldn't normally happen but is a safe default.
+    let trueInches=parseFloat(input.dataset.trueInches);
+    if(isNaN(trueInches)){
+      const val=parseFloat(input.value);
+      trueInches=wasFt?val*12:val;
+      input.dataset.trueInches=trueInches;
     }
+    input.value=isFt?Math.round((trueInches/12)*1000)/1000:trueInches;
   }
   recalc();
 }
@@ -4513,8 +4711,8 @@ function savePricerProject(){
         vinyl:el.querySelector('.li-vinyl').value,
         lam:el.querySelector('.li-lam').value,
         sub:el.querySelector('.li-sub').value,
-        w:el.querySelector('.li-w').value,
-        h:el.querySelector('.li-h').value,
+        w:getPreciseSaveValue(el.querySelector('.li-w')),
+        h:getPreciseSaveValue(el.querySelector('.li-h')),
         qty:el.querySelector('.li-qty').value,
         wFt:el.querySelector('.li-w-unit[data-unit="ft"]')?.classList.contains('active'),
         hFt:el.querySelector('.li-h-unit[data-unit="ft"]')?.classList.contains('active'),
@@ -4530,8 +4728,8 @@ function savePricerProject(){
         installFlatPrice:el.querySelector('.li-install-flat-price')?.value||'0',
         installFlatCost:el.querySelector('.li-install-flat-cost')?.value||'0',
         subSameSize:el.querySelector('.li-sub-samesize')?.checked!==false,
-        subW:el.querySelector('.li-sub-w')?.value||'',
-        subH:el.querySelector('.li-sub-h')?.value||'',
+        subW:getPreciseSaveValue(el.querySelector('.li-sub-w')),
+        subH:getPreciseSaveValue(el.querySelector('.li-sub-h')),
         subWFt:el.querySelector('.li-subw-unit[data-unit="ft"]')?.classList.contains('active'),
         subHFt:el.querySelector('.li-subh-unit[data-unit="ft"]')?.classList.contains('active'),
         subThickness:el.querySelector('.li-sub-thickness')?.value||'',
@@ -4856,9 +5054,6 @@ function printTaxReport(period){
   const periodStartStr=range.start.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
 
   const body=`
-    <div style="background:#fff8e6;border:1px solid #f0d98c;border-radius:6px;padding:12px 14px;margin-bottom:20px;font-size:11px;line-height:1.6">
-      This summarizes what's recorded in the Dashboard for this period — it isn't a filed return, and it doesn't know your actual assigned filing frequency (monthly, quarterly, or annual) or whether you owe tax on anything outside this system. Confirm both directly with the Texas Comptroller or your accountant before filing.
-    </div>
     <table><thead><tr><th>Filing Period</th><th class="num"></th></tr></thead><tbody>
       <tr><td>Period</td><td class="num">${periodLabels[period]}</td></tr>
       <tr><td>Covers</td><td class="num">${periodStartStr} — today</td></tr>
