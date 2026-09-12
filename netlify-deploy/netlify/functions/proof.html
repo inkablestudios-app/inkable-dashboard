@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Proof Review — Inkable Studios</title>
+<style>
+  :root{
+    --black:#0a0a0a; --dark:#151515; --panel:#1c1c1c; --border:#2c2c2c;
+    --text:#f0f0f0; --muted:#9a9a9a; --muted2:#666;
+    --blue:#2196f3; --green:#4caf50; --amber:#ff9800; --red:#f44336;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; font-family:'DM Sans',system-ui,-apple-system,sans-serif;
+    background:var(--black); color:var(--text); min-height:100vh;
+    display:flex; flex-direction:column; align-items:center; padding:24px 16px;
+  }
+  .brand{font-size:18px; font-weight:800; margin-bottom:4px}
+  .brand span{color:var(--blue)}
+  .subtitle{font-size:12px; color:var(--muted); margin-bottom:24px}
+  .card{
+    background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    width:100%; max-width:640px; padding:20px; margin-bottom:16px;
+  }
+  .job-label{font-size:14px; font-weight:700; margin-bottom:14px}
+  iframe{width:100%; height:60vh; min-height:400px; border:none; border-radius:8px; background:#525659}
+  .newtab-link{display:inline-block; margin-top:10px; font-size:12px; color:var(--blue); text-decoration:none}
+  .actions{display:flex; gap:10px; margin-top:18px}
+  button{
+    font-family:inherit; font-size:14px; font-weight:700; padding:12px 18px;
+    border-radius:8px; border:none; cursor:pointer; flex:1;
+  }
+  .btn-approve{background:var(--green); color:#fff}
+  .btn-changes{background:var(--dark); color:var(--text); border:1px solid var(--border)}
+  .btn-primary{background:var(--blue); color:#fff}
+  .btn-ghost{background:none; color:var(--muted); border:1px solid var(--border)}
+  textarea{
+    width:100%; min-height:90px; margin-top:12px; padding:10px; border-radius:8px;
+    background:var(--dark); border:1px solid var(--border); color:var(--text);
+    font-family:inherit; font-size:13px; resize:vertical;
+  }
+  .state-msg{text-align:center; padding:40px 20px; color:var(--muted); font-size:13px}
+  .state-msg.error{color:var(--red)}
+  .confirm-icon{font-size:40px; margin-bottom:10px}
+  .already-badge{
+    display:inline-block; font-size:11px; font-weight:700; padding:4px 10px;
+    border-radius:6px; margin-bottom:14px;
+  }
+  .already-approved{background:#1b3a1e; color:var(--green)}
+  .already-changes{background:#3a2a1b; color:var(--amber)}
+  #changesForm{display:none}
+</style>
+</head>
+<body>
+  <div class="brand">Inkable <span>Studios</span></div>
+  <div class="subtitle">Proof Review</div>
+
+  <div class="card" id="mainCard">
+    <div class="state-msg" id="loadingMsg">Loading your proof…</div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token');
+    const API_BASE = window.location.origin + '/api/proof-public';
+    const card = document.getElementById('mainCard');
+
+    function showError(msg){
+      card.innerHTML = `<div class="state-msg error">${msg}</div>`;
+    }
+
+    function showConfirmation(kind){
+      const isApproved = kind === 'approved';
+      card.innerHTML = `
+        <div class="state-msg" style="color:${isApproved ? 'var(--green)' : 'var(--amber)'}">
+          <div class="confirm-icon">${isApproved ? '✓' : '✎'}</div>
+          <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px">
+            ${isApproved ? 'Proof approved — thank you!' : 'Changes requested'}
+          </div>
+          <div>${isApproved ? "We'll move forward with production." : "We'll take a look and follow up with an updated proof."}</div>
+        </div>`;
+    }
+
+    async function submitResponse(response, note){
+      try{
+        const res = await fetch(API_BASE + '?token=' + encodeURIComponent(token), {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({response, note}),
+        });
+        if(!res.ok) throw new Error();
+        showConfirmation(response);
+      }catch(e){
+        alert("That didn't go through — check your connection and try again.");
+      }
+    }
+
+    function renderProof(data){
+      if(data.response){
+        // Already responded — show that instead of the action buttons,
+        // so reopening the same link doesn't invite a second, conflicting
+        // response.
+        const isApproved = data.response === 'approved';
+        card.innerHTML = `
+          <div class="job-label">${data.jobLabel}</div>
+          <span class="already-badge ${isApproved ? 'already-approved' : 'already-changes'}">
+            ${isApproved ? '✓ You approved this proof' : '✎ You requested changes'}
+          </span>
+          ${data.responseNote ? `<div style="font-size:13px;color:var(--muted);margin-bottom:14px">Your note: "${data.responseNote}"</div>` : ''}
+          <iframe src="${data.proofEmbedUrl}"></iframe>
+          <a class="newtab-link" href="${data.proofEmbedUrl.replace('/preview','/view')}" target="_blank" rel="noopener">Open in a new tab ↗</a>
+        `;
+        return;
+      }
+
+      card.innerHTML = `
+        <div class="job-label">${data.jobLabel}</div>
+        <iframe src="${data.proofEmbedUrl}"></iframe>
+        <a class="newtab-link" href="${data.proofEmbedUrl.replace('/preview','/view')}" target="_blank" rel="noopener">Open in a new tab ↗</a>
+        <div class="actions">
+          <button class="btn-approve" id="approveBtn">✓ Approve</button>
+          <button class="btn-changes" id="changesBtn">✎ Request Changes</button>
+        </div>
+        <div id="changesForm">
+          <textarea id="changesNote" placeholder="What would you like changed?"></textarea>
+          <div class="actions">
+            <button class="btn-ghost" id="cancelChangesBtn">Cancel</button>
+            <button class="btn-primary" id="submitChangesBtn">Submit</button>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('approveBtn').onclick = () => {
+        if(confirm('Approve this proof? This lets Inkable move forward with production.')){
+          submitResponse('approved', '');
+        }
+      };
+      document.getElementById('changesBtn').onclick = () => {
+        document.getElementById('changesForm').style.display = 'block';
+      };
+      document.getElementById('cancelChangesBtn').onclick = () => {
+        document.getElementById('changesForm').style.display = 'none';
+      };
+      document.getElementById('submitChangesBtn').onclick = () => {
+        const note = document.getElementById('changesNote').value.trim();
+        if(!note){ alert('Add a quick note about what should change.'); return; }
+        submitResponse('changes', note);
+      };
+    }
+
+    async function load(){
+      if(!token){ showError("This link is missing something — check that you copied the whole URL."); return; }
+      try{
+        const res = await fetch(API_BASE + '?token=' + encodeURIComponent(token));
+        const data = await res.json();
+        if(!res.ok){ showError(data.error || "This link isn't working right now."); return; }
+        renderProof(data);
+      }catch(e){
+        showError("Couldn't load your proof — check your connection and try again.");
+      }
+    }
+
+    load();
+  </script>
+</body>
+</html>
