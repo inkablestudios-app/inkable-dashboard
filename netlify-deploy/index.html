@@ -479,7 +479,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 <div class="topbar">
   <div class="topbar-brand">
     <div class="topbar-logo"><span>Inkable</span> Studios</div>
-    <div class="topbar-version">Dashboard v2.27</div>
+    <div class="topbar-version">Dashboard v2.30</div>
     <div class="topbar-version" id="syncStatusIndicator" style="margin-left:8px">☁ …</div>
   </div>
   <div class="topbar-right">
@@ -997,6 +997,16 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
         <div class="report-card" style="grid-column:span 2;border-left:3px solid var(--purple)">
           <h3>Leads by Source <span style="font-weight:400;text-transform:none;color:var(--muted);font-size:9px">(all clients, not period-based)</span></h3>
           <div id="reports-lead-sources" style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:8px"></div>
+        </div>
+
+        <div class="report-card" style="grid-column:span 2;border-left:3px solid var(--blue)">
+          <h3>Top Clients <span style="font-weight:400;text-transform:none;color:var(--muted);font-size:9px">(by revenue collected this period)</span></h3>
+          <div id="reports-top-clients" style="margin-top:8px"></div>
+        </div>
+
+        <div class="report-card" style="grid-column:span 2;border-left:3px solid var(--green)">
+          <h3>Revenue by Lead Source <span style="font-weight:400;text-transform:none;color:var(--muted);font-size:9px">(collected this period)</span></h3>
+          <div id="reports-revenue-by-source" style="margin-top:8px"></div>
         </div>
 
         <div class="report-card" style="grid-column:span 2">
@@ -1633,7 +1643,6 @@ function renderSales(){
     const status=getPaymentStatus(p.id,total);
     const badgeClass=status==='paid'?'pay-paid':status==='partial'?'pay-partial':'pay-unpaid';
     const badgeLabel=status==='paid'?'Paid':status==='partial'?'Partial':'Unpaid';
-    const extraExpenses=getTotalExpenses(p.id);
     const excluded=getJobMeta(p.id).excluded;
     const fin=getJobFinancials(p);
     const marginPct=fin.taxable>0?(fin.profit/fin.taxable*100):0;
@@ -1643,12 +1652,11 @@ function renderSales(){
         <div style="font-weight:700;font-size:13px;color:var(--text)">${clientName}${excluded?' <span style="background:var(--muted2);color:var(--dark);font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;letter-spacing:0.03em;vertical-align:middle">EXCLUDED</span>':''}</div>
         <div style="font-size:11px;font-family:'DM Mono',monospace;color:var(--muted)">${p.estNo||'—'}</div>
         <div style="font-size:11px;color:var(--muted);margin-top:2px">${p.name||''}</div>
-        ${extraExpenses!==0?`<div onclick="event.stopPropagation();openExpenseListModal('${p.id}')" style="font-size:10.5px;color:${extraExpenses>0?'var(--amber)':'var(--green)'};margin-top:3px;cursor:pointer;text-decoration:underline;text-underline-offset:2px" title="View or edit expenses">${extraExpenses>0?'+ $'+extraExpenses.toFixed(2)+' in extra expenses':'- $'+Math.abs(extraExpenses).toFixed(2)+' net credit'}</div>`:''}
       </div>
       <div class="amount">$${total.toFixed(2)}</div>
       <div class="amount" style="color:var(--green)">$${paid.toFixed(2)}</div>
       <div class="amount" style="color:${balance>0?'var(--red)':'var(--muted)'}">$${balance.toFixed(2)}</div>
-      <div class="amount" style="color:${fin.profit>=0?'var(--green)':'var(--red)'}" title="Cost: \$${fin.cost.total.toFixed(2)}${extraExpenses!==0?' (incl. \$'+Math.abs(extraExpenses).toFixed(2)+(extraExpenses>0?' extra':' credit')+')':''}">$${fin.profit.toFixed(2)}<div style="font-size:9.5px;color:var(--muted);font-weight:400">${marginPct.toFixed(0)}%</div></div>
+      <div class="amount" onclick="event.stopPropagation();openExpenseListModal('${p.id}')" style="color:${fin.profit>=0?'var(--green)':'var(--red)'};cursor:pointer" title="Cost: $${fin.cost.total.toFixed(2)} — click to view or edit the breakdown">$${fin.profit.toFixed(2)}<div style="font-size:9.5px;color:var(--muted);font-weight:400;text-decoration:underline;text-underline-offset:2px">${marginPct.toFixed(0)}% · Cost $${fin.cost.total.toFixed(2)}</div></div>
       <div><span class="pay-badge ${badgeClass}">${badgeLabel}</span></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
         <button class="pay-record-btn" onclick="openPaymentModal('${p.id}')">+ Payment</button>
@@ -2098,14 +2106,15 @@ function renderExpensesList(jobId,targetId){
   if(!listEl)return;
   const entries=getExpenses(jobId);
   if(!entries.length){
-    listEl.innerHTML='<div style="font-size:11px;color:var(--muted2);padding:4px 0">No extra expenses recorded for this job.</div>';
+    listEl.innerHTML='<div style="font-size:11px;color:var(--muted2);padding:4px 0">No expenses recorded for this job.</div>';
     return;
   }
   listEl.innerHTML=entries.map(entry=>{
     const isCredit=entry.amount<0;
+    const fromPricer=entry.source==='pricer';
     return `<div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:8px">
     <div style="flex:1">
-      <div style="font-size:11.5px;color:var(--text)">${entry.description}${isCredit?' <span style="color:var(--green);font-size:9.5px">(credit)</span>':''}</div>
+      <div style="font-size:11.5px;color:var(--text)">${entry.description}${isCredit?' <span style="color:var(--green);font-size:9.5px">(credit)</span>':''}${fromPricer?' <span style="color:var(--muted2);font-size:9.5px">(from pricer)</span>':''}</div>
       <div style="font-size:10px;color:var(--muted)">${entry.date}</div>
     </div>
     <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
@@ -2343,6 +2352,9 @@ function renderReports(){
   s('r-done',done.length);
   s('r-est-inv',estimates+' / '+invoices);
   renderLeadSourceBreakdown(clients);
+  const periodRange=getPeriodRange(currentReportsPeriod,reportsPeriodOffset);
+  renderTopClients(periodRange);
+  renderRevenueByLeadSource(periodRange);
 }
 
 function renderLeadSourceBreakdown(clients){
@@ -2370,45 +2382,88 @@ function renderLeadSourceBreakdown(clients){
     </div>`:'');
 }
 
+function renderTopClients(range){
+  const el=document.getElementById('reports-top-clients');
+  if(!el)return;
+  const top=computeTopClientsByRevenue(range,5);
+  if(!top.length){
+    el.innerHTML='<div style="font-size:12px;color:var(--muted2)">No revenue collected in this period yet.</div>';
+    return;
+  }
+  const maxRevenue=top[0].revenue;
+  el.innerHTML=top.map((c,i)=>`
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <div style="font-size:11px;color:var(--muted2);width:14px;flex-shrink:0">${i+1}</div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
+          <span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.name}</span>
+          <span style="color:var(--green);font-weight:700;flex-shrink:0;margin-left:8px">$${c.revenue.toFixed(2)}</span>
+        </div>
+        <div style="background:var(--dark);border-radius:3px;height:5px;overflow:hidden">
+          <div style="background:var(--blue);height:100%;width:${maxRevenue>0?(c.revenue/maxRevenue*100):0}%"></div>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function renderRevenueByLeadSource(range){
+  const el=document.getElementById('reports-revenue-by-source');
+  if(!el)return;
+  const bySource=computeRevenueByLeadSource(range);
+  if(!bySource.length){
+    el.innerHTML='<div style="font-size:12px;color:var(--muted2)">No revenue collected in this period yet.</div>';
+    return;
+  }
+  const maxRevenue=bySource[0][1];
+  el.innerHTML=bySource.map(([key,revenue])=>`
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <div style="width:110px;flex-shrink:0;font-size:12px;color:var(--text)">${key?LEAD_SOURCE_LABELS[key]||key:'Not set'}</div>
+      <div style="flex:1;min-width:0">
+        <div style="background:var(--dark);border-radius:3px;height:14px;overflow:hidden">
+          <div style="background:var(--green);height:100%;width:${maxRevenue>0?(revenue/maxRevenue*100):0}%"></div>
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--green);font-weight:700;flex-shrink:0;width:70px;text-align:right">$${revenue.toFixed(2)}</div>
+    </div>`).join('');
+}
+
 // ── Full financial picture for one job — revenue AND cost, for Reports.
 // Revenue side reuses the exact same math the invoice/estimate PDFs use.
 // Cost side mirrors the pricer's live Margin panel (myCost rates), applied
 // to saved data instead of the live DOM.
 function getJobFinancials(p){
-  const extra=getTotalExpenses(p.id);
+  // Cost is now simply the sum of this job's expenses — both the pricer-
+  // seeded ones (Materials, Design, Install, Setup, Hardware, tagged by
+  // category so Reports can still break them down) and anything added by
+  // hand. Nothing here is computed fresh from pricerData anymore; once an
+  // expense is seeded, it's a regular, independent, editable entry, and a
+  // later pricer edit never silently overwrites a correction you made.
+  const expenses=getExpenses(p.id);
+  const byCategory=(cat)=>expenses.filter(e=>e.category===cat).reduce((s,e)=>s+e.amount,0);
+  const materials=byCategory('materials');
+  const design=byCategory('design');
+  const install=byCategory('install');
+  const setup=byCategory('setup');
+  const hardware=byCategory('hardware');
+  // Anything without a pricer category — manually added, extra expenses.
+  const extra=expenses.filter(e=>!e.category).reduce((s,e)=>s+e.amount,0);
+  const totalCost=materials+design+install+setup+hardware+extra;
+
   const empty={revenue:0,taxable:0,tax:0,paid:0,balance:0,
-    cost:{materials:0,design:0,install:0,setup:0,hardware:0,extra,total:extra},profit:-extra};
+    cost:{materials,design,install,setup,hardware,extra,total:totalCost},profit:-totalCost};
   const f=p.state?.form;
   if(!f||!f.pricerData)return empty;
 
-  let pd;
-  try{ pd=JSON.parse(f.pricerData); }catch(e){ return empty; }
-  const rates=getRates(), vinyl=getVinyl(), laminate=getLaminate(), substrate=getSubstrate();
-
-  const d=gatherPricerPDFDataFromSaved(p); // revenue side: taxable/tax/total
-
-  let rawMat=0, designHrs=0, installCostBasisTotal=0;
-  (pd.lines||[]).forEach(l=>{
-    const calc=calcSavedLine(l,pd.jobType,rates,vinyl,laminate,substrate);
-    rawMat+=calc.rawMatCost;
-    designHrs+=calc.designHrsTotal;
-    installCostBasisTotal+=calc.installCostBasis;
-  });
-  const setupHrs=(parseFloat(pd.setupHrs)||0)+(parseFloat(pd.setupMins)||0)/60;
-  const designCost=designHrs*rates.myCostDesign;
-  const installCost=installCostBasisTotal;
-  const setupCost=setupHrs*rates.myCostSetup;
-  const hardwareCost=(parseFloat(pd.hardwareCost)||0)+(parseFloat(pd.subsCost)||0);
-  // Extra expenses — real costs recorded after the fact (production
-  // drift), separate from anything the original pricing estimated.
-  const totalCost=rawMat+designCost+installCost+setupCost+hardwareCost+extra;
+  const d=gatherPricerPDFDataFromSaved(p); // revenue side: taxable/tax/total — entirely separate
+  // from cost, and always reflects exactly what the client was quoted,
+  // regardless of anything happening on the cost side above.
 
   const paid=getAmountPaid(p.id);
   const balance=Math.max(0,d.total-paid);
 
   return{
     revenue:d.total,taxable:d.taxable,tax:d.tax,paid,balance,
-    cost:{materials:rawMat,design:designCost,install:installCost,setup:setupCost,hardware:hardwareCost,extra,total:totalCost},
+    cost:{materials,design,install,setup,hardware,extra,total:totalCost},
     profit:d.taxable-totalCost, // pre-tax revenue minus what the job actually cost you
   };
 }
@@ -2533,6 +2588,50 @@ function computeReportsDataForRange(range){
     netProfit:(revenueCollected-taxCollected)-expenses.total,
     outstandingBalance,unpaidCount,unpaidTotal,partialCount,paidCount,
   };
+}
+
+// Top clients and revenue-by-lead-source both attribute PAYMENTS (not
+// invoiced totals) to whichever client owns each project, within the
+// given range — matching how the rest of Reports recognizes revenue by
+// when it was actually collected, not when the job was priced. Excluded
+// jobs are skipped, same as everywhere else in Reports.
+function computeTopClientsByRevenue(range,limit){
+  const projects=getProjects();
+  const clients=getClients();
+  const byClient={};
+  projects.forEach(p=>{
+    if(getJobMeta(p.id).excluded)return;
+    getPayments(p.id).forEach(pmt=>{
+      if(dateInRange(pmt.date,range)){
+        const key=p.clientId||'—';
+        byClient[key]=(byClient[key]||0)+pmt.amount;
+      }
+    });
+  });
+  return Object.entries(byClient)
+    .map(([clientId,revenue])=>({
+      name:clients.find(c=>c.id===clientId)?.name||'Unknown Client',
+      revenue,
+    }))
+    .sort((a,b)=>b.revenue-a.revenue)
+    .slice(0,limit||5);
+}
+
+function computeRevenueByLeadSource(range){
+  const projects=getProjects();
+  const clients=getClients();
+  const bySource={};
+  projects.forEach(p=>{
+    if(getJobMeta(p.id).excluded)return;
+    getPayments(p.id).forEach(pmt=>{
+      if(dateInRange(pmt.date,range)){
+        const cl=clients.find(c=>c.id===p.clientId);
+        const source=cl?.leadSource||'';
+        bySource[source]=(bySource[source]||0)+pmt.amount;
+      }
+    });
+  });
+  return Object.entries(bySource).sort((a,b)=>b[1]-a[1]);
 }
 function computeReportsData(period,offset){
   return computeReportsDataForRange(getPeriodRange(period,offset));
@@ -4820,11 +4919,76 @@ function savePricerProject(){
     // editing the pricing shouldn't silently wipe out what was already sent.
     exportedPdfs:existing>=0?(list[existing].exportedPdfs||{}):{}};
 
+  // A compact, display-ready snapshot of the estimate — used by the public
+  // client review page, which has no access to the rates/materials tables
+  // needed to recompute pricing itself. Mirrors exactly what the real
+  // Estimate PDF shows (same field, same numbers), so the two can never
+  // drift apart or disagree.
+  try{
+    const d=gatherPricerPDFDataFromSaved(entry);
+    entry.state.form.estimateSummary={
+      lineItems:d.lineData.map(l=>({desc:l.desc,sqft:l.sqft,matTotal:l.matTotal})),
+      setupTotal:d.setupTotal,designTotal:d.designTotal,totalInstall:d.totalInstall,
+      hardwareTotal:d.hardwareTotal,disc:d.disc,dtype:d.dtype,dval:d.dval,
+      sub:d.sub,taxable:d.taxable,tax:d.tax,total:d.total,taxExempt:d.taxExempt,
+    };
+  }catch(err){
+    console.warn('Could not build the client-facing estimate summary for this job:',err);
+  }
+
   const rawList=JSON.parse(localStorage.getItem(SAVED_KEY)||'[]');
   if(existing>=0){rawList[existing]=entry;}
   else{rawList.unshift(entry);}
   localStorage.setItem(SAVED_KEY,JSON.stringify(rawList));
   syncProjectToServer(entry);
+
+  // Seed the pricer's cost breakdown as real, editable expense entries —
+  // but only the FIRST time this job is saved. Once seeded, each one is
+  // fully independent (editable, deletable, just like a manually-added
+  // expense), so a later pricer edit never silently overwrites a real
+  // correction you've already made to one of these numbers.
+  const existingMeta=getJobMeta(id);
+  const alreadySeeded=(existingMeta.expenses||[]).some(e=>e.source==='pricer');
+  if(!alreadySeeded){
+    try{
+      const pd=JSON.parse(state.form.pricerData);
+      const rates=getRates(), vinyl=getVinyl(), laminate=getLaminate(), substrate=getSubstrate();
+      let rawMat=0, designHrs=0, installCostBasisTotal=0;
+      (pd.lines||[]).forEach(l=>{
+        const calc=calcSavedLine(l,pd.jobType,rates,vinyl,laminate,substrate);
+        rawMat+=calc.rawMatCost;
+        designHrs+=calc.designHrsTotal;
+        installCostBasisTotal+=calc.installCostBasis;
+      });
+      const setupHrs=(parseFloat(pd.setupHrs)||0)+(parseFloat(pd.setupMins)||0)/60;
+      const designCost=designHrs*rates.myCostDesign;
+      const setupCost=setupHrs*rates.myCostSetup;
+      const hardwareCost=(parseFloat(pd.hardwareCost)||0)+(parseFloat(pd.subsCost)||0);
+
+      const seedDate=new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+      const seeds=[];
+      const addSeed=(desc,amount,category)=>{
+        if(amount>0.005){
+          seeds.push({
+            id:'exp_'+Date.now()+'_'+Math.floor(Math.random()*100000)+'_'+seeds.length,
+            description:desc,amount:Math.round(amount*100)/100,date:seedDate,
+            source:'pricer',category,
+          });
+        }
+      };
+      addSeed('Materials',rawMat,'materials');
+      addSeed('Design Labor',designCost,'design');
+      addSeed('Install Labor',installCostBasisTotal,'install');
+      addSeed('Setup',setupCost,'setup');
+      addSeed('Hardware',hardwareCost,'hardware');
+
+      if(seeds.length){
+        setJobMeta(id,{...existingMeta,expenses:[...(existingMeta.expenses||[]),...seeds]});
+      }
+    }catch(err){
+      console.warn('Could not seed cost breakdown for this job:',err);
+    }
+  }
 
   // Flash save button
   const btn=document.getElementById('pricerSaveBtn');
