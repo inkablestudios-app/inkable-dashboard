@@ -18,10 +18,13 @@ export default async (req) => {
   try {
     if (req.method === "GET") {
       const rows = await db.sql`
-        SELECT ps.*, p.name AS job_name, p.est_no, jm.proof_link, jm.status
+        SELECT ps.*, p.name AS job_name, p.est_no, p.state, p.saved_at, p.client_id,
+               jm.proof_link, jm.status, jm.install_date,
+               c.name AS client_name
         FROM proof_shares ps
         JOIN projects p ON p.id = ps.project_id
         LEFT JOIN job_meta jm ON jm.project_id = ps.project_id
+        LEFT JOIN clients c ON c.id = p.client_id
         WHERE ps.token = ${token}
       `;
       if (!rows.length) return Response.json({ error: "This link isn't valid — it may have been removed." }, { status: 404 });
@@ -42,11 +45,25 @@ export default async (req) => {
         return Response.json({ error: "No proof has been uploaded for this job yet." }, { status: 404 });
       }
 
+      // state may come back as a JSON string or an already-parsed object
+      // depending on the driver — handle both rather than assume.
+      let state = r.state;
+      if (typeof state === "string") {
+        try { state = JSON.parse(state); } catch { state = {}; }
+      }
+      const estimateSummary = state?.form?.estimateSummary || null;
+
       return Response.json({
-        jobLabel: r.est_no || r.job_name || "your job",
+        jobName: state?.form?.jobName || r.job_name || "Your job",
+        estNo: r.est_no || "",
+        clientName: r.client_name || "",
+        status: r.status || "send",
+        requestedDate: r.saved_at || "",
+        installDate: r.install_date || "",
         proofEmbedUrl: getDriveEmbedUrl(r.proof_link),
         response: r.response,
         responseNote: r.response_note,
+        estimateSummary,
       });
     }
 
