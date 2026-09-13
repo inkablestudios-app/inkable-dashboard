@@ -26,14 +26,27 @@ export default async (req) => {
     }
 
     if (req.method === "POST") {
-      const { projectId } = await req.json();
+      const { projectId, resetResponse } = await req.json();
       if (!projectId) return Response.json({ error: "projectId is required" }, { status: 400 });
 
       // Idempotent — "same link always works" means re-clicking "Get
       // Client Link" on a job that already has one just hands back the
       // existing token instead of minting a second, orphaned one.
       const existing = await db.sql`SELECT token FROM proof_shares WHERE project_id = ${projectId}`;
-      if (existing.length) return Response.json({ token: existing[0].token });
+      if (existing.length) {
+        // resetResponse is explicit and opt-in — set specifically when a
+        // proof gets replaced after changes were requested, so the client
+        // sees fresh Approve/Request Changes options for the NEW version
+        // instead of their old response blocking anything. A plain
+        // re-fetch of the link (just to copy it again) never touches this.
+        if (resetResponse) {
+          await db.sql`
+            UPDATE proof_shares SET response = NULL, response_note = '', response_at = NULL
+            WHERE project_id = ${projectId}
+          `;
+        }
+        return Response.json({ token: existing[0].token });
+      }
 
       const token = crypto.randomBytes(24).toString("base64url");
       await db.sql`INSERT INTO proof_shares (token, project_id) VALUES (${token}, ${projectId})`;
