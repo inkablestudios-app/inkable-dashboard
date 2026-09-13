@@ -33,7 +33,7 @@ button,.action-btn,.menu-item,.filter-pill,.pay-record-btn,.jt-btn,.li-lv-btn,.l
   --panel:#161616;--border:#222;--text:#e8e8e8;--muted:#666;--muted2:#444;
   --green:#22c55e;--amber:#f59e0b;--red:#ef4444;--purple:#a855f7;
   --status-send:#3b82f6;--status-art:#f59e0b;--status-prep:#8b5cf6;
-  --status-proof:#06b6d4;--status-approved:#10b981;--status-prod:#f97316;--status-done:#6b7280;--status-revision:#ec4899;
+  --status-proof:#06b6d4;--status-approved:#10b981;--status-prod:#f97316;--status-done:#6b7280;--status-revision:#ec4899;--status-awaiting:#eab308;
 }
 body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);height:100vh;overflow:hidden;display:flex;flex-direction:column}
 #appShell{flex-direction:column;flex:1;min-height:0}
@@ -327,6 +327,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 .s-prep{background:#4c1d9522;color:var(--status-prep)}.s-prep::before{background:var(--status-prep)}
 .s-proof{background:#0e7490 22;color:var(--status-proof)}.s-proof::before{background:var(--status-proof)}
 .s-revision{background:#83185522;color:var(--status-revision)}.s-revision::before{background:var(--status-revision)}
+.s-awaiting{background:#5b4b0822;color:var(--status-awaiting)}.s-awaiting::before{background:var(--status-awaiting)}
 .s-approved{background:#06472522;color:var(--status-approved)}.s-approved::before{background:var(--status-approved)}
 .s-prod{background:#7c2d1222;color:var(--status-prod)}.s-prod::before{background:var(--status-prod)}
 .s-done{background:#ffffff08;color:var(--status-done)}.s-done::before{background:var(--status-done)}
@@ -350,8 +351,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 /* ── SALES TAB ── */
 .sales-section{padding:20px 28px}
 .sales-section h3{font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px}
-.sales-row{display:grid;grid-template-columns:1fr 90px 90px 90px 90px 150px;gap:10px;align-items:center;padding:10px 14px;background:var(--panel);border:1px solid var(--border);border-radius:8px;margin-bottom:6px;font-size:13px}
-.sales-row-header{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted2);padding:0 14px 8px;display:grid;grid-template-columns:1fr 90px 90px 90px 90px 150px;gap:10px}
+.sales-row{display:grid;grid-template-columns:1fr 90px 90px 90px 90px 90px 150px;gap:10px;align-items:center;padding:10px 14px;background:var(--panel);border:1px solid var(--border);border-radius:8px;margin-bottom:6px;font-size:13px}
+.sales-row-header{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted2);padding:0 14px 8px;display:grid;grid-template-columns:1fr 90px 90px 90px 90px 90px 150px;gap:10px}
 .pay-badge{font-size:9.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:3px 8px;border-radius:20px;display:inline-block}
 .pay-unpaid{background:#ef444422;color:var(--red)}
 .pay-partial{background:#f59e0b22;color:var(--amber)}
@@ -478,7 +479,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 <div class="topbar">
   <div class="topbar-brand">
     <div class="topbar-logo"><span>Inkable</span> Studios</div>
-    <div class="topbar-version">Dashboard v2.25</div>
+    <div class="topbar-version">Dashboard v2.27</div>
     <div class="topbar-version" id="syncStatusIndicator" style="margin-left:8px">☁ …</div>
   </div>
   <div class="topbar-right">
@@ -556,6 +557,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
           <button class="filter-pill" data-status="art" onclick="setStatusFilter('art',this)">Awaiting Artwork</button>
           <button class="filter-pill" data-status="prep" onclick="setStatusFilter('prep',this)">Prepare Proof</button>
           <button class="filter-pill" data-status="proof" onclick="setStatusFilter('proof',this)">Send Proof</button>
+          <button class="filter-pill" data-status="awaiting" onclick="setStatusFilter('awaiting',this)">Awaiting Proof Approval</button>
           <button class="filter-pill" data-status="revision" onclick="setStatusFilter('revision',this)">In Design Revision</button>
           <button class="filter-pill" data-status="approved" onclick="setStatusFilter('approved',this)">Proof Approved</button>
           <button class="filter-pill" data-status="prod" onclick="setStatusFilter('prod',this)">In Production</button>
@@ -592,6 +594,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
           <div>Total</div>
           <div>Paid</div>
           <div>Balance</div>
+          <div>Margin</div>
           <div>Status</div>
           <div>Actions</div>
         </div>
@@ -665,11 +668,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
           <div id="expRunningTotal" style="font-size:11px;color:var(--amber);margin-bottom:14px">Current extra expenses on this job: $0.00</div>
           <div class="jdc-field" style="margin-bottom:10px">
             <label>Description</label>
-            <input type="text" id="expDescription" placeholder="e.g. Extra vinyl roll"/>
+            <input type="text" id="expDescription" autocomplete="off" placeholder="e.g. Extra vinyl roll"/>
           </div>
           <div class="jdc-field" style="margin-bottom:10px">
             <label>Amount <span style="font-weight:400;text-transform:none;color:var(--muted)">(negative for a credit or correction)</span></label>
-            <input type="number" id="expAmount" step="0.01" placeholder="0.00"/>
+            <input type="number" id="expAmount" autocomplete="off" step="0.01" placeholder="0.00"/>
           </div>
           <div class="jdc-field" style="margin-bottom:16px">
             <label>Date</label>
@@ -1021,6 +1024,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
           <option value="art">Awaiting Artwork</option>
           <option value="prep">Prepare Proof</option>
           <option value="proof">Send Proof</option>
+          <option value="awaiting">Awaiting Proof Approval</option>
           <option value="revision">In Design Revision</option>
           <option value="approved">Proof Approved</option>
           <option value="prod">In Production</option>
@@ -1168,11 +1172,11 @@ const META_KEY = 'inkable_job_meta'; // dashboard-only metadata
 
 const STATUS_LABELS = {
   send: 'Send Estimate', art: 'Awaiting Artwork', prep: 'Prepare Proof',
-  proof: 'Send Proof', revision: 'In Design Revision', approved: 'Proof Approved', prod: 'In Production', done: 'Done'
+  proof: 'Send Proof', awaiting: 'Awaiting Proof Approval', revision: 'In Design Revision', approved: 'Proof Approved', prod: 'In Production', done: 'Done'
 };
 const STATUS_CLASS = {
   send:'s-send', art:'s-art', prep:'s-prep',
-  proof:'s-proof', revision:'s-revision', approved:'s-approved', prod:'s-prod', done:'s-done'
+  proof:'s-proof', awaiting:'s-awaiting', revision:'s-revision', approved:'s-approved', prod:'s-prod', done:'s-done'
 };
 
 let currentFilter = 'all';
@@ -1631,6 +1635,8 @@ function renderSales(){
     const badgeLabel=status==='paid'?'Paid':status==='partial'?'Partial':'Unpaid';
     const extraExpenses=getTotalExpenses(p.id);
     const excluded=getJobMeta(p.id).excluded;
+    const fin=getJobFinancials(p);
+    const marginPct=fin.taxable>0?(fin.profit/fin.taxable*100):0;
 
     return `<div class="sales-row" style="${excluded?'opacity:0.5':''}">
       <div>
@@ -1642,6 +1648,7 @@ function renderSales(){
       <div class="amount">$${total.toFixed(2)}</div>
       <div class="amount" style="color:var(--green)">$${paid.toFixed(2)}</div>
       <div class="amount" style="color:${balance>0?'var(--red)':'var(--muted)'}">$${balance.toFixed(2)}</div>
+      <div class="amount" style="color:${fin.profit>=0?'var(--green)':'var(--red)'}" title="Cost: \$${fin.cost.total.toFixed(2)}${extraExpenses!==0?' (incl. \$'+Math.abs(extraExpenses).toFixed(2)+(extraExpenses>0?' extra':' credit')+')':''}">$${fin.profit.toFixed(2)}<div style="font-size:9.5px;color:var(--muted);font-weight:400">${marginPct.toFixed(0)}%</div></div>
       <div><span class="pay-badge ${badgeClass}">${badgeLabel}</span></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
         <button class="pay-record-btn" onclick="openPaymentModal('${p.id}')">+ Payment</button>
@@ -3275,12 +3282,33 @@ function handleProofFileSelected(jobId,inputEl){
   if(!file)return;
   const statusEl=document.getElementById('proofUploadStatus');
   if(statusEl){ statusEl.textContent='Uploading…'; statusEl.style.color='var(--muted)'; }
-  uploadProofFile(jobId,file).then(({link})=>{
+  uploadProofFile(jobId,file).then(async ({link})=>{
     const meta=getJobMeta(jobId);
     setJobMeta(jobId,{...meta,proofLink:link});
     if(statusEl){ statusEl.textContent='Uploaded ✓'; statusEl.style.color='var(--green)'; }
     renderProofSection(jobId);
     renderProjects();
+
+    // If a client link already exists, this is a resend after changes —
+    // not a first upload — so the job goes back to "waiting on them,"
+    // and their old response gets cleared so the page shows fresh
+    // Approve/Request Changes options for the updated proof.
+    try{
+      const token=localStorage.getItem(AUTH_TOKEN_KEY);
+      const headers={'Content-Type':'application/json'};
+      if(token)headers['Authorization']='Bearer '+token;
+      const checkRes=await fetch(CLOUD_API_BASE+'/proof-share?projectId='+encodeURIComponent(jobId),{headers});
+      if(checkRes.ok){
+        const shareData=await checkRes.json();
+        if(shareData.exists){
+          await fetch(CLOUD_API_BASE+'/proof-share',{method:'POST',headers,body:JSON.stringify({projectId:jobId,resetResponse:true})});
+          markJobAwaitingApproval(jobId);
+          if(document.getElementById('clientLinkSection-'+jobId))loadClientLinkStatus(jobId);
+        }
+      }
+    }catch(err){
+      console.warn('Could not check for an existing client link after replacing the proof:',err);
+    }
   }).catch(err=>{
     console.error('Proof upload error:',err);
     if(statusEl){ statusEl.textContent='Upload failed: '+err.message; statusEl.style.color='var(--red)'; }
@@ -3337,6 +3365,24 @@ async function loadClientLinkStatus(jobId){
     if(!res.ok)throw new Error('Server returned '+res.status);
     const data=await res.json();
     renderClientLinkSection(jobId,data.exists?data:null);
+
+    // The client's response is authoritative for the job's STATUS too —
+    // but that status change happened server-side, from a page this
+    // device never touched, so the local cache has no way to already
+    // know about it. Reconcile it here, the same moment we're already
+    // fetching this job's share status anyway, rather than waiting on
+    // the next full login to notice.
+    if(data.exists&&data.response){
+      const expectedStatus=data.response==='approved'?'approved':'revision';
+      const meta=getJobMeta(jobId);
+      if(meta.status!==expectedStatus){
+        setJobMeta(jobId,{...meta,status:expectedStatus});
+        const statusSelect=document.getElementById('modal-status');
+        if(statusSelect&&currentJobId===jobId)statusSelect.value=expectedStatus;
+        renderProjects();
+        renderSales();
+      }
+    }
   }catch(err){
     console.warn('Could not check client link status:',err);
     container.innerHTML=`<button class="btn btn-primary" style="font-size:11px;padding:6px 12px" onclick="getOrCreateClientLink('${jobId}')">🔗 Get Client Link</button>`;
@@ -3377,11 +3423,30 @@ async function getOrCreateClientLink(jobId){
     if(token)headers['Authorization']='Bearer '+token;
     const res=await fetch(CLOUD_API_BASE+'/proof-share',{method:'POST',headers,body:JSON.stringify({projectId:jobId})});
     if(!res.ok)throw new Error('Server returned '+res.status);
+    // Generating the link for the first time means it's on its way to the
+    // client — there's a real, distinct gap between "I've prepared this"
+    // and "the client is actually looking at it," and the status should
+    // say so rather than just sitting on "Send Proof" indefinitely.
+    markJobAwaitingApproval(jobId);
     await loadClientLinkStatus(jobId);
   }catch(err){
     console.error('Could not create client link:',err);
     if(container)container.innerHTML=`<div style="font-size:10.5px;color:var(--red)">Couldn't create the link — check your connection and try again.</div><button class="btn btn-primary" style="font-size:11px;padding:6px 12px;margin-top:6px" onclick="getOrCreateClientLink('${jobId}')">Try Again</button>`;
   }
+}
+// Shared by both "just generated a link for the first time" and "just
+// replaced the proof after changes were requested" — either way, once the
+// client's copy is current, the job is waiting on THEM, not on you. Never
+// downgrades an already-approved job just because the link got touched
+// again for some other reason (like re-copying it).
+function markJobAwaitingApproval(jobId){
+  const meta=getJobMeta(jobId);
+  if(meta.status==='approved')return;
+  setJobMeta(jobId,{...meta,status:'awaiting'});
+  renderProjects();
+  renderSales();
+  const statusSelect=document.getElementById('modal-status');
+  if(statusSelect&&currentJobId===jobId)statusSelect.value='awaiting';
 }
 
 function closeSettings(){
@@ -4924,14 +4989,15 @@ function printProjectsList(){
 function printSalesList(){
   const projects=getProjects();
   const clients=getClients();
-  let totalAll=0,paidAll=0,balAll=0;
+  let totalAll=0,paidAll=0,balAll=0,marginAll=0;
   const rows=projects.map(p=>{
     const cl=clients.find(c=>c.id===p.clientId);
     const clientName=cl?cl.name:(p.state?.form?.billingName||'—');
     const total=getProjectAmount(p);
     const paid=getAmountPaid(p.id);
     const balance=Math.max(0,total-paid);
-    totalAll+=total;paidAll+=paid;balAll+=balance;
+    const fin=getJobFinancials(p);
+    totalAll+=total;paidAll+=paid;balAll+=balance;marginAll+=fin.profit;
     const status=getPaymentStatus(p.id,total);
     const statusLabel=status==='paid'?'Paid':status==='partial'?'Partial':'Unpaid';
     return `<tr>
@@ -4940,16 +5006,18 @@ function printSalesList(){
       <td class="num">$${total.toFixed(2)}</td>
       <td class="num">$${paid.toFixed(2)}</td>
       <td class="num">$${balance.toFixed(2)}</td>
+      <td class="num">$${fin.profit.toFixed(2)}</td>
       <td>${statusLabel}</td>
     </tr>`;
   }).join('');
   const body=`<table><thead><tr>
-    <th>Client</th><th>Job #</th><th class="num">Total</th><th class="num">Paid</th><th class="num">Balance</th><th>Status</th>
-  </tr></thead><tbody>${rows||'<tr><td colspan="6" class="muted">No sales yet.</td></tr>'}</tbody></table>
+    <th>Client</th><th>Job #</th><th class="num">Total</th><th class="num">Paid</th><th class="num">Balance</th><th class="num">Margin</th><th>Status</th>
+  </tr></thead><tbody>${rows||'<tr><td colspan="7" class="muted">No sales yet.</td></tr>'}</tbody></table>
   <div class="summary">
     <div class="summary-row"><span>Total invoiced</span><span>$${totalAll.toFixed(2)}</span></div>
     <div class="summary-row"><span>Total collected</span><span>$${paidAll.toFixed(2)}</span></div>
     <div class="summary-row total"><span>Balance outstanding</span><span>$${balAll.toFixed(2)}</span></div>
+    <div class="summary-row"><span>Total margin</span><span>$${marginAll.toFixed(2)}</span></div>
   </div>`;
   openPrintWindow('Sales — Inkable Studios',projects.length+' job'+(projects.length!==1?'s':''),body);
 }

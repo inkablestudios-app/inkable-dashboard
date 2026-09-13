@@ -118,9 +118,18 @@
         <div class="job-label">${data.jobLabel}</div>
         <iframe src="${data.proofEmbedUrl}"></iframe>
         <a class="newtab-link" href="${data.proofEmbedUrl.replace('/preview','/view')}" target="_blank" rel="noopener">Open in a new tab ↗</a>
-        <div class="actions">
+        <div class="actions" id="mainActions">
           <button class="btn-approve" id="approveBtn">✓ Approve</button>
           <button class="btn-changes" id="changesBtn">✎ Request Changes</button>
+        </div>
+        <div id="approveConfirm" style="display:none">
+          <div style="font-size:13px;color:var(--text);margin-top:14px;text-align:center">
+            Approve this proof? This lets Inkable move forward with production.
+          </div>
+          <div class="actions">
+            <button class="btn-ghost" id="cancelApproveBtn">Cancel</button>
+            <button class="btn-approve" id="confirmApproveBtn">Yes, Approve</button>
+          </div>
         </div>
         <div id="changesForm">
           <textarea id="changesNote" placeholder="What would you like changed?"></textarea>
@@ -132,9 +141,15 @@
       `;
 
       document.getElementById('approveBtn').onclick = () => {
-        if(confirm('Approve this proof? This lets Inkable move forward with production.')){
-          submitResponse('approved', '');
-        }
+        document.getElementById('mainActions').style.display = 'none';
+        document.getElementById('approveConfirm').style.display = 'block';
+      };
+      document.getElementById('cancelApproveBtn').onclick = () => {
+        document.getElementById('approveConfirm').style.display = 'none';
+        document.getElementById('mainActions').style.display = 'flex';
+      };
+      document.getElementById('confirmApproveBtn').onclick = () => {
+        submitResponse('approved', '');
       };
       document.getElementById('changesBtn').onclick = () => {
         document.getElementById('changesForm').style.display = 'block';
