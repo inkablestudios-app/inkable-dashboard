@@ -351,8 +351,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 /* ── SALES TAB ── */
 .sales-section{padding:20px 28px}
 .sales-section h3{font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px}
-.sales-row{display:grid;grid-template-columns:1fr 90px 90px 90px 90px 90px 150px;gap:10px;align-items:center;padding:10px 14px;background:var(--panel);border:1px solid var(--border);border-radius:8px;margin-bottom:6px;font-size:13px}
-.sales-row-header{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted2);padding:0 14px 8px;display:grid;grid-template-columns:1fr 90px 90px 90px 90px 90px 150px;gap:10px}
+.sales-row{display:grid;grid-template-columns:1fr 90px 90px 90px 90px 90px 90px 150px;gap:10px;align-items:center;padding:10px 14px;background:var(--panel);border:1px solid var(--border);border-radius:8px;margin-bottom:6px;font-size:13px}
+.sales-row-header{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted2);padding:0 14px 8px;display:grid;grid-template-columns:1fr 90px 90px 90px 90px 90px 90px 150px;gap:10px}
 .pay-badge{font-size:9.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:3px 8px;border-radius:20px;display:inline-block}
 .pay-unpaid{background:#ef444422;color:var(--red)}
 .pay-partial{background:#f59e0b22;color:var(--amber)}
@@ -392,6 +392,20 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 
 /* ── MODAL (job detail / status change) ── */
 .modal-overlay{position:fixed;inset:0;background:#000000cc;z-index:500;display:none;align-items:center;justify-content:center}
+.toast-container{position:fixed;top:20px;right:20px;z-index:900;display:flex;flex-direction:column;gap:10px;max-width:340px}
+.toast{
+  background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--green);
+  border-radius:8px;padding:13px 14px;box-shadow:0 8px 24px #00000055;
+  display:flex;gap:10px;align-items:flex-start;
+  animation:toastIn 0.25s ease-out;cursor:pointer;
+}
+.toast.leaving{animation:toastOut 0.2s ease-in forwards}
+.toast-icon{font-size:16px;flex-shrink:0;line-height:1.3}
+.toast-body{flex:1;font-size:12.5px;line-height:1.45;color:var(--text)}
+.toast-body b{display:block;margin-bottom:2px;font-size:12px}
+.toast-close{background:none;border:none;color:var(--muted2);cursor:pointer;font-size:13px;padding:0;flex-shrink:0}
+@keyframes toastIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+@keyframes toastOut{from{opacity:1;transform:translateX(0)}to{opacity:0;transform:translateX(20px)}}
 .modal-overlay.open{display:flex}
 .modal{background:var(--panel);border:1px solid var(--border);border-radius:12px;width:480px;max-width:90vw;max-height:80vh;overflow-y:auto}
 .modal-header{padding:20px 24px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
@@ -474,15 +488,23 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 </div>
 
 <div id="appShell" style="display:none">
+<div class="toast-container" id="toastContainer"></div>
 
 <!-- TOPBAR -->
 <div class="topbar">
   <div class="topbar-brand">
     <div class="topbar-logo"><span>Inkable</span> Studios</div>
-    <div class="topbar-version">Dashboard v2.30</div>
+    <div class="topbar-version">Dashboard v2.36</div>
     <div class="topbar-version" id="syncStatusIndicator" style="margin-left:8px">☁ …</div>
   </div>
   <div class="topbar-right">
+<div style="position:relative">
+  <button class="btn btn-ghost" id="notifBellBtn" onclick="event.stopPropagation();toggleNotifDropdown()" title="Client responses" style="position:relative">
+    🔔
+    <span id="notifBadge" style="display:none;position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:8px;align-items:center;justify-content:center;padding:0 4px">0</span>
+  </button>
+  <div id="notifDropdown" style="display:none;position:absolute;right:0;top:100%;margin-top:6px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:4px;z-index:100;width:280px;max-height:360px;overflow-y:auto;box-shadow:0 4px 16px #00000088"></div>
+</div>
 <button class="btn btn-ghost" onclick="openSettings()" title="Pricing settings">⚙️ Settings</button>
 <button class="btn btn-primary" onclick="newEstimate()">＋ New Estimate</button>
   </div>
@@ -594,6 +616,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
           <div>Total</div>
           <div>Paid</div>
           <div>Balance</div>
+          <div>Expenses</div>
           <div>Margin</div>
           <div>Status</div>
           <div>Actions</div>
@@ -1043,7 +1066,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
       </div>
       <div class="modal-field">
         <label>Install Date <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
-        <input type="date" id="modal-install-date"/>
+        <div style="display:flex;gap:8px">
+          <input type="date" id="modal-install-date" style="flex:1"/>
+          <input type="time" id="modal-install-time" style="width:110px" title="Optional — leave blank for an all-day event"/>
+        </div>
+        <div id="modal-calendar-status" style="font-size:10.5px;color:var(--muted2);margin-top:4px"></div>
       </div>
       <div class="modal-field">
         <label>Tags</label>
@@ -1078,7 +1105,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
         <div id="modal-log-list" style="max-height:130px;overflow-y:auto"></div>
       </div>
       <div class="modal-field" id="modal-expenses-section">
-        <label>Extra Expenses <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">(added after pricing)</span></label>
+        <label>Expenses <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">(materials, design, install &amp; anything added after)</span></label>
         <div id="modal-expenses-list" style="max-height:110px;overflow-y:auto;margin-bottom:8px"></div>
         <button onclick="openExpenseModal(currentJobId)" class="btn btn-ghost" style="padding:6px 12px;font-size:11px;width:100%">+ Add Expense</button>
       </div>
@@ -1224,7 +1251,7 @@ function saveMeta(m){ localStorage.setItem(META_KEY,JSON.stringify(m)); }
 
 function getJobMeta(id){
   const m=getMeta();
-  return m[id]||{status:'send',tags:[],notes:'',payments:[],installDate:'',proofLink:'',expenses:[],excluded:false};
+  return m[id]||{status:'send',tags:[],notes:'',payments:[],installDate:'',installTime:'',proofLink:'',expenses:[],excluded:false,calendarEventId:''};
 }
 function setJobMeta(id,data){
   const m=getMeta();
@@ -1314,6 +1341,32 @@ function getPaymentStatus(id,total){
 }
 
 // ── Navigation ────────────────────────────────────────────────────────
+// A real in-app notification, not a browser alert() — for anything that
+// deserves the person's attention without blocking them or looking like
+// a system popup. Auto-dismisses, but can be closed early or clicked
+// through to somewhere relevant.
+function showToast(icon,title,message,opts){
+  opts=opts||{};
+  const container=document.getElementById('toastContainer');
+  if(!container)return;
+  const el=document.createElement('div');
+  el.className='toast';
+  el.style.borderLeftColor=opts.color||'var(--green)';
+  el.innerHTML=`
+    <div class="toast-icon">${icon}</div>
+    <div class="toast-body"><b>${title}</b>${message}</div>
+    <button class="toast-close" onclick="event.stopPropagation();this.closest('.toast').remove()">✕</button>
+  `;
+  if(opts.onClick)el.addEventListener('click',opts.onClick);
+  container.appendChild(el);
+  const duration=opts.duration||7000;
+  setTimeout(()=>{
+    if(!el.isConnected)return;
+    el.classList.add('leaving');
+    setTimeout(()=>el.remove(),200);
+  },duration);
+}
+
 function switchTab(tab){
   document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
@@ -1586,6 +1639,7 @@ function quickStatusChange(id, sel){
   meta.status=sel.value;
   setJobMeta(id,meta);
   sel.className=`status-badge ${STATUS_CLASS[sel.value]||'s-send'}`;
+  refreshReminders();
   // If this change means the job no longer matches the filter you're
   // currently looking at (e.g. you're viewing "Done" and just moved it
   // back to "Send Estimate"), it would otherwise just vanish from the
@@ -1656,7 +1710,8 @@ function renderSales(){
       <div class="amount">$${total.toFixed(2)}</div>
       <div class="amount" style="color:var(--green)">$${paid.toFixed(2)}</div>
       <div class="amount" style="color:${balance>0?'var(--red)':'var(--muted)'}">$${balance.toFixed(2)}</div>
-      <div class="amount" onclick="event.stopPropagation();openExpenseListModal('${p.id}')" style="color:${fin.profit>=0?'var(--green)':'var(--red)'};cursor:pointer" title="Cost: $${fin.cost.total.toFixed(2)} — click to view or edit the breakdown">$${fin.profit.toFixed(2)}<div style="font-size:9.5px;color:var(--muted);font-weight:400;text-decoration:underline;text-underline-offset:2px">${marginPct.toFixed(0)}% · Cost $${fin.cost.total.toFixed(2)}</div></div>
+      <div class="amount" onclick="event.stopPropagation();openExpenseListModal('${p.id}')" style="color:var(--amber);cursor:pointer;text-decoration:underline;text-underline-offset:2px" title="View or edit this job's expenses">$${fin.cost.total.toFixed(2)}</div>
+      <div class="amount" style="color:${fin.profit>=0?'var(--green)':'var(--red)'}">$${fin.profit.toFixed(2)}<div style="font-size:9.5px;color:var(--muted);font-weight:400">${marginPct.toFixed(0)}%</div></div>
       <div><span class="pay-badge ${badgeClass}">${badgeLabel}</span></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
         <button class="pay-record-btn" onclick="openPaymentModal('${p.id}')">+ Payment</button>
@@ -1708,10 +1763,30 @@ function submitPayment(){
   if(amount<=0){ alert('Enter an amount greater than $0.'); return; }
   const method=document.getElementById('pmtMethod').value;
   const date=document.getElementById('pmtDate').value;
+
+  const proj=getProjects().find(p=>p.id===paymentModalProjectId);
+  const total=proj?getProjectAmount(proj):0;
+  const paidBefore=getAmountPaid(paymentModalProjectId);
+
   addPayment(paymentModalProjectId,amount,method,date);
+
+  // A payment crossing the 50% mark is the signal to start preparing the
+  // proof — worth a clear, immediate confirmation right when it happens,
+  // since you're the one who just entered it and are already looking at
+  // the screen. Only fires on the crossing itself, not every payment
+  // after a job's already past halfway.
+  const paidAfter=paidBefore+amount;
+  if(total>0&&paidBefore<total*0.5&&paidAfter>=total*0.5){
+    const clients=getClients();
+    const cl=proj?clients.find(c=>c.id===proj.clientId):null;
+    const who=cl?cl.name:(proj?.estNo||'This job');
+    showToast('💰','50% paid — ready to start the proof',`${who} (${proj?.estNo||''}) just crossed the halfway mark.`,{color:'var(--amber)',duration:9000});
+  }
+
   closePaymentModal();
   renderSales();
   renderReports();
+  refreshReminders();
 }
 
 // ── Expenses — a real cost recorded against a specific job after pricing,
@@ -2708,6 +2783,11 @@ function openJobModal(id){
   document.getElementById('modal-title').textContent=clientName+' — '+(p?.estNo||'');
   document.getElementById('modal-status').value=meta.status||'send';
   document.getElementById('modal-install-date').value=meta.installDate||'';
+  document.getElementById('modal-install-time').value=meta.installTime||'';
+  const calStatusEl=document.getElementById('modal-calendar-status');
+  if(calStatusEl){
+    calStatusEl.textContent=meta.calendarEventId?'📅 Synced to Google Calendar':'';
+  }
   document.getElementById('modal-notes').value=meta.notes||'';
 
   activeTags={rush:meta.tags?.includes('rush'),hold:meta.tags?.includes('hold')};
@@ -2746,14 +2826,27 @@ function saveJobMeta(){
   // wiped out every recorded payment the moment this form was saved.
   const existing=getJobMeta(currentJobId);
   const newStatus=document.getElementById('modal-status').value;
-  setJobMeta(currentJobId,{
+  const newInstallDate=document.getElementById('modal-install-date').value;
+  const newInstallTime=document.getElementById('modal-install-time').value;
+  const updatedMeta={
     ...existing,
     status:newStatus,
-    installDate:document.getElementById('modal-install-date').value,
+    installDate:newInstallDate,
+    installTime:newInstallTime,
     tags,
     notes:document.getElementById('modal-notes').value.trim()
-  });
+  };
+  setJobMeta(currentJobId,updatedMeta);
+
+  // Only touch the calendar if the install date or time actually changed —
+  // saving the rest of this form (status, notes, tags) shouldn't fire an
+  // API call and rewrite an event that hasn't moved.
+  if(existing.installDate!==newInstallDate||existing.installTime!==newInstallTime){
+    syncInstallToCalendar(currentJobId,updatedMeta);
+  }
+
   closeModal();
+  refreshReminders();
   // Same reasoning as quickStatusChange: don't let a status change make the
   // job silently vanish because it no longer matches the filter you're
   // currently viewing.
@@ -2804,6 +2897,8 @@ function toggleActionMenu(id,e){
 // Close menus on outside click
 document.addEventListener('click',()=>{
   document.querySelectorAll('[id^="menu-"]').forEach(m=>m.style.display='none');
+  const notifDd=document.getElementById('notifDropdown');
+  if(notifDd)notifDd.style.display='none';
 });
 
 function editInPricer(id){
@@ -2969,15 +3064,175 @@ async function pullFromServerOnLoad(){
     if(typeof renderSales==='function')renderSales();
     if(typeof renderClients==='function')renderClients();
     if(typeof renderReports==='function')renderReports();
+    checkForNewClientResponses(data.proofResponses||{});
+    refreshReminders();
   }catch(err){
     console.warn('Initial cloud sync failed — using whatever is already on this device:',err);
     updateSyncIndicator(false);
   }
 }
 
+// ── Client-response notifications — a client approving or requesting
+// changes happens on a page this device never touched, so there's no
+// other way to find out except checking what the server has on next
+// sync. "Acknowledged" tracks the LATEST response timestamp per job
+// that's already been seen, so re-opening the same response twice
+// doesn't notify twice, but a NEW response on a job you'd already
+// cleared still correctly notifies again.
+const PROOF_ACK_KEY='inkable_proof_response_ack';
+function getAcknowledgedResponses(){
+  try{ return JSON.parse(localStorage.getItem(PROOF_ACK_KEY)||'{}'); }catch(e){ return {}; }
+}
+function acknowledgeResponse(projectId,responseAt){
+  const ack=getAcknowledgedResponses();
+  ack[projectId]=responseAt;
+  localStorage.setItem(PROOF_ACK_KEY,JSON.stringify(ack));
+}
+let newClientResponses=[];
+let activeReminders=[];
+function checkForNewClientResponses(proofResponses){
+  const ack=getAcknowledgedResponses();
+  const projects=getProjects();
+  const clients=getClients();
+  newClientResponses=Object.entries(proofResponses)
+    .filter(([projectId,r])=>r.responseAt&&ack[projectId]!==r.responseAt)
+    .map(([projectId,r])=>{
+      const p=projects.find(pr=>pr.id===projectId);
+      const cl=p?clients.find(c=>c.id===p.clientId):null;
+      return{
+        projectId,response:r.response,responseNote:r.responseNote,responseAt:r.responseAt,
+        clientName:cl?cl.name:'',estNo:p?.estNo||'',jobName:p?.name||'',
+      };
+    })
+    .sort((a,b)=>new Date(b.responseAt)-new Date(a.responseAt));
+  renderNotificationBell();
+}
+
+// Stale estimates and overdue balances are ongoing STATES, not one-time
+// events like a client response — there's nothing to "acknowledge." A job
+// shows up here for as long as it actually still matches, and clears
+// itself the moment its status moves or its balance is paid, recomputed
+// fresh every time this runs rather than tracked against a dismiss list.
+const EARLY_STATUSES=['send','art','prep','proof','awaiting'];
+function computeReminders(){
+  const{staleEstimateDays,overdueBalanceDays}=getReminderSettings();
+  const now=new Date();
+  const projects=getProjects();
+  const clients=getClients();
+  const reminders=[];
+
+  projects.forEach(p=>{
+    if(getJobMeta(p.id).excluded)return; // consistent with exclusion everywhere else
+    const meta=getJobMeta(p.id);
+    const savedDate=new Date(p.savedAt);
+    if(isNaN(savedDate))return;
+    const daysOld=Math.floor((now-savedDate)/(1000*60*60*24));
+    const cl=clients.find(c=>c.id===p.clientId);
+    const who=cl?cl.name:(p.estNo||p.name||'This job');
+
+    if(EARLY_STATUSES.includes(meta.status)&&daysOld>=staleEstimateDays){
+      reminders.push({
+        type:'stale',projectId:p.id,estNo:p.estNo,
+        message:`${who} has been sitting in "${STATUS_LABELS[meta.status]||meta.status}" for ${daysOld} days`,
+      });
+    }
+
+    const total=getProjectAmount(p);
+    const balance=Math.max(0,total-getAmountPaid(p.id));
+    if(balance>0.005&&daysOld>=overdueBalanceDays){
+      reminders.push({
+        type:'overdue',projectId:p.id,estNo:p.estNo,
+        message:`${who} has a $${balance.toFixed(2)} balance outstanding, ${daysOld} days old`,
+      });
+    }
+  });
+  return reminders;
+}
+function refreshReminders(){
+  activeReminders=computeReminders();
+  renderNotificationBell();
+}
+
+function renderNotificationBell(){
+  const badge=document.getElementById('notifBadge');
+  const btn=document.getElementById('notifBellBtn');
+  if(!badge||!btn)return;
+  const total=newClientResponses.length+activeReminders.length;
+  if(total>0){
+    badge.textContent=total;
+    badge.style.display='flex';
+  }else{
+    badge.style.display='none';
+  }
+}
+function toggleNotifDropdown(){
+  const dd=document.getElementById('notifDropdown');
+  if(!dd)return;
+  const opening=dd.style.display==='none'||!dd.style.display;
+  if(opening){
+    const responseItems=newClientResponses.map(n=>{
+      const isApproved=n.response==='approved';
+      const who=n.clientName||n.jobName||'A client';
+      const label=isApproved?'approved the proof':'requested changes';
+      const dateStr=new Date(n.responseAt).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+      return`<div class="menu-item" style="white-space:normal;line-height:1.4;padding:10px 12px" onclick="openNotifResponse('${n.projectId}','${n.responseAt}')">
+        <div style="font-size:12px;color:var(--text)"><b>${who}</b> ${isApproved?'✓':'✎'} ${label}</div>
+        <div style="font-size:10.5px;color:var(--muted)">${n.estNo||''} · ${dateStr}</div>
+        ${n.responseNote?`<div style="font-size:11px;color:var(--muted);margin-top:3px;font-style:italic">"${n.responseNote}"</div>`:''}
+      </div>`;
+    }).join('');
+    const reminderItems=activeReminders.map(r=>{
+      const icon=r.type==='stale'?'⏳':'💵';
+      return`<div class="menu-item" style="white-space:normal;line-height:1.4;padding:10px 12px" onclick="openNotifReminder('${r.projectId}')">
+        <div style="font-size:12px;color:var(--text)">${icon} ${r.message}</div>
+        <div style="font-size:10.5px;color:var(--muted)">${r.estNo||''}</div>
+      </div>`;
+    }).join('');
+    dd.innerHTML=(responseItems+reminderItems)||'<div style="padding:16px;font-size:12px;color:var(--muted2);text-align:center">Nothing new</div>';
+  }
+  document.querySelectorAll('[id^="menu-"],#notifDropdown').forEach(el=>{if(el!==dd)el.style.display='none';});
+  dd.style.display=opening?'block':'none';
+}
+function openNotifReminder(projectId){
+  document.getElementById('notifDropdown').style.display='none';
+  const proj=getProjects().find(p=>p.id===projectId);
+  if(proj){
+    switchTab('projects');
+    openJobModal(projectId);
+  }else{
+    alert('That job could not be found — it may have been deleted.');
+  }
+}
+function openNotifResponse(projectId,responseAt){
+  acknowledgeResponse(projectId,responseAt);
+  newClientResponses=newClientResponses.filter(n=>!(n.projectId===projectId&&n.responseAt===responseAt));
+  renderNotificationBell();
+  document.getElementById('notifDropdown').style.display='none';
+  const proj=getProjects().find(p=>p.id===projectId);
+  if(proj){
+    switchTab('projects');
+    openJobModal(projectId);
+  }else{
+    alert('That job could not be found — it may have been deleted.');
+  }
+}
+
 // ── Init ──────────────────────────────────────────────────────────────
 renderProjects();
 checkAuthOnLoad();
+
+// Keep things current while the Dashboard sits open — a client responding
+// to a proof, or a change made from another device, has no other way to
+// reach this tab except a fresh sync. Silent by design: it just refreshes
+// the data and lets the existing notification bell surface anything new,
+// no toast spam every 5 minutes for a sync that usually finds nothing.
+// Only runs once actually logged in, and safe to run under an open
+// modal or the pricer — it only touches the Projects/Sales/Reports list
+// views, never anything currently being edited.
+function periodicBackgroundSync(){
+  if(localStorage.getItem(AUTH_TOKEN_KEY))pullFromServerOnLoad();
+}
+setInterval(periodicBackgroundSync,5*60*1000);
 
 // If a Drive Client ID is already saved, get the auth client ready so
 // "Connect" works immediately — this doesn't grant access on its own,
@@ -3101,6 +3356,18 @@ function getRates(){
   };
 }
 
+// Two independent thresholds — how many days before a quiet estimate or
+// an unpaid balance is worth a nudge. Kept separate on purpose: money
+// owed and a client who's gone quiet aren't the same kind of "overdue"
+// and don't belong on the same clock.
+function getReminderSettings(){
+  const pd=getPricingData();
+  return{
+    staleEstimateDays:pd.staleEstimateDays??7,
+    overdueBalanceDays:pd.overdueBalanceDays??14,
+  };
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // SETTINGS PANEL — shop rates, my costs, install speed, material lists.
 // Writes to the same PRICING_KEY localStorage that Inkatool (the legacy
@@ -3124,6 +3391,8 @@ function openSettings(){
     installSqftBasic:pd.installSqftBasic??50,
     installSqftStandard:pd.installSqftStandard??100,
     installSqftAdvanced:pd.installSqftAdvanced??20,
+    staleEstimateDays:pd.staleEstimateDays??7,
+    overdueBalanceDays:pd.overdueBalanceDays??14,
     vinyl:{...DEFAULT_VINYL,...(pd.vinyl||{})},
     laminate:{...DEFAULT_LAMINATE,...(pd.laminate||{})},
     substrate:{...DEFAULT_SUBSTRATE,...(pd.substrate||{})},
@@ -3131,7 +3400,7 @@ function openSettings(){
   renderSettingsPanel();
   renderBackupSummary();
   document.getElementById('driveClientId').value=getDriveClientId();
-  setDriveStatus(isDriveConnected()?'Connected — ready to upload proofs.':'Not connected.',isDriveConnected());
+  setDriveStatus(isDriveConnected()?'Connected — ready to upload proofs and sync install dates.':'Not connected.',isDriveConnected());
   document.getElementById('settingsOverlay').classList.add('open');
 }
 
@@ -3233,6 +3502,10 @@ function handleRestoreFile(event){
 // actually opened it, since that's on their device, not this one.
 const DRIVE_CLIENT_ID_KEY='inkable_drive_client_id';
 const DRIVE_SCOPE='https://www.googleapis.com/auth/drive.file';
+// Narrowest scope that can actually create/edit/delete events — deliberately
+// NOT the broader 'calendar' scope, which would also grant reading and
+// managing every other calendar and event on the account.
+const CALENDAR_SCOPE='https://www.googleapis.com/auth/calendar.events';
 // Built-in default — a Google OAuth Client ID is meant to be public
 // (unlike a Client Secret, which must never be embedded client-side), so
 // baking it in is safe. The Settings field can still override this if the
@@ -3256,14 +3529,14 @@ function initGoogleAuth(){
   if(!clientId||typeof google==='undefined'||!google.accounts)return false;
   driveTokenClient=google.accounts.oauth2.initTokenClient({
     client_id:clientId,
-    scope:DRIVE_SCOPE,
+    scope:DRIVE_SCOPE+' '+CALENDAR_SCOPE,
     callback:(resp)=>{
       if(resp.error){
         setDriveStatus('Connection failed: '+resp.error,false);
         return;
       }
       driveAccessToken=resp.access_token;
-      setDriveStatus('Connected — ready to upload proofs.',true);
+      setDriveStatus('Connected — ready to upload proofs and sync install dates.',true);
     },
   });
   return true;
@@ -3281,6 +3554,105 @@ function connectGoogleDrive(){
   driveTokenClient.requestAccessToken();
 }
 function isDriveConnected(){ return !!driveAccessToken; }
+
+// ── Google Calendar sync — install dates only, for now. Uses the SAME
+// Google connection as Drive (one "Connect" grants both scopes at once,
+// via the token client above), so there's no separate setup step. Fails
+// gracefully everywhere: a missing connection or a failed API call never
+// blocks saving the job itself, it just means the calendar doesn't get
+// the update this time.
+const CAL_TZ='America/Chicago';
+function buildCalendarEventBody(date,time,summary,estNo){
+  const body={summary,description:'Job '+(estNo||'')+' — synced from the Inkable Dashboard'};
+  if(time){
+    const start=date+'T'+time+':00';
+    const startDate=new Date(start);
+    const end=new Date(startDate.getTime()+60*60*1000); // 1hr default duration
+    const pad=n=>String(n).padStart(2,'0');
+    const endStr=end.getFullYear()+'-'+pad(end.getMonth()+1)+'-'+pad(end.getDate())+'T'+pad(end.getHours())+':'+pad(end.getMinutes())+':00';
+    body.start={dateTime:start,timeZone:CAL_TZ};
+    body.end={dateTime:endStr,timeZone:CAL_TZ};
+  }else{
+    const endDate=new Date(date+'T00:00:00');
+    endDate.setDate(endDate.getDate()+1);
+    const pad=n=>String(n).padStart(2,'0');
+    body.start={date};
+    body.end={date:endDate.getFullYear()+'-'+pad(endDate.getMonth()+1)+'-'+pad(endDate.getDate())};
+  }
+  return body;
+}
+async function createCalendarEvent(eventBody){
+  const res=await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events',{
+    method:'POST',
+    headers:{Authorization:'Bearer '+driveAccessToken,'Content-Type':'application/json'},
+    body:JSON.stringify(eventBody),
+  });
+  if(!res.ok)throw new Error('Calendar API returned '+res.status);
+  return res.json();
+}
+async function updateCalendarEvent(eventId,eventBody){
+  const res=await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/'+eventId,{
+    method:'PATCH',
+    headers:{Authorization:'Bearer '+driveAccessToken,'Content-Type':'application/json'},
+    body:JSON.stringify(eventBody),
+  });
+  if(!res.ok)throw new Error('Calendar API returned '+res.status);
+  return res.json();
+}
+async function deleteCalendarEvent(eventId){
+  const res=await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/'+eventId,{
+    method:'DELETE',
+    headers:{Authorization:'Bearer '+driveAccessToken},
+  });
+  // 404/410 just mean it's already gone (deleted directly in Calendar,
+  // say) — not a real failure, nothing left to do either way.
+  if(!res.ok&&res.status!==404&&res.status!==410)throw new Error('Calendar API returned '+res.status);
+}
+async function syncInstallToCalendar(jobId,meta){
+  if(!isDriveConnected()){
+    showToast('📅','Install date not synced to your calendar','Connect Google in Settings to enable calendar sync.',{color:'var(--muted2)',duration:6000});
+    return;
+  }
+
+  // Date was cleared — remove the calendar event if one exists, rather
+  // than leaving a stale install date sitting on the calendar forever.
+  if(!meta.installDate){
+    if(meta.calendarEventId){
+      try{
+        await deleteCalendarEvent(meta.calendarEventId);
+      }catch(err){
+        console.warn('Could not remove the calendar event for this job:',err);
+      }
+      setJobMeta(jobId,{...getJobMeta(jobId),calendarEventId:''});
+    }
+    return;
+  }
+
+  const proj=getProjects().find(p=>p.id===jobId);
+  const clients=getClients();
+  const cl=proj?clients.find(c=>c.id===proj.clientId):null;
+  const clientName=cl?cl.name:(proj?.state?.form?.billingName||'');
+  const jobLabel=proj?.name||proj?.estNo||'Job';
+  const summary='Install — '+(clientName?clientName+' — ':'')+jobLabel;
+  const eventBody=buildCalendarEventBody(meta.installDate,meta.installTime,summary,proj?.estNo);
+
+  try{
+    if(meta.calendarEventId){
+      await updateCalendarEvent(meta.calendarEventId,eventBody);
+    }else{
+      const newEvent=await createCalendarEvent(eventBody);
+      setJobMeta(jobId,{...getJobMeta(jobId),calendarEventId:newEvent.id});
+    }
+    const whenStr=meta.installTime
+      ?new Date(meta.installDate+'T'+meta.installTime+':00').toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})
+      :new Date(meta.installDate+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+    showToast('📅','Synced to Google Calendar',summary+' — '+whenStr,{color:'var(--blue)',duration:5000});
+  }catch(err){
+    console.error('Calendar sync failed:',err);
+    showToast('⚠️','Could not sync to Calendar','Check your Google connection in Settings and try again.',{color:'var(--red)',duration:7000});
+  }
+}
+
 
 // Find a folder by name under a given parent (or root if parentId is null),
 // creating it if it doesn't already exist. Returns the folder's Drive id.
@@ -3629,6 +4001,8 @@ function renderSettingsPanel(){
   set('settingInstallSqftBasic',s.installSqftBasic);
   set('settingInstallSqftStandard',s.installSqftStandard);
   set('settingInstallSqftAdvanced',s.installSqftAdvanced);
+  set('settingStaleEstimateDays',s.staleEstimateDays);
+  set('settingOverdueBalanceDays',s.overdueBalanceDays);
   renderMatCostRows('vinylCostRows','vinyl');
   renderMatCostRows('laminateCostRows','laminate');
   renderMatCostRows('substrateCostRows','substrate');
@@ -3710,6 +4084,8 @@ function saveSettings(){
   s.installSqftBasic=num('settingInstallSqftBasic',50);
   s.installSqftStandard=num('settingInstallSqftStandard',100);
   s.installSqftAdvanced=num('settingInstallSqftAdvanced',20);
+  s.staleEstimateDays=num('settingStaleEstimateDays',7);
+  s.overdueBalanceDays=num('settingOverdueBalanceDays',14);
 
   // Merge into whatever else already lives under PRICING_KEY (e.g. QQ presets
   // saved by the legacy tool) rather than clobbering the whole object.
@@ -5153,7 +5529,7 @@ function printProjectsList(){
 function printSalesList(){
   const projects=getProjects();
   const clients=getClients();
-  let totalAll=0,paidAll=0,balAll=0,marginAll=0;
+  let totalAll=0,paidAll=0,balAll=0,marginAll=0,expensesAll=0;
   const rows=projects.map(p=>{
     const cl=clients.find(c=>c.id===p.clientId);
     const clientName=cl?cl.name:(p.state?.form?.billingName||'—');
@@ -5161,7 +5537,7 @@ function printSalesList(){
     const paid=getAmountPaid(p.id);
     const balance=Math.max(0,total-paid);
     const fin=getJobFinancials(p);
-    totalAll+=total;paidAll+=paid;balAll+=balance;marginAll+=fin.profit;
+    totalAll+=total;paidAll+=paid;balAll+=balance;marginAll+=fin.profit;expensesAll+=fin.cost.total;
     const status=getPaymentStatus(p.id,total);
     const statusLabel=status==='paid'?'Paid':status==='partial'?'Partial':'Unpaid';
     return `<tr>
@@ -5170,17 +5546,19 @@ function printSalesList(){
       <td class="num">$${total.toFixed(2)}</td>
       <td class="num">$${paid.toFixed(2)}</td>
       <td class="num">$${balance.toFixed(2)}</td>
+      <td class="num">$${fin.cost.total.toFixed(2)}</td>
       <td class="num">$${fin.profit.toFixed(2)}</td>
       <td>${statusLabel}</td>
     </tr>`;
   }).join('');
   const body=`<table><thead><tr>
-    <th>Client</th><th>Job #</th><th class="num">Total</th><th class="num">Paid</th><th class="num">Balance</th><th class="num">Margin</th><th>Status</th>
-  </tr></thead><tbody>${rows||'<tr><td colspan="7" class="muted">No sales yet.</td></tr>'}</tbody></table>
+    <th>Client</th><th>Job #</th><th class="num">Total</th><th class="num">Paid</th><th class="num">Balance</th><th class="num">Expenses</th><th class="num">Margin</th><th>Status</th>
+  </tr></thead><tbody>${rows||'<tr><td colspan="8" class="muted">No sales yet.</td></tr>'}</tbody></table>
   <div class="summary">
     <div class="summary-row"><span>Total invoiced</span><span>$${totalAll.toFixed(2)}</span></div>
     <div class="summary-row"><span>Total collected</span><span>$${paidAll.toFixed(2)}</span></div>
     <div class="summary-row total"><span>Balance outstanding</span><span>$${balAll.toFixed(2)}</span></div>
+    <div class="summary-row"><span>Total expenses</span><span>$${expensesAll.toFixed(2)}</span></div>
     <div class="summary-row"><span>Total margin</span><span>$${marginAll.toFixed(2)}</span></div>
   </div>`;
   openPrintWindow('Sales — Inkable Studios',projects.length+' job'+(projects.length!==1?'s':''),body);
@@ -6010,6 +6388,12 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
             </select>
             <input type="number" id="discVal" min="0" step="0.01" value="0" oninput="recalc()" style="flex:1;background:var(--dark);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;font-family:'DM Mono',monospace;outline:none"/>
           </div>
+        </div>
+
+        <!-- Tax Exempt / Minimum Charge — own section, own heading, so
+             neither reads as a sub-option buried under Discount. -->
+        <div class="disc-section">
+          <div class="labor-title">Tax &amp; Charges</div>
           <div class="pricing-toggle-row">
             <label class="pricing-toggle">
               <input type="checkbox" id="taxExemptChk" onchange="recalc()"/>
@@ -6164,6 +6548,7 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
     <button class="settings-tab" onclick="switchSettingsTab('laminate',this)">Laminate</button>
     <button class="settings-tab" onclick="switchSettingsTab('substrate',this)">Substrate</button>
     <button class="settings-tab" onclick="switchSettingsTab('data',this)">Data</button>
+    <button class="settings-tab" onclick="switchSettingsTab('reminders',this)">Reminders</button>
     <button class="settings-tab" onclick="switchSettingsTab('drive',this)">Proofs / Drive</button>
   </div>
   <div class="settings-content">
@@ -6263,21 +6648,49 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
       </div>
     </div>
 
+    <!-- REMINDERS TAB -->
+    <div class="settings-tab-panel" id="stab-reminders">
+      <div class="settings-section-title">Reminders</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.6">
+        Two independent clocks — a quiet estimate and an unpaid balance aren't the same kind of overdue, so each gets its own threshold. Both show up in the notification bell, and stay there for as long as the job actually still matches — pay the balance or move the estimate forward and it clears itself, nothing to dismiss by hand.
+      </div>
+      <div style="background:var(--dark);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px">
+        <div style="font-weight:700;font-size:13px;margin-bottom:8px">Stale estimate follow-up</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Flag an estimate that's sat with no status movement for this many days.</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="number" id="settingStaleEstimateDays" min="1" step="1" style="width:80px;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:'DM Mono',monospace;outline:none"/>
+          <span style="font-size:12px;color:var(--muted)">days</span>
+        </div>
+      </div>
+      <div style="background:var(--dark);border:1px solid var(--border);border-radius:10px;padding:16px">
+        <div style="font-weight:700;font-size:13px;margin-bottom:8px">Overdue balance nudge</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Flag a job with money still owed after this many days.</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="number" id="settingOverdueBalanceDays" min="1" step="1" style="width:80px;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:'DM Mono',monospace;outline:none"/>
+          <span style="font-size:12px;color:var(--muted)">days</span>
+        </div>
+      </div>
+    </div>
+
     <!-- GOOGLE DRIVE / PROOFS TAB -->
     <div class="settings-tab-panel" id="stab-drive">
-      <div class="settings-section-title">Proof uploads via Google Drive</div>
+      <div class="settings-section-title">Google Drive &amp; Calendar Sync</div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.6">
-        Connect your Google Drive so uploading a proof creates the folder, uploads the file, sets it to "anyone with the link," and drops that link on the job automatically — no manual copy-pasting.
+        One Google connection, two things it does: uploading a proof creates the folder, uploads the file, sets it to "anyone with the link," and drops that link on the job automatically — and setting a job's install date puts it straight on your Google Calendar, keeping it updated if the date changes and removing it if you clear the date.
+      </div>
+
+      <div style="background:#3a2f0a;border:1px solid #5c4b12;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:#f0c419;line-height:1.5">
+        Already connected from before Calendar sync existed? You'll need to click <b>Connect</b> again below — a previously-granted connection doesn't automatically pick up a newly-added permission.
       </div>
 
       <div style="background:var(--dark);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px">
         <div style="font-weight:700;font-size:13px;margin-bottom:8px">One-time setup</div>
         <div style="font-size:11px;color:var(--muted);line-height:1.7">
           1. Go to <span style="color:var(--blue)">console.cloud.google.com</span> and create a project (or use an existing one).<br/>
-          2. Go to <b>APIs &amp; Services → Library</b>, search "Google Drive API," and click <b>Enable</b>. This is separate from the steps below.<br/>
+          2. Go to <b>APIs &amp; Services → Library</b>, search "Google Drive API," click <b>Enable</b> — then search "Google Calendar API" and click <b>Enable</b> on that too. Both are separate from the steps below.<br/>
           3. Google now walks new projects through a setup wizard called <b>"Google Auth Platform"</b> (Branding → Audience → Data Access → Clients). If you land there, work through it top to bottom.<br/>
           4. On the <b>Audience</b> step, choose <b>External</b> — you can't switch this later without starting a new project.<br/>
-          5. On <b>Data Access</b>, add the Drive scope. Because Drive access counts as a "sensitive" scope, Google will offer a verification process — <b>skip it</b>. Instead, leave the app in "Testing" mode and add your own Google account (and anyone else who'll use this) under <b>Test users</b>, up to 100 people. That's enough for a tool like this and avoids weeks of review.<br/>
+          5. On <b>Data Access</b>, add both the Drive scope and the Calendar Events scope. Because these count as "sensitive" scopes, Google will offer a verification process — <b>skip it</b>. Instead, leave the app in "Testing" mode and add your own Google account (and anyone else who'll use this) under <b>Test users</b>, up to 100 people. That's enough for a tool like this and avoids weeks of review.<br/>
           6. On <b>Clients</b>, click <b>Create Client</b> → type <b>Web application</b> → under "Authorized JavaScript origins" add the <b>exact URL</b> you open this Dashboard from.<br/>
           7. Copy the Client ID it gives you and paste it below.<br/>
           8. <b>Important:</b> this only works if the Dashboard is loaded from a real http(s):// address — opening the file directly from your computer (a file:// path) won't work with Google sign-in at all. It needs to be hosted somewhere, even just the Netlify site you already have.<br/>
@@ -6294,7 +6707,7 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
       <div style="background:var(--dark);border:1px solid var(--border);border-radius:10px;padding:16px">
         <div style="font-weight:700;font-size:13px;margin-bottom:8px">Connection</div>
         <div id="driveConnectionStatus" style="font-size:12px;color:var(--muted);margin-bottom:10px">Not connected.</div>
-        <button class="btn btn-primary" id="driveConnectBtn" onclick="connectGoogleDrive()">Connect Google Drive</button>
+        <button class="btn btn-primary" id="driveConnectBtn" onclick="connectGoogleDrive()">Connect Google</button>
       </div>
     </div>
 
