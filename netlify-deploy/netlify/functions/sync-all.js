@@ -30,11 +30,15 @@ export default async (req) => {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
   try {
-    const [clientRows, projectRows, metaRows, pricingRows] = await Promise.all([
+    const [clientRows, projectRows, metaRows, pricingRows, proofRows] = await Promise.all([
       db.sql`SELECT * FROM clients ORDER BY name`,
       db.sql`SELECT * FROM projects ORDER BY saved_at DESC`,
       db.sql`SELECT * FROM job_meta`,
       db.sql`SELECT data FROM pricing_settings WHERE id = 1`,
+      // Only rows with an actual response — this powers the "client
+      // responded while you were away" notification, so jobs no one's
+      // replied to yet don't need to come along for the ride.
+      db.sql`SELECT project_id, response, response_note, response_at FROM proof_shares WHERE response IS NOT NULL`,
     ]);
 
     const clients = clientRows.map(r => ({
@@ -53,8 +57,15 @@ export default async (req) => {
     metaRows.forEach(r => {
       jobMeta[r.project_id] = {
         status: r.status, tags: r.tags, notes: r.notes,
-        installDate: r.install_date, proofLink: r.proof_link, payments: r.payments,
-        expenses: r.expenses, excluded: r.is_excluded,
+        installDate: r.install_date, installTime: r.install_time, proofLink: r.proof_link, payments: r.payments,
+        expenses: r.expenses, excluded: r.is_excluded, calendarEventId: r.calendar_event_id,
+      };
+    });
+
+    const proofResponses = {};
+    proofRows.forEach(r => {
+      proofResponses[r.project_id] = {
+        response: r.response, responseNote: r.response_note, responseAt: r.response_at,
       };
     });
 
@@ -63,6 +74,7 @@ export default async (req) => {
       projects,
       jobMeta,
       pricing: pricingRows[0]?.data || {},
+      proofResponses,
     });
   } catch (err) {
     console.error("sync-all function error:", err);

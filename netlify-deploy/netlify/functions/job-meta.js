@@ -23,9 +23,9 @@ export default async (req) => {
       rows.forEach(r => {
         out[r.project_id] = {
           status: r.status, tags: r.tags, notes: r.notes,
-          installDate: r.install_date, proofLink: r.proof_link,
+          installDate: r.install_date, installTime: r.install_time, proofLink: r.proof_link,
           payments: r.payments, expenses: r.expenses,
-          excluded: r.is_excluded,
+          excluded: r.is_excluded, calendarEventId: r.calendar_event_id,
         };
       });
       return Response.json(out);
@@ -35,22 +35,22 @@ export default async (req) => {
       const m = await req.json();
       if (!m.projectId) return Response.json({ error: "projectId is required" }, { status: 400 });
       const [row] = await db.sql`
-        INSERT INTO job_meta (project_id, status, tags, notes, install_date, proof_link, payments, expenses, is_excluded, updated_at)
+        INSERT INTO job_meta (project_id, status, tags, notes, install_date, install_time, proof_link, payments, expenses, is_excluded, calendar_event_id, updated_at)
         VALUES (${m.projectId}, ${m.status || "send"}, ${JSON.stringify(m.tags || [])}, ${m.notes || ""},
-                ${m.installDate || ""}, ${m.proofLink || ""}, ${JSON.stringify(m.payments || [])},
-                ${JSON.stringify(m.expenses || [])}, ${!!m.excluded}, NOW())
+                ${m.installDate || ""}, ${m.installTime || ""}, ${m.proofLink || ""}, ${JSON.stringify(m.payments || [])},
+                ${JSON.stringify(m.expenses || [])}, ${!!m.excluded}, ${m.calendarEventId || ""}, NOW())
         ON CONFLICT (project_id) DO UPDATE SET
           status=EXCLUDED.status, tags=EXCLUDED.tags, notes=EXCLUDED.notes,
-          install_date=EXCLUDED.install_date, proof_link=EXCLUDED.proof_link,
+          install_date=EXCLUDED.install_date, install_time=EXCLUDED.install_time, proof_link=EXCLUDED.proof_link,
           payments=EXCLUDED.payments, expenses=EXCLUDED.expenses,
-          is_excluded=EXCLUDED.is_excluded, updated_at=NOW()
+          is_excluded=EXCLUDED.is_excluded, calendar_event_id=EXCLUDED.calendar_event_id, updated_at=NOW()
         RETURNING *
       `;
       return Response.json({
         status: row.status, tags: row.tags, notes: row.notes,
-        installDate: row.install_date, proofLink: row.proof_link,
+        installDate: row.install_date, installTime: row.install_time, proofLink: row.proof_link,
         payments: row.payments, expenses: row.expenses,
-        excluded: row.is_excluded,
+        excluded: row.is_excluded, calendarEventId: row.calendar_event_id,
       });
     }
 
