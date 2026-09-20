@@ -255,10 +255,12 @@
     };
     document.getElementById('confirmApproveBtn').onclick = () => submitResponse('approved', '');
     document.getElementById('changesBtn').onclick = () => {
+      document.getElementById('mainActions').style.display = 'none';
       document.getElementById('changesForm').style.display = 'block';
     };
     document.getElementById('cancelChangesBtn').onclick = () => {
       document.getElementById('changesForm').style.display = 'none';
+      document.getElementById('mainActions').style.display = 'flex';
     };
     document.getElementById('submitChangesBtn').onclick = () => {
       const note = document.getElementById('changesNote').value.trim();
@@ -286,8 +288,11 @@
     return `
       <section>
         <div class="sectiontitle">Questions about this job?</div>
-        <div class="estimate" style="opacity:0.7">
-          <div style="padding:14px 16px;font-size:12.5px;color:var(--muted)">
+        <div class="estimate">
+          <div style="padding:14px 16px;font-size:12.5px;color:var(--text)">
+            <a href="mailto:inkablestudios@gmail.com" style="color:var(--blue);text-decoration:none;font-weight:600">✉ inkablestudios@gmail.com</a>
+          </div>
+          <div style="padding:0 16px 14px;font-size:12px;color:var(--muted)">
             Direct messaging isn't set up yet.
             <span style="font-size:10px;font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:0.05em;background:var(--panel2);padding:3px 8px;border-radius:5px;margin-left:4px">Coming soon</span>
           </div>
