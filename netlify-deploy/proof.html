@@ -270,19 +270,69 @@
     };
   }
 
-  function paymentSectionHtml(){
+  function paymentSectionHtml(data){
+    const summary = data.estimateSummary;
+    if(!summary || !summary.total){
+      return `
+        <section>
+          <div class="estimate" style="opacity:0.7">
+            <div style="padding:13px 16px;font-size:13px;font-weight:600">Payment</div>
+            <div style="padding:0 16px 14px;font-size:12px;color:var(--muted)">
+              An estimate hasn't been finalized for this job yet.
+            </div>
+          </div>
+        </section>`;
+    }
+    const paid = data.paid || 0;
+    const balance = data.balance != null ? data.balance : Math.max(0, summary.total - paid);
+
+    let body;
+    if(balance <= 0.005){
+      body = `<div style="padding:16px;font-size:13px;font-weight:700;color:var(--green)">✓ Paid in full</div>`;
+    }else if(paid > 0.005){
+      body = `
+        <div style="padding:0 16px 14px">
+          <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px">Paid so far: ${fmtMoney(paid)} of ${fmtMoney(summary.total)}</div>
+          <button class="btn-primary" style="width:100%;font-family:inherit;font-size:13.5px;font-weight:700;padding:11px 14px;border-radius:9px;border:none;cursor:pointer" id="payRemainingBtn">Pay Remaining Balance — ${fmtMoney(balance)}</button>
+          <div id="paymentError" style="display:none;color:#e55;font-size:11.5px;margin-top:8px"></div>
+        </div>`;
+    }else{
+      body = `
+        <div style="padding:0 16px 14px">
+          <div class="actions" style="margin-top:0">
+            <button class="btn-primary" style="flex:1" id="payDepositBtn">Pay 50% Deposit — ${fmtMoney(summary.total*0.5)}</button>
+            <button class="btn-ghost" style="flex:1" id="payFullBtn">Pay in Full — ${fmtMoney(summary.total)}</button>
+          </div>
+          <div id="paymentError" style="display:none;color:#e55;font-size:11.5px;margin-top:8px"></div>
+        </div>`;
+    }
+
     return `
       <section>
-        <div class="estimate" style="opacity:0.7">
-          <div style="padding:13px 16px;font-size:13px;font-weight:600;display:flex;justify-content:space-between;align-items:center">
-            <span>Payment</span>
-            <span style="font-size:10px;font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:0.05em;background:var(--panel2);padding:3px 8px;border-radius:5px">Coming soon</span>
-          </div>
-          <div style="padding:0 16px 14px;font-size:12px;color:var(--muted)">
-            Online payment isn't set up yet — for now, Inkable will follow up directly about paying your invoice.
-          </div>
+        <div class="estimate">
+          <div style="padding:13px 16px;font-size:13px;font-weight:600">Payment</div>
+          ${body}
         </div>
       </section>`;
+  }
+
+  async function startCheckout(amountType){
+    const btns = [document.getElementById('payDepositBtn'), document.getElementById('payFullBtn'), document.getElementById('payRemainingBtn')].filter(Boolean);
+    const errEl = document.getElementById('paymentError');
+    btns.forEach(b=>{ b.disabled = true; b.style.opacity = '0.6'; });
+    if(errEl) errEl.style.display = 'none';
+    try{
+      const res = await fetch(window.location.origin + '/api/create-checkout-session', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({token, amountType}),
+      });
+      const result = await res.json();
+      if(!res.ok || !result.url) throw new Error(result.error || "Couldn't start checkout.");
+      window.location.href = result.url;
+    }catch(e){
+      btns.forEach(b=>{ b.disabled = false; b.style.opacity = '1'; });
+      if(errEl){ errEl.textContent = e.message || "Couldn't start checkout — try again."; errEl.style.display = 'block'; }
+    }
   }
 
   function contactSectionHtml(){
@@ -302,7 +352,7 @@
   }
 
   function render(data){
-    card.innerHTML = jobHeadHtml(data) + proofSectionHtml(data) + estimateHtml(data.estimateSummary) + paymentSectionHtml() + contactSectionHtml();
+    card.innerHTML = jobHeadHtml(data) + proofSectionHtml(data) + estimateHtml(data.estimateSummary) + paymentSectionHtml(data) + contactSectionHtml();
     wireProofActions(data);
     const toggle = document.getElementById('estimateToggle');
     if(toggle){
@@ -311,6 +361,12 @@
         document.getElementById('estimateBody').classList.toggle('open');
       };
     }
+    const depositBtn = document.getElementById('payDepositBtn');
+    if(depositBtn) depositBtn.onclick = () => startCheckout('deposit');
+    const fullBtn = document.getElementById('payFullBtn');
+    if(fullBtn) fullBtn.onclick = () => startCheckout('full');
+    const remainingBtn = document.getElementById('payRemainingBtn');
+    if(remainingBtn) remainingBtn.onclick = () => startCheckout('full');
   }
 
   async function load(){
@@ -323,6 +379,20 @@
     }catch(e){
       showError("Couldn't load your job — check your connection and try again.");
     }
+  }
+
+  // Stripe redirects back here with ?payment=success right after checkout,
+  // before the webhook has necessarily finished updating the balance —
+  // so this shows a quick "updating" banner and reloads shortly after
+  // rather than the (possibly still-stale) balance from the first load.
+  const paymentParam = params.get('payment');
+  if(paymentParam === 'success'){
+    const banner = document.createElement('div');
+    banner.style.cssText = 'background:#1b3a1e;color:var(--green);border-radius:10px;padding:12px 16px;font-size:12.5px;font-weight:600;margin-top:20px';
+    banner.textContent = 'Payment received — updating your balance…';
+    document.querySelector('.wrap').insertBefore(banner, card);
+    history.replaceState(null, '', window.location.pathname + '?token=' + encodeURIComponent(token));
+    setTimeout(load, 3000);
   }
 
   load();

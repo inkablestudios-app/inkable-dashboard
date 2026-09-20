@@ -19,7 +19,7 @@ export default async (req) => {
     if (req.method === "GET") {
       const rows = await db.sql`
         SELECT ps.*, p.name AS job_name, p.est_no, p.state, p.saved_at, p.client_id,
-               jm.proof_link, jm.status, jm.install_date,
+               jm.proof_link, jm.status, jm.install_date, jm.payments,
                c.name AS client_name
         FROM proof_shares ps
         JOIN projects p ON p.id = ps.project_id
@@ -53,6 +53,13 @@ export default async (req) => {
       }
       const estimateSummary = state?.form?.estimateSummary || null;
 
+      let payments = r.payments;
+      if (typeof payments === "string") {
+        try { payments = JSON.parse(payments); } catch { payments = []; }
+      }
+      const paid = (payments || []).reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+      const balance = estimateSummary ? Math.max(0, estimateSummary.total - paid) : 0;
+
       return Response.json({
         jobName: state?.form?.jobName || r.job_name || "Your job",
         estNo: r.est_no || "",
@@ -64,6 +71,8 @@ export default async (req) => {
         response: r.response,
         responseNote: r.response_note,
         estimateSummary,
+        paid,
+        balance,
       });
     }
 
