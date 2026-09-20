@@ -180,6 +180,7 @@
               ${extraRows}
               <div class="totrow"><span>Subtotal</span><span>${fmtMoney(summary.sub - (summary.disc||0))}</span></div>
               <div class="totrow"><span>${summary.taxExempt ? 'Sales Tax (Exempt)' : 'Sales Tax'}</span><span>${fmtMoney(summary.tax)}</span></div>
+              ${summary.processingFeeOn && summary.processingFee > 0 ? `<div class="totrow"><span>Card Processing Fee</span><span>${fmtMoney(summary.processingFee)}</span></div>` : ''}
               <div class="totrow final"><span>Total</span><span>${fmtMoney(summary.total)}</span></div>
             </div>
           </div>

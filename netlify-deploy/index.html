@@ -226,7 +226,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 
 /* Discount section */
 .disc-section{background:#242424;border:1px solid #333;border-radius:8px;padding:11px 13px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.3)}
-.pricing-toggle-row{display:flex;gap:16px;margin-top:10px}
+.pricing-toggle-row{display:flex;gap:16px;margin-top:10px;flex-wrap:wrap}
 .pricing-toggle{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);cursor:pointer}
 .pricing-toggle input{width:13px;height:13px;accent-color:var(--blue);cursor:pointer}
 .pricing-toggle input:checked+span{color:var(--text)}
@@ -498,7 +498,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 <div class="topbar">
   <div class="topbar-brand">
     <div class="topbar-logo"><span>Inkable</span> Studios</div>
-    <div class="topbar-version">Dashboard v2.37</div>
+    <div class="topbar-version">Dashboard v2.38</div>
     <div class="topbar-version" id="syncStatusIndicator" style="margin-left:8px">☁ …</div>
   </div>
   <div class="topbar-right">
@@ -3414,6 +3414,7 @@ function getRates(){
     myCostInstall:pd.myCostInstall??25,
     setupRate:pd.setupRate??40,
     myCostSetup:pd.myCostSetup??20,
+    processingFeeRate:pd.processingFeeRate??2.9,
   };
 }
 
@@ -4080,6 +4081,7 @@ function renderSettingsPanel(){
   set('settingInstallSqftAdvanced',s.installSqftAdvanced);
   set('settingStaleEstimateDays',s.staleEstimateDays);
   set('settingOverdueBalanceDays',s.overdueBalanceDays);
+  set('settingProcessingFeeRate',s.processingFeeRate);
   renderMatCostRows('vinylCostRows','vinyl');
   renderMatCostRows('laminateCostRows','laminate');
   renderMatCostRows('substrateCostRows','substrate');
@@ -4163,6 +4165,7 @@ function saveSettings(){
   s.installSqftAdvanced=num('settingInstallSqftAdvanced',20);
   s.staleEstimateDays=num('settingStaleEstimateDays',7);
   s.overdueBalanceDays=num('settingOverdueBalanceDays',14);
+  s.processingFeeRate=num('settingProcessingFeeRate',2.9);
 
   // Merge into whatever else already lives under PRICING_KEY (e.g. QQ presets
   // saved by the legacy tool) rather than clobbering the whole object.
@@ -4348,6 +4351,11 @@ function openPricer(projNum, clientId){
   document.getElementById('minChargeChk').checked=false;
   document.getElementById('minChargeVal').value='25';
   document.getElementById('minChargeField').style.display='none';
+  // Checked by default on every new estimate. The SPA reuses this same
+  // overlay across multiple "new estimate" clicks without a page reload,
+  // so this reset has to be re-applied explicitly every time — the
+  // checkbox's HTML "checked" attribute only takes effect on first load.
+  document.getElementById('processingFeeChk').checked=true;
 
   // Open overlay first, then populate
   document.getElementById('pricerOverlay').classList.add('open');
@@ -4415,6 +4423,9 @@ function loadPricerFromSaved(project){
   document.getElementById('minChargeChk').checked=!!pd.minCharge;
   document.getElementById('minChargeVal').value=pd.minChargeVal||'25';
   document.getElementById('minChargeField').style.display=pd.minCharge?'flex':'none';
+  // Defaults false for jobs saved before this feature existed — don't
+  // silently turn on a fee for an estimate that was priced without one.
+  document.getElementById('processingFeeChk').checked=!!pd.processingFeeOn;
 
   (pd.lines||[]).forEach(line=>addLineItemFromSaved(line));
   if(!(pd.lines||[]).length) addLineItem(); // never leave the pricer with zero items
@@ -5280,6 +5291,7 @@ function renderLivePreview(d){
       <div class="lp-row subtotal"><span>Subtotal</span><span>$${d.sub.toFixed(2)}</span></div>
       ${discRow}
       <div class="lp-row"><span>Tax ${d.taxExempt?'(Exempt)':'(8.25%)'}</span><span>${d.taxExempt?'$0.00':'$'+d.tax.toFixed(2)}</span></div>
+      ${d.processingFeeOn&&d.processingFee>0?`<div class="lp-row"><span>Card Processing Fee</span><span>$${d.processingFee.toFixed(2)}</span></div>`:''}
       <div class="lp-total-row"><span>Total</span><span class="val">$${d.total.toFixed(2)}</span></div>
     </div>
   `;
@@ -5362,6 +5374,7 @@ function savePricerProject(){
       taxExempt:document.getElementById('taxExemptChk').checked,
       minCharge:document.getElementById('minChargeChk').checked,
       minChargeVal:document.getElementById('minChargeVal').value,
+      processingFeeOn:document.getElementById('processingFeeChk')?.checked!==false,
     }),
   }};
 
@@ -5384,6 +5397,7 @@ function savePricerProject(){
       setupTotal:d.setupTotal,designTotal:d.designTotal,totalInstall:d.totalInstall,
       hardwareTotal:d.hardwareTotal,disc:d.disc,dtype:d.dtype,dval:d.dval,
       sub:d.sub,taxable:d.taxable,tax:d.tax,total:d.total,taxExempt:d.taxExempt,
+      processingFee:d.processingFee,processingFeeOn:d.processingFeeOn,
     };
   }catch(err){
     console.warn('Could not build the client-facing estimate summary for this job:',err);
@@ -5795,7 +5809,12 @@ function gatherPricerPDFData(){
   if(minChargeOn&&taxable<minChargeVal){minChargeAdj=minChargeVal-taxable;taxable=minChargeVal;}
   const taxExempt=document.getElementById('taxExemptChk')?.checked;
   const tax=taxExempt?0:taxable*0.0825;
-  const total=taxable+tax;
+  // Card processing fee — manual, opt-in per job (checked by default),
+  // applied on top of tax+taxable so it reflects what actually gets run
+  // through the card, not just the pre-tax price.
+  const processingFeeOn=document.getElementById('processingFeeChk')?.checked;
+  const processingFee=processingFeeOn?(taxable+tax)*(rates.processingFeeRate/100):0;
+  const total=taxable+tax+processingFee;
 
   const jobName=(document.getElementById('pricerJobName')?.value||'').trim()||'Untitled Job';
   const notes=(document.getElementById('pricerNotes')?.value||'').trim();
@@ -5813,6 +5832,7 @@ function gatherPricerPDFData(){
   const clientPhone=client?client.phone||'':'';
 
   return{lineData,totalMat,totalInstall,designTotal,setupTotal,hardwareTotal,sub,dtype,dval,disc,taxable,tax,total,taxExempt,minChargeApplied:minChargeOn,minChargeAdj,
+    processingFee,processingFeeOn,
     jobName,notes,terms,date,estNo,invNo,clientName,clientAddr,clientCityLine,clientPhone};
 }
 
@@ -5833,7 +5853,7 @@ function textWidthTracked(doc,text,charSpace){
 function gatherPricerPDFDataFromSaved(p){
   const f=p.state?.form||{};
   const rates=getRates(), vinyl=getVinyl(), laminate=getLaminate(), substrate=getSubstrate();
-  let lineData=[], dtype='none', dval=0, hardwareTotal=0, setupTotal=0, taxExempt=false, minCharge=false, minChargeVal=0;
+  let lineData=[], dtype='none', dval=0, hardwareTotal=0, setupTotal=0, taxExempt=false, minCharge=false, minChargeVal=0, processingFeeOn=false;
 
   if(f.pricerData){
     const pd=JSON.parse(f.pricerData);
@@ -5841,6 +5861,9 @@ function gatherPricerPDFDataFromSaved(p){
     dval=parseFloat(pd.discVal)||0;
     taxExempt=!!pd.taxExempt;
     minCharge=!!pd.minCharge;
+    // Defaults to false for jobs saved before this feature existed —
+    // never silently add a fee to a job that was priced without it.
+    processingFeeOn=!!pd.processingFeeOn;
     minChargeVal=parseFloat(pd.minChargeVal)||0;
     hardwareTotal=(parseFloat(pd.hardware)||0)+(parseFloat(pd.subs)||0);
     const setupHrsTotal=(parseFloat(pd.setupHrs)||0)+(parseFloat(pd.setupMins)||0)/60;
@@ -5864,7 +5887,8 @@ function gatherPricerPDFDataFromSaved(p){
   let minChargeAdj=0;
   if(minCharge&&taxable<minChargeVal){minChargeAdj=minChargeVal-taxable;taxable=minChargeVal;}
   const tax=taxExempt?0:taxable*0.0825;
-  const total=taxable+tax;
+  const processingFee=processingFeeOn?(taxable+tax)*(rates.processingFeeRate/100):0;
+  const total=taxable+tax+processingFee;
 
   const clients=getClients();
   const client=f.clientId?clients.find(c=>c.id===f.clientId):null;
@@ -5874,6 +5898,7 @@ function gatherPricerPDFDataFromSaved(p){
   const clientPhone=client?client.phone||'':'';
 
   return{lineData,totalMat,totalInstall,designTotal,setupTotal,hardwareTotal,sub,dtype,dval,disc,taxable,tax,total,taxExempt,minChargeApplied:minCharge,minChargeAdj,
+    processingFee,processingFeeOn,
     jobName:f.jobName||'Untitled Job',
     notes:f.notes||'',
     terms:f.terms||'',
@@ -6345,7 +6370,7 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
   const H=792;
   // If the totals block (worst case ~6 rows + bar) won't fit before the page
   // bottom, start a fresh page so nothing gets cut off.
-  const neededH=9*16+30+30;
+  const neededH=10*16+30+30;
   if(y+neededH>H-60){ doc.addPage(); y=onNewPage?onNewPage(doc):M; }
 
   function row(lbl,amt,sublbl){
@@ -6369,6 +6394,7 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
   if(d.minChargeApplied&&d.minChargeAdj>0) row('Minimum Job Charge Adj.',d.minChargeAdj);
   row('Subtotal',d.sub-d.disc);
   row(d.taxExempt?'Sales Tax (Exempt)':'Sales Tax',d.tax,d.taxExempt?null:'(8.25%)');
+  if(d.processingFeeOn&&d.processingFee>0) row('Card Processing Fee',d.processingFee);
 
   y+=4;
   const BAR_H=30;
@@ -6479,6 +6505,10 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
             <label class="pricing-toggle">
               <input type="checkbox" id="minChargeChk" onchange="toggleMinCharge()"/>
               <span>Minimum Charge</span>
+            </label>
+            <label class="pricing-toggle">
+              <input type="checkbox" id="processingFeeChk" checked onchange="recalc()"/>
+              <span>Processing Fee</span>
             </label>
           </div>
           <div class="pi" id="minChargeField" style="display:none;margin-top:8px">
@@ -6651,6 +6681,7 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
         <div class="shop-row"><div><label>Setup rate</label><small>$/hr — trimming, file prep, printer setup. Always included on every job.</small></div><div class="pi"><span>$</span><input id="settingSetupRate" type="number" step="1" min="0"/></div></div>
         <div class="shop-row"><div><label>Print cost</label><small>Ink + machine time, $/sqft — applied per item when "Printed on our printer" is checked</small></div><div class="pi"><span>$</span><input id="settingPrintCost" type="number" step="0.01" min="0"/></div></div>
         <div class="shop-row"><div><label>Markup multiplier</label><small>Applied to all material costs</small></div><div class="pi"><span>×</span><input id="settingMarkup" type="number" step="0.1" min="1"/></div></div>
+        <div class="shop-row"><div><label>Card processing fee</label><small>% passed to the client when the Processing Fee checkbox is on (matches your Stripe rate — default 2.9%)</small></div><div class="pi"><input id="settingProcessingFeeRate" type="number" step="0.1" min="0"/><span>%</span></div></div>
       </div>
 
       <button onclick="toggleSettingsAccordion('sacc-mycosts')" class="shop-acc-btn" id="sacc-mycosts-btn">
