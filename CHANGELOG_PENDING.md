@@ -53,3 +53,12 @@
   - Re-saving a job keeps its date (from the pricer's Date field) instead of resetting it to today,
     which moved old jobs' costs into the current Reports period and reset reminders.
   - Reports "Est. / Invoices" counts jobs with a generated invoice (was always 0).
+- Projects / Sales / Clients review fixes:
+  - Sorting by date compared the text ("Apr" < "Oct" < "Sep"), so "newest first" was really
+    alphabetical by month. Now real dates. Est # sorts as numbers (EST-999 before EST-1000). Status sort
+    includes Awaiting Approval and In Design Revision (they sorted like "Send Estimate").
+  - Sales list is newest first (it was in alphabetical month order from the server).
+  - Changing status to "Awaiting Proof Approval" from the Projects list dropdown now clears the
+    client's old response, same as the job window already did.
+  - Search also finds jobs by the billing name on the estimate (jobs with no client record).
+  - Client detail shows "Paid to date" and "Owed now", and paid-of-total per job, newest first.

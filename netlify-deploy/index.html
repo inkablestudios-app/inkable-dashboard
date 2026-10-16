@@ -1552,6 +1552,11 @@ function changeClientInPricer(){
 // ── Projects ──────────────────────────────────────────────────────────
 // Shared by renderProjects() and the print view — guarantees what prints
 // is exactly what's on screen: same search, same status filter, same sort.
+// A job's date as a number for sorting (oldest = smallest); unreadable dates sort last.
+function jobDateValue(p){
+  const t=new Date(p.savedAt).getTime();
+  return isNaN(t)?0:t;
+}
 function getFilteredSortedProjects(){
   const projects=getProjects();
   const q=(document.getElementById('search-input')?.value||'').toLowerCase().trim();
@@ -1561,12 +1566,15 @@ function getFilteredSortedProjects(){
     const meta=getJobMeta(p.id);
     if(meta.status==='done'&&currentFilter!=='done') return false;
     const matchQ=!q||p.name?.toLowerCase().includes(q)||(p.estNo||'').toLowerCase().includes(q)||
-      clients.find(c=>c.id===p.clientId)?.name.toLowerCase().includes(q);
+      clients.find(c=>c.id===p.clientId)?.name.toLowerCase().includes(q)||
+      (p.state?.form?.billingName||'').toLowerCase().includes(q);
     const matchStatus=currentFilter==='all'||meta.status===currentFilter;
     return matchQ&&matchStatus;
   });
 
-  const statusOrder={send:0,art:1,prep:2,proof:3,approved:4,prod:5,done:6};
+  // Every status in workflow order (awaiting/revision were missing, so they
+  // sorted as if they were "Send Estimate").
+  const statusOrder={send:0,art:1,prep:2,proof:3,awaiting:4,revision:5,approved:6,prod:7,done:8};
   filtered.sort((a,b)=>{
     const ma=getJobMeta(a.id),mb=getJobMeta(b.id);
     const aRush=ma.tags?.includes('rush')?0:1;
@@ -1578,11 +1586,11 @@ function getFilteredSortedProjects(){
       const cb=clients.find(c=>c.id===b.clientId)?.name||(b.state?.form?.billingName||'');
       cmp=ca.localeCompare(cb);
     } else if(sortCol==='jobnum'){
-      cmp=(a.estNo||'').localeCompare(b.estNo||'');
+      cmp=(a.estNo||'').localeCompare(b.estNo||'',undefined,{numeric:true}); // EST-999 before EST-1000
     } else if(sortCol==='status'){
       cmp=(statusOrder[ma.status]||0)-(statusOrder[mb.status]||0);
     } else {
-      cmp=(a.savedAt||'').localeCompare(b.savedAt||'');
+      cmp=jobDateValue(a)-jobDateValue(b); // real dates — text sorted "Apr" before "Oct" before "Sep"
     }
     return sortDir==='asc'?cmp:-cmp;
   });
@@ -1647,8 +1655,13 @@ function renderProjects(){
 
 function quickStatusChange(id, sel){
   const meta=getJobMeta(id);
+  const before=meta.status;
   meta.status=sel.value;
   setJobMeta(id,meta);
+  // Same as the job window: moving back to "Awaiting Proof Approval" must
+  // clear the client's old response so their page offers Approve/Request
+  // Changes again (only the job window did this before).
+  if(before!==sel.value&&sel.value==='awaiting')resetClientResponseAndMarkAwaiting(id);
   sel.className=`status-badge ${STATUS_CLASS[sel.value]||'s-send'}`;
   refreshReminders();
   // If this change means the job no longer matches the filter you're
@@ -1699,7 +1712,8 @@ function renderSales(){
   if(!projects.length){el.innerHTML='';empty.style.display='flex';return;}
   empty.style.display='none';
 
-  el.innerHTML=projects.map(p=>{
+  const sorted=[...projects].sort((a,b)=>jobDateValue(b)-jobDateValue(a)||(b.estNo||'').localeCompare(a.estNo||'',undefined,{numeric:true}));
+  el.innerHTML=sorted.map(p=>{
     const cl=clients.find(c=>c.id===p.clientId);
     const clientName=cl?cl.name:(p.state?.form?.billingName||'—');
     const total=getProjectAmount(p);
@@ -2086,13 +2100,24 @@ function openClientDetail(clientId){
 
   const addrLine=[client.addr,client.city?(client.city+(client.state?', '+client.state:'')+(client.zip?' '+client.zip:'')):''].filter(Boolean).join(', ');
 
+  let lifetimePaid=0, owed=0;
+  projects.forEach(p=>{
+    const paid=getAmountPaid(p.id);
+    lifetimePaid+=paid;
+    if(isJobCommitted(p.id)&&!getJobMeta(p.id).excluded)owed+=Math.max(0,getProjectAmount(p)-paid);
+  });
+  const moneyHtml=projects.length?`<div style="display:flex;gap:18px;margin-bottom:12px">
+      <div><div style="font-size:16px;font-weight:800;color:var(--green)">${fmt(lifetimePaid)}</div><div style="font-size:10px;color:var(--muted)">Paid to date</div></div>
+      <div><div style="font-size:16px;font-weight:800;color:${owed>0.005?'var(--red)':'var(--muted)'}">${fmt(owed)}</div><div style="font-size:10px;color:var(--muted)">Owed now</div></div>
+    </div>`:'';
   const jobsHtml=projects.length
-    ? projects.map(p=>{
+    ? [...projects].sort((a,b)=>jobDateValue(b)-jobDateValue(a)).map(p=>{
         const total=getProjectAmount(p);
+        const paid=getAmountPaid(p.id);
         const meta=getJobMeta(p.id);
         return `<div onclick="closeClientDetail();openJobModal('${p.id}')" style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);cursor:pointer">
-          <span style="font-size:12px;color:var(--blue)">${p.estNo||p.name||'Job'}</span>
-          <span style="font-size:11px;color:var(--muted)">${STATUS_LABELS[meta.status]||meta.status} · $${total.toFixed(2)}</span>
+          <span style="font-size:12px;color:var(--blue)">${p.estNo||p.name||'Job'} <span style="color:var(--muted2)">${p.savedAt||''}</span></span>
+          <span style="font-size:11px;color:var(--muted)">${STATUS_LABELS[meta.status]||meta.status} · ${fmt(paid)} of ${fmt(total)}</span>
         </div>`;
       }).join('')
     : '<div style="font-size:12px;color:var(--muted2);padding:6px 0">No jobs yet.</div>';
@@ -2103,6 +2128,7 @@ function openClientDetail(clientId){
     ${client.leadSource?`<div style="font-size:11px;color:var(--blue);margin-bottom:8px">Source: ${LEAD_SOURCE_LABELS[client.leadSource]||client.leadSource}</div>`:''}
     ${client.notes?`<div style="font-size:12px;color:var(--muted);background:var(--dark);border-radius:6px;padding:8px 10px;margin-bottom:8px">${client.notes}</div>`:''}
     <div style="font-size:11px;color:${daysAgo!==null&&daysAgo>21?'var(--amber)':'var(--muted)'};margin-bottom:14px">${contactLine}</div>
+    ${moneyHtml}
     <div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Jobs (${projects.length})</div>
     ${jobsHtml}
   `;
