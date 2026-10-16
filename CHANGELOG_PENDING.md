@@ -6,3 +6,6 @@
 - Fix: payments can no longer be wiped by a Dashboard save. The server now merges payment lists by id
   instead of replacing them; deleting a payment sends an explicit `removedPaymentIds`. The webhook
   appends its payment in a single atomic database statement. Tested against Postgres (PGlite).
+- Fix: re-saving a job no longer wipes stored estimate/invoice PDFs on the server.
+- Fix: Sales/Reports totals include the card processing fee.
+- Fix: estimate save goes to the server first; a full browser storage now shows a warning instead of losing the save.

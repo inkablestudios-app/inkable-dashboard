@@ -4310,7 +4310,11 @@ function getProjectAmount(p){
       if(dtype==='flat')disc=Math.min(dval,sub);
       let taxable=sub-disc;
       if(pd.minCharge&&taxable<(parseFloat(pd.minChargeVal)||0))taxable=parseFloat(pd.minChargeVal)||0;
-      return pd.taxExempt?taxable:taxable+taxable*0.0825;
+      const withTax=pd.taxExempt?taxable:taxable+taxable*0.0825;
+      // Same rule as the Estimate PDF and the client page: the card fee is
+      // charged on top of taxable + tax. Leaving it out made Sales show a
+      // lower total than the client actually pays through Stripe.
+      return pd.processingFeeOn?withTax*(1+rates.processingFeeRate/100):withTax;
     }
 
     // Legacy single-item tool format
@@ -5423,8 +5427,16 @@ function savePricerProject(){
   const rawList=JSON.parse(localStorage.getItem(SAVED_KEY)||'[]');
   if(existing>=0){rawList[existing]=entry;}
   else{rawList.unshift(entry);}
-  localStorage.setItem(SAVED_KEY,JSON.stringify(rawList));
+  // Server first: if this device's storage is full, the save must still
+  // reach the cloud, and the owner must hear about it instead of the error
+  // silently stopping everything below.
   syncProjectToServer(entry);
+  try{
+    localStorage.setItem(SAVED_KEY,JSON.stringify(rawList));
+  }catch(err){
+    console.error('Local save failed (browser storage full?):',err);
+    showToast('⚠️','Saved to the cloud, but not on this device','This browser\'s storage is full. Reload the page to refresh the local copy from the cloud.',{color:'var(--red)',duration:12000});
+  }
 
   // Seed the pricer's cost breakdown as real, editable expense entries —
   // but only the FIRST time this job is saved. Once seeded, each one is

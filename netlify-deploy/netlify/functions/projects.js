@@ -57,11 +57,22 @@ export default async (req) => {
         INSERT INTO projects (id, name, est_no, project_num, client_id, saved_at, doc_type, state, exported_pdfs, updated_at)
         VALUES (${p.id}, ${p.name || ""}, ${p.estNo || ""}, ${p.projectNum || ""}, ${p.clientId || null},
                 ${p.savedAt || ""}, ${p.docType || "estimate"}, ${JSON.stringify(p.state || {})},
-                ${JSON.stringify(p.exportedPdfs || {})}, NOW())
+                ${JSON.stringify(p.exportedPdfs || {})}::jsonb, NOW())
         ON CONFLICT (id) DO UPDATE SET
           name=EXCLUDED.name, est_no=EXCLUDED.est_no, project_num=EXCLUDED.project_num,
           client_id=EXCLUDED.client_id, saved_at=EXCLUDED.saved_at, doc_type=EXCLUDED.doc_type,
-          state=EXCLUDED.state, exported_pdfs=EXCLUDED.exported_pdfs, updated_at=NOW()
+          state=EXCLUDED.state,
+          -- The Dashboard only keeps PDF *metadata* locally (no bytes), so a
+          -- normal re-save sends entries without "data". Keep the stored bytes
+          -- for those, and keep any PDF types the save didn't mention at all;
+          -- only an entry that carries new bytes replaces the old one.
+          exported_pdfs = (CASE WHEN jsonb_typeof(projects.exported_pdfs) = 'object' THEN projects.exported_pdfs ELSE '{}'::jsonb END) || COALESCE((
+            SELECT jsonb_object_agg(k,
+              CASE WHEN NOT jsonb_exists(v, 'data') AND jsonb_exists(COALESCE(projects.exported_pdfs -> k, '{}'::jsonb), 'data')
+                   THEN projects.exported_pdfs -> k ELSE v END)
+            FROM jsonb_each(EXCLUDED.exported_pdfs) AS x(k, v)
+          ), '{}'::jsonb),
+          updated_at=NOW()
         RETURNING *
       `;
       return Response.json(row);
