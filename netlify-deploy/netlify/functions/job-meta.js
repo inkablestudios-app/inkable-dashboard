@@ -34,15 +34,33 @@ export default async (req) => {
     if (method === "POST") {
       const m = await req.json();
       if (!m.projectId) return Response.json({ error: "projectId is required" }, { status: 400 });
+
+      // Payments are MERGED, never blindly replaced. The Stripe webhook
+      // writes payments straight to the server, so a Dashboard tab holding
+      // an older copy of this job must not wipe them out when it saves an
+      // unrelated change (status, notes...). Rule: keep every payment the
+      // server already has unless the Dashboard sent it (by id) or
+      // explicitly asked to delete it via removedPaymentIds.
+      const incomingPayments = Array.isArray(m.payments) ? m.payments : [];
+      const keepOutIds = JSON.stringify([
+        ...incomingPayments.map(p => p && p.id).filter(Boolean),
+        ...(Array.isArray(m.removedPaymentIds) ? m.removedPaymentIds : []),
+      ].map(String));
       const [row] = await db.sql`
         INSERT INTO job_meta (project_id, status, tags, notes, install_date, install_time, proof_link, payments, expenses, is_excluded, calendar_event_id, updated_at)
         VALUES (${m.projectId}, ${m.status || "send"}, ${JSON.stringify(m.tags || [])}, ${m.notes || ""},
-                ${m.installDate || ""}, ${m.installTime || ""}, ${m.proofLink || ""}, ${JSON.stringify(m.payments || [])},
+                ${m.installDate || ""}, ${m.installTime || ""}, ${m.proofLink || ""}, ${JSON.stringify(incomingPayments)}::jsonb,
                 ${JSON.stringify(m.expenses || [])}, ${!!m.excluded}, ${m.calendarEventId || ""}, NOW())
         ON CONFLICT (project_id) DO UPDATE SET
           status=EXCLUDED.status, tags=EXCLUDED.tags, notes=EXCLUDED.notes,
           install_date=EXCLUDED.install_date, install_time=EXCLUDED.install_time, proof_link=EXCLUDED.proof_link,
-          payments=EXCLUDED.payments, expenses=EXCLUDED.expenses,
+          payments=EXCLUDED.payments || COALESCE((
+            SELECT jsonb_agg(e) FROM jsonb_array_elements(
+              CASE WHEN jsonb_typeof(job_meta.payments) = 'array' THEN job_meta.payments ELSE '[]'::jsonb END
+            ) AS e
+            WHERE NOT jsonb_exists(${keepOutIds}::jsonb, e->>'id')
+          ), '[]'::jsonb),
+          expenses=EXCLUDED.expenses,
           is_excluded=EXCLUDED.is_excluded, calendar_event_id=EXCLUDED.calendar_event_id, updated_at=NOW()
         RETURNING *
       `;

@@ -68,31 +68,30 @@ export default async (req) => {
       const amount = (session.amount_total || 0) / 100;
 
       if (projectId && amount > 0) {
-        const rows = await db.sql`SELECT payments FROM job_meta WHERE project_id = ${projectId}`;
-        let payments = rows.length ? rows[0].payments : [];
-        if (typeof payments === "string") {
-          try { payments = JSON.parse(payments); } catch { payments = []; }
-        }
-        payments = payments || [];
-
-        // Idempotent — Stripe retries webhook deliveries, so the same
-        // session completing twice must not record the payment twice.
-        const alreadyRecorded = payments.some(p => p.stripeSessionId === session.id);
-        if (!alreadyRecorded) {
-          payments.push({
-            id: "pmt_" + Date.now() + "_" + Math.floor(Math.random() * 100000),
-            amount,
-            method: "Card (Stripe) — " + description,
-            date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
-            stripeSessionId: session.id,
-          });
-
-          await db.sql`
-            INSERT INTO job_meta (project_id, payments, updated_at)
-            VALUES (${projectId}, ${JSON.stringify(payments)}, NOW())
-            ON CONFLICT (project_id) DO UPDATE SET payments = ${JSON.stringify(payments)}, updated_at = NOW()
-          `;
-        }
+        const payment = {
+          id: "pmt_" + Date.now() + "_" + Math.floor(Math.random() * 100000),
+          amount,
+          method: "Card (Stripe) — " + description,
+          date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+          stripeSessionId: session.id,
+        };
+        // One atomic statement: append to whatever is in the database at
+        // this instant (no read-then-write gap a Dashboard save could slip
+        // into), and skip it if this session was already recorded —
+        // Stripe retries deliveries, so the same session can arrive twice.
+        const newList = JSON.stringify([payment]);
+        const sessionMatch = JSON.stringify([{ stripeSessionId: session.id }]);
+        await db.sql`
+          INSERT INTO job_meta (project_id, payments, updated_at)
+          VALUES (${projectId}, ${newList}::jsonb, NOW())
+          ON CONFLICT (project_id) DO UPDATE SET
+            payments = CASE
+              WHEN jsonb_typeof(job_meta.payments) = 'array' AND job_meta.payments @> ${sessionMatch}::jsonb
+                THEN job_meta.payments
+              ELSE (CASE WHEN jsonb_typeof(job_meta.payments) = 'array' THEN job_meta.payments ELSE '[]'::jsonb END) || ${newList}::jsonb
+            END,
+            updated_at = NOW()
+        `;
       }
     }
   } catch (err) {

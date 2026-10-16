@@ -1332,6 +1332,10 @@ function addPayment(id,amount,method,date){
 function removePayment(id,paymentId){
   const meta=getJobMeta(id);
   meta.payments=(meta.payments||[]).filter(p=>p.id!==paymentId);
+  // The server merges payments instead of replacing them (so a Stripe
+  // payment can't be wiped by a stale save), which means a deletion has
+  // to be stated explicitly or the server would just keep its copy.
+  meta.removedPaymentIds=[...new Set([...(meta.removedPaymentIds||[]),paymentId])];
   setJobMeta(id,meta);
 }
 function getAmountPaid(id){
@@ -3075,7 +3079,20 @@ function syncClientToServer(client){ cloudPush('/clients','POST',client); }
 function syncClientDeleteToServer(id){ cloudPush('/clients?id='+encodeURIComponent(id),'DELETE'); }
 function syncProjectToServer(project){ cloudPush('/projects','POST',project); }
 function syncProjectDeleteToServer(id){ cloudPush('/projects?id='+encodeURIComponent(id),'DELETE'); }
-function syncJobMetaToServer(projectId,data){ cloudPush('/job-meta','POST',{projectId,...data}); }
+async function syncJobMetaToServer(projectId,data){
+  const saved=await cloudPush('/job-meta','POST',{projectId,...data});
+  if(!saved||!Array.isArray(saved.payments))return;
+  // Adopt the server's merged payment list — it may hold a Stripe payment
+  // this device hadn't pulled yet. Deletions it confirmed are done, so
+  // their pending-delete markers can go.
+  const m=getMeta();
+  if(!m[projectId])return;
+  const sent=new Set(data.removedPaymentIds||[]);
+  const stillPending=(m[projectId].removedPaymentIds||[]).filter(pid=>!sent.has(pid));
+  m[projectId].payments=saved.payments.filter(p=>!stillPending.includes(p.id));
+  if(stillPending.length)m[projectId].removedPaymentIds=stillPending;else delete m[projectId].removedPaymentIds;
+  saveMeta(m);
+}
 function syncPricingToServer(data){ cloudPush('/pricing','POST',data); }
 
 // Pulls the server's current data on load and makes it the local cache.
