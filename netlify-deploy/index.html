@@ -3648,9 +3648,12 @@ function openSettings(){
     installSqftAdvanced:pd.installSqftAdvanced??20,
     staleEstimateDays:pd.staleEstimateDays??7,
     overdueBalanceDays:pd.overdueBalanceDays??14,
-    vinyl:{...DEFAULT_VINYL,...(pd.vinyl||{})},
-    laminate:{...DEFAULT_LAMINATE,...(pd.laminate||{})},
-    substrate:{...DEFAULT_SUBSTRATE,...(pd.substrate||{})},
+    processingFeeRate:pd.processingFeeRate??2.9,
+    // Your saved lists as they are. Mixing the defaults back in made a
+    // deleted default material reappear the next time Settings was saved.
+    vinyl:{...(pd.vinyl||DEFAULT_VINYL)},
+    laminate:{...(pd.laminate||DEFAULT_LAMINATE)},
+    substrate:{...(pd.substrate||DEFAULT_SUBSTRATE)},
   };
   renderSettingsPanel();
   renderBackupSummary();
@@ -4384,7 +4387,9 @@ function resetMatCategory(category){
 function saveSettings(){
   if(!settingsDraft)return;
   const s=settingsDraft;
-  const num=(id,fallback)=>parseFloat(document.getElementById(id)?.value)||fallback;
+  // 0 is a real value (e.g. no print cost, no card fee) — only an empty or
+  // unreadable box falls back to the default.
+  const num=(id,fallback)=>{ const v=parseFloat(document.getElementById(id)?.value); return isNaN(v)?fallback:v; };
   s.markup=num('settingMarkup',2.5);
   s.printCost=num('settingPrintCost',0.15);
   s.designBasic=num('settingDesignBasic',40);

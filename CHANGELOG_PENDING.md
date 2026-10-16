@@ -77,3 +77,8 @@
   - Client page now shows a "Minimum Job Charge Adjustment" row, so its rows add up to the total for
     jobs under the shop minimum (the total itself was already right).
   - Status "Send Proof" (your to-do) showed the client "Proof Sent"; it now says "Proof Ready".
+- Settings fixes:
+  - The card processing fee rate didn't load into Settings, so saving ANY setting reset it to 2.9%.
+  - Typing 0 in any setting (print cost, card fee, a "my cost") was replaced by the default.
+  - Deleting a default vinyl/laminate/substrate didn't stick: it came back the next time Settings
+    was saved.
