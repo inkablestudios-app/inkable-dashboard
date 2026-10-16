@@ -94,3 +94,15 @@
 - FIX: the Dashboard's server address was hard-coded to the LIVE site, so the test address saved
   through the live site's old server code. It now uses whichever site it's opened from.
 - Data tab text corrected: data lives in the cloud; the backup file is an extra safety copy.
+- Per-job deposit %: a "Deposit to start" box in the pricer (starts at the Settings default). The client
+  page button, the Stripe charge and the deposit-paid alert use that job's %.
+- Phone placeholder: phone is blank by default; client page shows "Phone line coming soon" (no
+  call/text links) and PDFs show "Coming soon" until a number is entered in Settings → Business.
+- Job status is protected: each status change is time-stamped, and the server keeps the NEWEST
+  change. A Dashboard save from a copy that hadn't synced can no longer undo a client's approval or
+  change request. Needs migration 009 (status_at column).
+- New Installs tab (📅): jobs grouped Overdue / Today / Tomorrow / Next 7 days / Later, plus approved or
+  in-production jobs with no install date. Shows time, client address and phone, and the amount still
+  to collect. Sidebar badge = overdue + next 7 days. Done and excluded jobs are left out.
+- Backup reminder in the bell when no backup has been downloaded in 30 days (Settings → Reminders);
+  clicking it opens Settings → Data. The last backup date syncs across devices.

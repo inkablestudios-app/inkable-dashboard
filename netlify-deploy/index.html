@@ -529,6 +529,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
       <span class="icon">💰</span> Sales
       <span class="nav-badge" id="badge-sales">0</span>
     </div>
+    <div class="nav-item" onclick="switchTab('installs')">
+      <span class="icon">📅</span> Installs
+      <span class="nav-badge" id="badge-installs" style="display:none">0</span>
+    </div>
     <div class="nav-item" onclick="switchTab('clients')">
       <span class="icon">👥</span> Clients
     </div>
@@ -732,6 +736,15 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
     </div>
 
     <!-- ── CLIENTS TAB ── -->
+    <!-- ── INSTALLS TAB — every job with an install date, soonest first;
+         replaces needing Google Calendar for day-to-day planning. -->
+    <div class="tab-content" id="tab-installs">
+      <div class="page-header">
+        <div class="page-title">Upcoming Installs</div>
+      </div>
+      <div id="installs-list" style="padding:16px 28px 28px;overflow-y:auto"></div>
+    </div>
+
     <div class="tab-content" id="tab-clients">
       <div class="page-header">
         <div class="page-title">Clients</div>
@@ -1255,6 +1268,9 @@ function getJobMeta(id){
 }
 function setJobMeta(id,data){
   const m=getMeta();
+  // Stamp the moment the status changes here, so the server can tell this
+  // newer change from an older one (e.g. a client's approval).
+  if(data&&data.status!==(m[id]?.status??'send'))data={...data,statusAt:Date.now()};
   m[id]=data;
   saveMeta(m);
   syncJobMetaToServer(id,data);
@@ -1341,6 +1357,12 @@ function getAmountPaid(id){
 // paid something, or it has reached Proof Approved / In Production / Done.
 // Estimates that were never accepted aren't debts.
 const COMMITTED_STATUSES=['approved','prod','done'];
+// The deposit % for one job: what was set on that job in the pricer, or
+// the Settings default for jobs saved before that box existed.
+function getJobDepositPct(p){
+  try{ const v=JSON.parse(p?.state?.form?.pricerData||'{}').depositPct; if(v>0)return v; }catch(e){}
+  return getRates().depositPct;
+}
 function isJobCommitted(id){
   return getAmountPaid(id)>0.005||COMMITTED_STATUSES.includes(getJobMeta(id).status);
 }
@@ -1388,6 +1410,7 @@ function switchTab(tab){
   if(tab==='projects') renderProjects();
   if(tab==='sales') renderSales();
   if(tab==='clients') renderClients();
+  if(tab==='installs') renderInstalls();
   if(tab==='reports') renderReports();
 }
 
@@ -1699,6 +1722,8 @@ function updateStats(projects){
   const unpaidCount=projects.filter(p=>!getJobMeta(p.id).excluded&&isJobCommitted(p.id)&&getPaymentStatus(p.id,getProjectAmount(p))!=='paid').length;
   document.getElementById('badge-projects').textContent=active;
   document.getElementById('badge-sales').textContent=unpaidCount;
+  updateInstallsBadge();
+  if(document.getElementById('tab-installs')?.classList.contains('active'))renderInstalls();
 }
 
 // ── Sales ──────────────────────────────────────────────────────────────
@@ -1811,12 +1836,12 @@ function submitPayment(){
   // the screen. Only fires on the crossing itself, not every payment
   // after a job's already past halfway.
   const paidAfter=paidBefore+amount;
-  const dep=getRates().depositPct/100;
+  const depPct=getJobDepositPct(proj), dep=depPct/100;
   if(total>0&&paidBefore<total*dep-0.005&&paidAfter>=total*dep-0.005){
     const clients=getClients();
     const cl=proj?clients.find(c=>c.id===proj.clientId):null;
     const who=cl?cl.name:(proj?.estNo||'This job');
-    showToast('💰','Deposit paid — ready to start the proof',`${who} (${proj?.estNo||''}) has paid the ${getRates().depositPct}% deposit.`,{color:'var(--amber)',duration:9000});
+    showToast('💰','Deposit paid — ready to start the proof',`${who} (${proj?.estNo||''}) has paid the ${depPct}% deposit.`,{color:'var(--amber)',duration:9000});
   }
 
   closePaymentModal();
@@ -1957,6 +1982,87 @@ function submitExpense(){
   closeExpenseModal();
   renderSales();
   renderReports();
+}
+
+// ── Upcoming Installs — jobs with an install date, grouped by when, plus
+// committed jobs that still need a date. Done and excluded jobs are left
+// out. The sidebar badge counts overdue + the next 7 days.
+function installDateOf(meta){
+  if(!meta.installDate)return null;
+  const d=new Date(meta.installDate+'T00:00:00'); // date picker value, local day
+  return isNaN(d)?null:d;
+}
+function getInstallGroups(){
+  const projects=getProjects(), clients=getClients();
+  const today=new Date(); today.setHours(0,0,0,0);
+  const dayMs=86400000;
+  const groups={overdue:[],today:[],tomorrow:[],week:[],later:[],nodate:[]};
+  projects.forEach(p=>{
+    const meta=getJobMeta(p.id);
+    if(meta.excluded||meta.status==='done')return;
+    const cl=clients.find(c=>c.id===p.clientId);
+    const item={p,meta,cl,date:installDateOf(meta)};
+    if(!item.date){
+      if(['approved','prod'].includes(meta.status))groups.nodate.push(item);
+      return;
+    }
+    const diff=Math.round((item.date-today)/dayMs);
+    if(diff<0)groups.overdue.push(item);
+    else if(diff===0)groups.today.push(item);
+    else if(diff===1)groups.tomorrow.push(item);
+    else if(diff<=7)groups.week.push(item);
+    else groups.later.push(item);
+  });
+  const byWhen=(a,b)=>(a.date-b.date)||((a.meta.installTime||'').localeCompare(b.meta.installTime||''));
+  Object.values(groups).forEach(g=>g.sort(byWhen));
+  return groups;
+}
+function fmtInstallTime(t){
+  if(!t)return '';
+  const [h,m]=t.split(':').map(Number);
+  if(isNaN(h))return t;
+  return ((h%12)||12)+':'+String(m||0).padStart(2,'0')+(h<12?' AM':' PM');
+}
+function renderInstalls(){
+  const el=document.getElementById('installs-list');
+  const g=getInstallGroups();
+  updateInstallsBadge(g);
+  if(!el)return;
+  const sections=[
+    ['overdue','Overdue — date has passed','var(--red)'],
+    ['today','Today','var(--green)'],
+    ['tomorrow','Tomorrow','var(--blue)'],
+    ['week','Next 7 days','var(--text)'],
+    ['later','Later','var(--muted)'],
+    ['nodate','Approved / in production — no install date yet','var(--amber)'],
+  ];
+  const row=it=>{
+    const {p,meta,cl,date}=it;
+    const who=cl?cl.name:(p.state?.form?.billingName||'—');
+    const addr=cl?[cl.addr,[cl.city,cl.state].filter(Boolean).join(', ')].filter(Boolean).join(', '):'';
+    const total=getProjectAmount(p), paid=getAmountPaid(p.id), bal=Math.max(0,total-paid);
+    const when=date?date.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})+(meta.installTime?' · '+fmtInstallTime(meta.installTime):''):'Set a date';
+    return `<div class="job-row" style="grid-template-columns:150px 1fr 150px 120px;cursor:pointer" onclick="openJobModal('${p.id}')">
+      <div style="font-weight:700;font-size:12px;color:var(--text)">${when}</div>
+      <div style="min-width:0">
+        <div style="font-weight:700;font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(who)} <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);font-weight:400">${escapeHtml(p.estNo||'')}</span></div>
+        <div style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(p.name||'')}${addr?' · 📍 '+escapeHtml(addr):''}${cl&&cl.phone?' · 📞 '+escapeHtml(cl.phone):''}</div>
+      </div>
+      <div><span class="status-badge ${STATUS_CLASS[meta.status]||'s-send'}" style="display:inline-flex">${STATUS_LABELS[meta.status]||meta.status}</span></div>
+      <div style="text-align:right;font-size:12px;font-weight:700;color:${bal>0.005?'var(--red)':'var(--green)'}">${bal>0.005?'Collect '+fmt(bal):'Paid ✓'}</div>
+    </div>`;
+  };
+  const html=sections.filter(([k])=>g[k].length).map(([k,title,color])=>`
+    <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${color};margin:18px 0 8px">${title} (${g[k].length})</div>
+    <div style="display:flex;flex-direction:column;gap:6px">${g[k].map(row).join('')}</div>`).join('');
+  el.innerHTML=html||`<div class="empty-state"><div class="icon">📅</div><h3>No installs scheduled</h3><p>Set an install date in a job's window and it shows up here.</p></div>`;
+}
+function updateInstallsBadge(g){
+  const b=document.getElementById('badge-installs');
+  if(!b)return;
+  g=g||getInstallGroups();
+  const n=g.overdue.length+g.today.length+g.tomorrow.length+g.week.length;
+  b.textContent=n; b.style.display=n?'':'none';
 }
 
 // ── Clients ────────────────────────────────────────────────────────────
@@ -3187,6 +3293,12 @@ async function syncJobMetaToServer(projectId,data){
   // confirmed are done, so their pending-delete markers can go.
   const m=getMeta();
   if(!m[projectId])return;
+  // The server keeps the newest status; if it kept a newer one than ours
+  // (the client approved meanwhile), show that one.
+  if(saved.status&&Number(saved.statusAt)>(Number(m[projectId].statusAt)||0)){
+    m[projectId].status=saved.status; m[projectId].statusAt=Number(saved.statusAt);
+    setTimeout(()=>{ renderProjects(); if(typeof renderSales==='function')renderSales(); },0);
+  }
   [['payments','removedPaymentIds'],['expenses','removedExpenseIds']].forEach(([listKey,removedKey])=>{
     if(!Array.isArray(saved[listKey]))return;
     const sent=new Set(data[removedKey]||[]);
@@ -3309,9 +3421,9 @@ function checkForNewCardPayments(oldMeta,newMeta){
       const total=getProjectAmount(proj);
       const paidAfter=getAmountPaid(pm.projectId);
       const paidBefore=paidAfter-fresh.filter(f=>f.projectId===pm.projectId).reduce((t,f)=>t+(parseFloat(f.amount)||0),0);
-      const dep=getRates().depositPct/100;
+      const depPct=getJobDepositPct(proj), dep=depPct/100;
       if(total>0&&paidBefore<total*dep-0.005&&paidAfter>=total*dep-0.005&&fresh.find(f=>f.projectId===pm.projectId)===pm){
-        showToast('💰','Deposit paid — ready to start the proof',`${who} (${proj.estNo||''}) has paid the ${getRates().depositPct}% deposit.`,{color:'var(--amber)',duration:9000});
+        showToast('💰','Deposit paid — ready to start the proof',`${who} (${proj.estNo||''}) has paid the ${depPct}% deposit.`,{color:'var(--amber)',duration:9000});
       }
     }
   });
@@ -3339,11 +3451,21 @@ function openNotifCardPayment(sessionId){
 // fresh every time this runs rather than tracked against a dismiss list.
 const EARLY_STATUSES=['send','art','prep','proof','awaiting'];
 function computeReminders(){
-  const{staleEstimateDays,overdueBalanceDays}=getReminderSettings();
+  const{staleEstimateDays,overdueBalanceDays,backupReminderDays}=getReminderSettings();
   const now=new Date();
   const projects=getProjects();
   const clients=getClients();
   const reminders=[];
+
+  // Backup nudge — only once there's something worth backing up.
+  if(projects.length){
+    const last=getPricingData().lastBackupAt;
+    const days=last?Math.floor((now-last)/86400000):null;
+    if(days===null||days>=backupReminderDays){
+      reminders.push({type:'backup',projectId:'__backup',estNo:'Settings → Data',
+        message:days===null?'You haven\'t downloaded a backup yet':`Last backup was ${days} days ago — time for a new one`});
+    }
+  }
 
   projects.forEach(p=>{
     if(getJobMeta(p.id).excluded)return; // consistent with exclusion everywhere else
@@ -3410,7 +3532,7 @@ function toggleNotifDropdown(){
         <div style="font-size:10.5px;color:var(--muted)">${n.estNo||''} · ${n.date||''}</div>
       </div>`).join('');
     const reminderItems=activeReminders.map(r=>{
-      const icon=r.type==='stale'?'⏳':'💵';
+      const icon=r.type==='stale'?'⏳':r.type==='backup'?'💾':'💵';
       return`<div class="menu-item" style="white-space:normal;line-height:1.4;padding:10px 12px" onclick="openNotifReminder('${r.projectId}')">
         <div style="font-size:12px;color:var(--text)">${icon} ${r.message}</div>
         <div style="font-size:10.5px;color:var(--muted)">${r.estNo||''}</div>
@@ -3423,6 +3545,12 @@ function toggleNotifDropdown(){
 }
 function openNotifReminder(projectId){
   document.getElementById('notifDropdown').style.display='none';
+  if(projectId==='__backup'){
+    openSettings();
+    const btn=[...document.querySelectorAll('.settings-tab')].find(b=>b.textContent.trim()==='Data');
+    switchSettingsTab('data',btn);
+    return;
+  }
   const proj=getProjects().find(p=>p.id===projectId);
   if(proj){
     switchTab('projects');
@@ -3619,7 +3747,8 @@ function getRates(){
 }
 // Business details and estimate defaults — shown on PDFs, the client page
 // and new estimates. Edited in Settings → Business.
-const DEFAULT_BUSINESS={bizEmail:'inkablestudios@gmail.com',bizPhone:'281-995-2973',bizInstagram:'@inkablehtx',defaultNotes:'',defaultTerms:''};
+// Phone left blank = "coming soon" on PDFs and the client page.
+const DEFAULT_BUSINESS={bizEmail:'inkablestudios@gmail.com',bizPhone:'',bizInstagram:'@inkablehtx',defaultNotes:'',defaultTerms:''};
 function getBusinessInfo(){
   const pd=getPricingData();
   const out={};
@@ -3636,6 +3765,7 @@ function getReminderSettings(){
   return{
     staleEstimateDays:pd.staleEstimateDays??7,
     overdueBalanceDays:pd.overdueBalanceDays??14,
+    backupReminderDays:pd.backupReminderDays??30,
   };
 }
 
@@ -3664,6 +3794,7 @@ function openSettings(){
     installSqftAdvanced:pd.installSqftAdvanced??20,
     staleEstimateDays:pd.staleEstimateDays??7,
     overdueBalanceDays:pd.overdueBalanceDays??14,
+    backupReminderDays:pd.backupReminderDays??30,
     processingFeeRate:pd.processingFeeRate??2.9,
     taxRate:pd.taxRate??8.25,
     depositPct:pd.depositPct??50,
@@ -3715,6 +3846,10 @@ function exportAllData(){
   const blob=new Blob([json],{type:'application/json'});
   const dateSlug=new Date().toISOString().slice(0,10);
   downloadBlob(blob,'inkable-backup-'+dateSlug+'.json');
+  const pd={...getPricingData(),lastBackupAt:Date.now()};
+  localStorage.setItem(PRICING_KEY,JSON.stringify(pd));
+  syncPricingToServer(pd);
+  refreshReminders();
 }
 function handleRestoreFile(event){
   const file=event.target.files?.[0];
@@ -4363,6 +4498,7 @@ function renderSettingsPanel(){
   set('settingInstallSqftAdvanced',s.installSqftAdvanced);
   set('settingStaleEstimateDays',s.staleEstimateDays);
   set('settingOverdueBalanceDays',s.overdueBalanceDays);
+  set('settingBackupReminderDays',s.backupReminderDays);
   set('settingProcessingFeeRate',s.processingFeeRate);
   set('settingTaxRate',s.taxRate);
   set('settingDepositPct',s.depositPct);
@@ -4456,6 +4592,7 @@ function saveSettings(){
   s.installSqftAdvanced=num('settingInstallSqftAdvanced',20);
   s.staleEstimateDays=num('settingStaleEstimateDays',7);
   s.overdueBalanceDays=num('settingOverdueBalanceDays',14);
+  s.backupReminderDays=Math.max(1,num('settingBackupReminderDays',30));
   s.processingFeeRate=num('settingProcessingFeeRate',2.9);
   s.taxRate=num('settingTaxRate',8.25);
   s.depositPct=Math.min(100,Math.max(1,num('settingDepositPct',50)));
@@ -4669,6 +4806,7 @@ function openPricer(projNum, clientId){
   // so this reset has to be re-applied explicitly every time — the
   // checkbox's HTML "checked" attribute only takes effect on first load.
   document.getElementById('processingFeeChk').checked=true;
+  document.getElementById('depositPctInput').value=getRates().depositPct;
 
   // Open overlay first, then populate
   document.getElementById('pricerOverlay').classList.add('open');
@@ -4741,6 +4879,7 @@ function loadPricerFromSaved(project){
   // Defaults false for jobs saved before this feature existed — don't
   // silently turn on a fee for an estimate that was priced without one.
   document.getElementById('processingFeeChk').checked=!!pd.processingFeeOn;
+  document.getElementById('depositPctInput').value=pd.depositPct!=null?pd.depositPct:getRates().depositPct;
 
   (pd.lines||[]).forEach(line=>addLineItemFromSaved(line));
   if(!(pd.lines||[]).length) addLineItem(); // never leave the pricer with zero items
@@ -5704,6 +5843,7 @@ function savePricerProject(){
       minChargeVal:document.getElementById('minChargeVal').value,
       processingFeeOn:document.getElementById('processingFeeChk')?.checked!==false,
       taxRate:pricerState.taxRate??getRates().taxRate,
+      depositPct:(()=>{ const v=parseFloat(document.getElementById('depositPctInput')?.value); return v>0?Math.min(100,v):getRates().depositPct; })(),
     }),
   }};
 
@@ -5736,6 +5876,7 @@ function savePricerProject(){
       sub:d.sub,taxable:d.taxable,tax:d.tax,total:d.total,taxExempt:d.taxExempt,
       processingFee:d.processingFee,processingFeeOn:d.processingFeeOn,
       minChargeAdj:d.minChargeAdj||0,
+      depositPct:JSON.parse(state.form.pricerData).depositPct,
     };
   }catch(err){
     console.warn('Could not build the client-facing estimate summary for this job:',err);
@@ -6431,7 +6572,7 @@ function drawEstimatePDF(doc,W,H,M,d){
   doc.setFont('helvetica','normal');doc.setTextColor(60);
   const biz=getBusinessInfo();
   doc.text(biz.bizEmail,M+158,footTop+31);
-  doc.text(biz.bizPhone,M+330,footTop+31);
+  doc.text(biz.bizPhone||'Coming soon',M+330,footTop+31);
   doc.addImage('data:image/png;base64,'+QR_B64,'PNG',W-M-38,footTop+5,36,36);
 }
 
@@ -6868,6 +7009,11 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
               <span>Processing Fee</span>
             </label>
           </div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+            <span style="font-size:11px;color:var(--muted)">Deposit to start</span>
+            <div class="pi" style="width:90px"><input type="number" id="depositPctInput" min="1" max="100" step="5" style="flex:1;background:none;border:none;color:var(--text);font-size:12px;font-family:'DM Mono',monospace;outline:none;padding:7px 0"/><span>%</span></div>
+            <span style="font-size:10px;color:var(--muted2)">this job only</span>
+          </div>
           <div class="pi" id="minChargeField" style="display:none;margin-top:8px">
             <span>$</span>
             <input type="number" id="minChargeVal" min="0" step="0.01" value="25" oninput="recalc()" style="flex:1;background:none;border:none;color:var(--text);font-size:12px;font-family:'DM Mono',monospace;outline:none;padding:7px 0"/>
@@ -7068,7 +7214,7 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
       <div class="settings-section-title">Contact details</div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.6">Printed on estimates, invoices and receipts, and shown on the client page.</div>
       <div class="shop-row"><div><label>Email</label></div><input id="settingBizEmail" type="email" style="width:100%;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;box-sizing:border-box;max-width:260px"/></div>
-      <div class="shop-row"><div><label>Phone</label><small>Call or text</small></div><input id="settingBizPhone" type="tel" style="width:100%;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;box-sizing:border-box;max-width:260px"/></div>
+      <div class="shop-row"><div><label>Phone</label><small>Call or text. Leave blank to show "coming soon".</small></div><input id="settingBizPhone" type="tel" style="width:100%;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;box-sizing:border-box;max-width:260px"/></div>
       <div class="shop-row"><div><label>Instagram</label></div><input id="settingBizInstagram" type="text" style="width:100%;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;box-sizing:border-box;max-width:260px"/></div>
       <div class="settings-section-title" style="margin-top:20px">Money</div>
       <div class="shop-row"><div><label>Deposit</label><small>% of the total a client pays to start (client page "Pay Deposit" button and the "deposit paid" alert)</small></div><div class="pi"><span>%</span><input id="settingDepositPct" type="number" step="5" min="1" max="100"/></div></div>
@@ -7160,6 +7306,14 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
         <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Flag a job with money still owed after this many days.</div>
         <div style="display:flex;align-items:center;gap:8px">
           <input type="number" id="settingOverdueBalanceDays" min="1" step="1" style="width:80px;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:'DM Mono',monospace;outline:none"/>
+          <span style="font-size:12px;color:var(--muted)">days</span>
+        </div>
+      </div>
+      <div style="background:var(--dark);border:1px solid var(--border);border-radius:10px;padding:16px;margin-top:14px">
+        <div style="font-weight:700;font-size:13px;margin-bottom:8px">Backup reminder</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Remind me to download a backup (Settings → Data) when the last one is older than this.</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="number" id="settingBackupReminderDays" min="1" step="1" style="width:80px;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px"/>
           <span style="font-size:12px;color:var(--muted)">days</span>
         </div>
       </div>

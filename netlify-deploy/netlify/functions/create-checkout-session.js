@@ -73,7 +73,8 @@ export default async (req) => {
     const settingsRows = await db.sql`SELECT data FROM pricing_settings WHERE id = 1`;
     let settings = settingsRows[0]?.data || {};
     if (typeof settings === "string") { try { settings = JSON.parse(settings); } catch { settings = {}; } }
-    const depositPct = Number(settings.depositPct) > 0 ? Math.min(100, Number(settings.depositPct)) : 50;
+    const depositPct = Math.min(100, Number(summary.depositPct) > 0 ? Number(summary.depositPct)
+      : Number(settings.depositPct) > 0 ? Number(settings.depositPct) : 50);
 
     let amount, description;
     if (paid > 0.005) {

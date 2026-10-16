@@ -24,7 +24,7 @@ export default async (req) => {
         out[r.project_id] = {
           status: r.status, tags: r.tags, notes: r.notes,
           installDate: r.install_date, installTime: r.install_time, proofLink: r.proof_link,
-          estimateVisualLink: r.estimate_visual_link,
+          estimateVisualLink: r.estimate_visual_link, statusAt: Number(r.status_at) || 0,
           payments: r.payments, expenses: r.expenses,
           excluded: r.is_excluded, calendarEventId: r.calendar_event_id,
         };
@@ -42,6 +42,10 @@ export default async (req) => {
       // unrelated change (status, notes...). Rule: keep every payment the
       // server already has unless the Dashboard sent it (by id) or
       // explicitly asked to delete it via removedPaymentIds.
+      // Status: the newest change wins. A save without a status time (older
+      // app versions) counts as time 0, so it only wins over rows that have
+      // never recorded one — the old behaviour.
+      const statusAt = Number(m.statusAt) > 0 ? Math.floor(Number(m.statusAt)) : 0;
       const incomingPayments = Array.isArray(m.payments) ? m.payments : [];
       const keepOutIds = JSON.stringify([
         ...incomingPayments.map(p => p && p.id).filter(Boolean),
@@ -54,12 +58,14 @@ export default async (req) => {
         ...(Array.isArray(m.removedExpenseIds) ? m.removedExpenseIds : []),
       ].map(String));
       const [row] = await db.sql`
-        INSERT INTO job_meta (project_id, status, tags, notes, install_date, install_time, proof_link, estimate_visual_link, payments, expenses, is_excluded, calendar_event_id, updated_at)
-        VALUES (${m.projectId}, ${m.status || "send"}, ${JSON.stringify(m.tags || [])}, ${m.notes || ""},
+        INSERT INTO job_meta (project_id, status, status_at, tags, notes, install_date, install_time, proof_link, estimate_visual_link, payments, expenses, is_excluded, calendar_event_id, updated_at)
+        VALUES (${m.projectId}, ${m.status || "send"}, ${statusAt}, ${JSON.stringify(m.tags || [])}, ${m.notes || ""},
                 ${m.installDate || ""}, ${m.installTime || ""}, ${m.proofLink || ""}, ${m.estimateVisualLink || ""}, ${JSON.stringify(incomingPayments)}::jsonb,
                 ${JSON.stringify(incomingExpenses)}::jsonb, ${!!m.excluded}, ${m.calendarEventId || ""}, NOW())
         ON CONFLICT (project_id) DO UPDATE SET
-          status=EXCLUDED.status, tags=EXCLUDED.tags, notes=EXCLUDED.notes,
+          status = CASE WHEN EXCLUDED.status_at >= COALESCE(job_meta.status_at, 0) THEN EXCLUDED.status ELSE job_meta.status END,
+          status_at = GREATEST(EXCLUDED.status_at, COALESCE(job_meta.status_at, 0)),
+          tags=EXCLUDED.tags, notes=EXCLUDED.notes,
           install_date=EXCLUDED.install_date, install_time=EXCLUDED.install_time, proof_link=EXCLUDED.proof_link, estimate_visual_link=EXCLUDED.estimate_visual_link,
           payments=EXCLUDED.payments || COALESCE((
             SELECT jsonb_agg(e) FROM jsonb_array_elements(
@@ -79,7 +85,7 @@ export default async (req) => {
       return Response.json({
         status: row.status, tags: row.tags, notes: row.notes,
         installDate: row.install_date, installTime: row.install_time, proofLink: row.proof_link,
-        estimateVisualLink: row.estimate_visual_link,
+        estimateVisualLink: row.estimate_visual_link, statusAt: Number(row.status_at) || 0,
         payments: row.payments, expenses: row.expenses,
         excluded: row.is_excluded, calendarEventId: row.calendar_event_id,
       });

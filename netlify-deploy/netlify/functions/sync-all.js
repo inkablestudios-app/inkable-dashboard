@@ -57,7 +57,7 @@ export default async (req) => {
     metaRows.forEach(r => {
       jobMeta[r.project_id] = {
         status: r.status, tags: r.tags, notes: r.notes,
-        installDate: r.install_date, installTime: r.install_time, proofLink: r.proof_link, estimateVisualLink: r.estimate_visual_link, payments: r.payments,
+        installDate: r.install_date, installTime: r.install_time, proofLink: r.proof_link, estimateVisualLink: r.estimate_visual_link, statusAt: Number(r.status_at) || 0, payments: r.payments,
         expenses: r.expenses, excluded: r.is_excluded, calendarEventId: r.calendar_event_id,
       };
     });

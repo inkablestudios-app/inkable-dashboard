@@ -78,10 +78,12 @@ export default async (req) => {
         estimateSummary,
         paid,
         balance,
-        depositPct: Number(settings.depositPct) > 0 ? Number(settings.depositPct) : 50,
+        // This job's own deposit % if it has one, else the shop default.
+        depositPct: Number(estimateSummary?.depositPct) > 0 ? Number(estimateSummary.depositPct)
+          : Number(settings.depositPct) > 0 ? Number(settings.depositPct) : 50,
         business: {
           email: settings.bizEmail ?? "inkablestudios@gmail.com",
-          phone: settings.bizPhone ?? "281-995-2973",
+          phone: settings.bizPhone ?? "",
           instagram: settings.bizInstagram ?? "@inkablehtx",
         },
       });
@@ -112,9 +114,9 @@ export default async (req) => {
       // field was ever synced.
       const newStatus = response === "approved" ? "approved" : "revision";
       await db.sql`
-        INSERT INTO job_meta (project_id, status, updated_at)
-        VALUES (${projectId}, ${newStatus}, NOW())
-        ON CONFLICT (project_id) DO UPDATE SET status = ${newStatus}, updated_at = NOW()
+        INSERT INTO job_meta (project_id, status, status_at, updated_at)
+        VALUES (${projectId}, ${newStatus}, ${Date.now()}, NOW())
+        ON CONFLICT (project_id) DO UPDATE SET status = ${newStatus}, status_at = ${Date.now()}, updated_at = NOW()
       `;
 
       return Response.json({ ok: true });
