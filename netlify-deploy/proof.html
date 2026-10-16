@@ -312,6 +312,7 @@
         </section>`;
     }
     const paid = data.paid || 0;
+    const dep = data.depositPct || 50;
     const balance = data.balance != null ? data.balance : Math.max(0, summary.total - paid);
 
     let body;
@@ -328,7 +329,7 @@
       body = `
         <div style="padding:0 16px 14px">
           <div class="actions" style="margin-top:0">
-            <button class="btn-primary" style="flex:1" id="payDepositBtn">Pay 50% Deposit — ${fmtMoney(summary.total*0.5)}</button>
+            <button class="btn-primary" style="flex:1" id="payDepositBtn">Pay ${dep}% Deposit — ${fmtMoney(summary.total*dep/100)}</button>
             <button class="btn-ghost" style="flex:1" id="payFullBtn">Pay in Full — ${fmtMoney(summary.total)}</button>
           </div>
           <div id="paymentError" style="display:none;color:#e55;font-size:11.5px;margin-top:8px"></div>
@@ -363,24 +364,27 @@
     }
   }
 
-  function contactSectionHtml(){
+  function esc(s){ const d=document.createElement('div'); d.textContent=s==null?'':String(s); return d.innerHTML; }
+  function contactSectionHtml(biz){
+    biz = biz || {};
+    const email = biz.email || 'inkablestudios@gmail.com';
+    const phone = biz.phone || '';
+    const ig = (biz.instagram || '').replace(/^@/, '');
     return `
       <section>
         <div class="sectiontitle">Questions about this job?</div>
         <div class="estimate">
           <div style="padding:14px 16px;font-size:12.5px;color:var(--text)">
-            <a href="mailto:inkablestudios@gmail.com" style="color:var(--blue);text-decoration:none;font-weight:600">✉ inkablestudios@gmail.com</a>
-          </div>
-          <div style="padding:0 16px 14px;font-size:12px;color:var(--muted)">
-            Direct messaging isn't set up yet.
-            <span style="font-size:10px;font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:0.05em;background:var(--panel2);padding:3px 8px;border-radius:5px;margin-left:4px">Coming soon</span>
+            <a href="mailto:${esc(email)}" style="color:var(--blue);text-decoration:none;font-weight:600">✉ ${esc(email)}</a>
+            ${phone ? `<div style="margin-top:8px"><a href="tel:${esc(phone.replace(/[^0-9+]/g,''))}" style="color:var(--blue);text-decoration:none;font-weight:600">📞 ${esc(phone)}</a> &nbsp;·&nbsp; <a href="sms:${esc(phone.replace(/[^0-9+]/g,''))}" style="color:var(--blue);text-decoration:none;font-weight:600">💬 Text us</a></div>` : ''}
+            ${ig ? `<div style="margin-top:8px"><a href="https://instagram.com/${esc(ig)}" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:none;font-weight:600">📷 @${esc(ig)}</a></div>` : ''}
           </div>
         </div>
       </section>`;
   }
 
   function render(data){
-    card.innerHTML = jobHeadHtml(data) + proofSectionHtml(data) + estimateVisualHtml(data) + estimateHtml(data.estimateSummary) + paymentSectionHtml(data) + contactSectionHtml();
+    card.innerHTML = jobHeadHtml(data) + proofSectionHtml(data) + estimateVisualHtml(data) + estimateHtml(data.estimateSummary) + paymentSectionHtml(data) + contactSectionHtml(data.business);
     wireProofActions(data);
     const toggle = document.getElementById('estimateToggle');
     if(toggle){

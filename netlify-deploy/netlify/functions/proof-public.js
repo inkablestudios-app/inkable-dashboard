@@ -54,6 +54,11 @@ export default async (req) => {
       if (typeof payments === "string") {
         try { payments = JSON.parse(payments); } catch { payments = []; }
       }
+      // Shop settings the client page needs (deposit %, contact details).
+      const settingsRows = await db.sql`SELECT data FROM pricing_settings WHERE id = 1`;
+      let settings = settingsRows[0]?.data || {};
+      if (typeof settings === "string") { try { settings = JSON.parse(settings); } catch { settings = {}; } }
+
       const paid = (payments || []).reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
       const balance = estimateSummary ? Math.max(0, estimateSummary.total - paid) : 0;
 
@@ -73,6 +78,12 @@ export default async (req) => {
         estimateSummary,
         paid,
         balance,
+        depositPct: Number(settings.depositPct) > 0 ? Number(settings.depositPct) : 50,
+        business: {
+          email: settings.bizEmail ?? "inkablestudios@gmail.com",
+          phone: settings.bizPhone ?? "281-995-2973",
+          instagram: settings.bizInstagram ?? "@inkablehtx",
+        },
       });
     }
 

@@ -72,6 +72,25 @@ export default async (req) => {
       return Response.json({ token });
     }
 
+    // Changing an existing password from Settings always requires the
+    // current password — an unlocked, logged-in device alone isn't enough.
+    if (body.action === "change-password") {
+      const rows = await db.sql`SELECT * FROM app_auth WHERE id = 1`;
+      if (!rows.length || !rows[0].password_hash) {
+        return Response.json({ error: "No password has been set yet." }, { status: 400 });
+      }
+      const ok = hashPassword(body.currentPassword || "", rows[0].password_salt) === rows[0].password_hash;
+      if (!ok) return Response.json({ error: "Current password is incorrect." }, { status: 401 });
+      if (!body.newPassword || body.newPassword.length < 8) {
+        return Response.json({ error: "New password must be at least 8 characters." }, { status: 400 });
+      }
+      const salt = crypto.randomBytes(16).toString("hex");
+      const hash = hashPassword(body.newPassword, salt);
+      await db.sql`UPDATE app_auth SET password_hash = ${hash}, password_salt = ${salt}, updated_at = NOW() WHERE id = 1`;
+      const token = makeToken({ exp: Date.now() + THIRTY_DAYS });
+      return Response.json({ token });
+    }
+
     if (body.action === "verify") {
       return Response.json({ valid: !!verifyToken(body.token) });
     }

@@ -82,3 +82,15 @@
   - Typing 0 in any setting (print cost, card fee, a "my cost") was replaced by the default.
   - Deleting a default vinyl/laminate/substrate didn't stick: it came back the next time Settings
     was saved.
+- New settings (Settings → Business and Data):
+  - Contact details (email, phone, Instagram) used on PDFs and the client page. Client page now has
+    tap-to-call, "Text us" and Instagram links (replaces the "messaging coming soon" placeholder).
+  - Deposit % (default 50): client page "Pay X% Deposit" button, the Stripe charge, and the
+    "deposit paid — ready to start" alerts.
+  - Sales tax rate (default 8.25%) for NEW estimates; each job keeps the rate it was priced with
+    (older jobs stay at 8.25%).
+  - Default notes and terms, pre-filled on every new estimate.
+  - Change password (needs the current password; min 8 characters).
+- FIX: the Dashboard's server address was hard-coded to the LIVE site, so the test address saved
+  through the live site's old server code. It now uses whichever site it's opened from.
+- Data tab text corrected: data lives in the cloud; the backup file is an extra safety copy.

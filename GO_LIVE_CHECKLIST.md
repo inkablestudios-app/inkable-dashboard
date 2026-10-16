@@ -18,3 +18,4 @@ Do NOT skip these. Tick each one off before taking real payments.
       job and opening a client link both work. If job saves fail with a server error, the migration
       didn't run.
 - [ ] Turn on Stripe email for successful payments (Settings > Notifications).
+- [ ] Settings → Business: check email, phone, Instagram, deposit %, tax rate, default terms.

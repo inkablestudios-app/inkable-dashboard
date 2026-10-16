@@ -70,13 +70,18 @@ export default async (req) => {
     // Once anything has been paid, "50% deposit" no longer means
     // anything — always charge the real remaining balance regardless of
     // which button was clicked.
+    const settingsRows = await db.sql`SELECT data FROM pricing_settings WHERE id = 1`;
+    let settings = settingsRows[0]?.data || {};
+    if (typeof settings === "string") { try { settings = JSON.parse(settings); } catch { settings = {}; } }
+    const depositPct = Number(settings.depositPct) > 0 ? Math.min(100, Number(settings.depositPct)) : 50;
+
     let amount, description;
     if (paid > 0.005) {
       amount = balance;
       description = "Remaining balance";
     } else if (amountType === "deposit") {
-      amount = summary.total * 0.5;
-      description = "50% deposit";
+      amount = summary.total * depositPct / 100;
+      description = depositPct + "% deposit";
     } else {
       amount = summary.total;
       description = "Full payment";

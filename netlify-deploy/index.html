@@ -1811,11 +1811,12 @@ function submitPayment(){
   // the screen. Only fires on the crossing itself, not every payment
   // after a job's already past halfway.
   const paidAfter=paidBefore+amount;
-  if(total>0&&paidBefore<total*0.5&&paidAfter>=total*0.5){
+  const dep=getRates().depositPct/100;
+  if(total>0&&paidBefore<total*dep-0.005&&paidAfter>=total*dep-0.005){
     const clients=getClients();
     const cl=proj?clients.find(c=>c.id===proj.clientId):null;
     const who=cl?cl.name:(proj?.estNo||'This job');
-    showToast('💰','50% paid — ready to start the proof',`${who} (${proj?.estNo||''}) just crossed the halfway mark.`,{color:'var(--amber)',duration:9000});
+    showToast('💰','Deposit paid — ready to start the proof',`${who} (${proj?.estNo||''}) has paid the ${getRates().depositPct}% deposit.`,{color:'var(--amber)',duration:9000});
   }
 
   closePaymentModal();
@@ -3066,7 +3067,10 @@ function logout(){
 // multiple devices safe to use — the database applies each change as its
 // own precise update, so two devices editing different things can't wipe
 // out each other's work the way a single shared file would.
-const CLOUD_API_BASE='https://inkable-dashboard.netlify.app/api';
+// Same site the Dashboard is opened from — the live site talks to the live
+// server code, the test address to the test code. (Hard-coding the live
+// address made the test site save through the OLD live functions.)
+const CLOUD_API_BASE=window.location.origin+'/api';
 let cloudSyncOk=null; // null = not attempted yet, true/false after first try
 // Several cloudPush() calls can fire in quick succession off a single save.
 // A later, unrelated push succeeding must NOT paper over an earlier real
@@ -3305,8 +3309,9 @@ function checkForNewCardPayments(oldMeta,newMeta){
       const total=getProjectAmount(proj);
       const paidAfter=getAmountPaid(pm.projectId);
       const paidBefore=paidAfter-fresh.filter(f=>f.projectId===pm.projectId).reduce((t,f)=>t+(parseFloat(f.amount)||0),0);
-      if(total>0&&paidBefore<total*0.5&&paidAfter>=total*0.5&&fresh.find(f=>f.projectId===pm.projectId)===pm){
-        showToast('💰','50% paid — ready to start the proof',`${who} (${proj.estNo||''}) just crossed the halfway mark.`,{color:'var(--amber)',duration:9000});
+      const dep=getRates().depositPct/100;
+      if(total>0&&paidBefore<total*dep-0.005&&paidAfter>=total*dep-0.005&&fresh.find(f=>f.projectId===pm.projectId)===pm){
+        showToast('💰','Deposit paid — ready to start the proof',`${who} (${proj.estNo||''}) has paid the ${getRates().depositPct}% deposit.`,{color:'var(--amber)',duration:9000});
       }
     }
   });
@@ -3608,7 +3613,18 @@ function getRates(){
     setupRate:pd.setupRate??40,
     myCostSetup:pd.myCostSetup??20,
     processingFeeRate:pd.processingFeeRate??2.9,
+    taxRate:pd.taxRate??8.25,
+    depositPct:pd.depositPct??50,
   };
+}
+// Business details and estimate defaults — shown on PDFs, the client page
+// and new estimates. Edited in Settings → Business.
+const DEFAULT_BUSINESS={bizEmail:'inkablestudios@gmail.com',bizPhone:'281-995-2973',bizInstagram:'@inkablehtx',defaultNotes:'',defaultTerms:''};
+function getBusinessInfo(){
+  const pd=getPricingData();
+  const out={};
+  Object.keys(DEFAULT_BUSINESS).forEach(k=>{ out[k]=pd[k]!=null?pd[k]:DEFAULT_BUSINESS[k]; });
+  return out;
 }
 
 // Two independent thresholds — how many days before a quiet estimate or
@@ -3649,6 +3665,9 @@ function openSettings(){
     staleEstimateDays:pd.staleEstimateDays??7,
     overdueBalanceDays:pd.overdueBalanceDays??14,
     processingFeeRate:pd.processingFeeRate??2.9,
+    taxRate:pd.taxRate??8.25,
+    depositPct:pd.depositPct??50,
+    ...getBusinessInfo(),
     // Your saved lists as they are. Mixing the defaults back in made a
     // deleted default material reappear the next time Settings was saved.
     vinyl:{...(pd.vinyl||DEFAULT_VINYL)},
@@ -4238,6 +4257,29 @@ async function resetClientResponseAndMarkAwaiting(jobId){
   }
 }
 
+async function changePassword(){
+  const cur=document.getElementById('pwCurrent').value;
+  const nw=document.getElementById('pwNew').value;
+  const cf=document.getElementById('pwConfirm').value;
+  const st=document.getElementById('pwStatus');
+  const say=(msg,ok)=>{ st.textContent=msg; st.style.color=ok?'var(--green)':'var(--red)'; };
+  if(!cur){ say('Enter your current password.'); return; }
+  if(nw.length<8){ say('New password needs at least 8 characters.'); return; }
+  if(nw!==cf){ say('The new passwords don\'t match.'); return; }
+  say('Saving…',true);
+  try{
+    // Requires the CURRENT password (not just this logged-in session), so
+    // someone using an unlocked device can't lock you out.
+    const res=await fetch(CLOUD_API_BASE+'/auth',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'change-password',currentPassword:cur,newPassword:nw})});
+    const data=await res.json();
+    if(!res.ok){ say(data.error||'Could not change the password.'); return; }
+    localStorage.setItem(AUTH_TOKEN_KEY,data.token);
+    ['pwCurrent','pwNew','pwConfirm'].forEach(id=>document.getElementById(id).value='');
+    say('Password changed ✓',true);
+  }catch(e){ say('Can\'t reach the server — check your connection.'); }
+}
+
 function closeSettings(){
   document.getElementById('settingsOverlay').classList.remove('open');
   settingsDraft=null;
@@ -4322,6 +4364,13 @@ function renderSettingsPanel(){
   set('settingStaleEstimateDays',s.staleEstimateDays);
   set('settingOverdueBalanceDays',s.overdueBalanceDays);
   set('settingProcessingFeeRate',s.processingFeeRate);
+  set('settingTaxRate',s.taxRate);
+  set('settingDepositPct',s.depositPct);
+  set('settingBizEmail',s.bizEmail);
+  set('settingBizPhone',s.bizPhone);
+  set('settingBizInstagram',s.bizInstagram);
+  set('settingDefaultNotes',s.defaultNotes);
+  set('settingDefaultTerms',s.defaultTerms);
   renderMatCostRows('vinylCostRows','vinyl');
   renderMatCostRows('laminateCostRows','laminate');
   renderMatCostRows('substrateCostRows','substrate');
@@ -4408,6 +4457,14 @@ function saveSettings(){
   s.staleEstimateDays=num('settingStaleEstimateDays',7);
   s.overdueBalanceDays=num('settingOverdueBalanceDays',14);
   s.processingFeeRate=num('settingProcessingFeeRate',2.9);
+  s.taxRate=num('settingTaxRate',8.25);
+  s.depositPct=Math.min(100,Math.max(1,num('settingDepositPct',50)));
+  const txt=id=>(document.getElementById(id)?.value||'').trim();
+  s.bizEmail=txt('settingBizEmail');
+  s.bizPhone=txt('settingBizPhone');
+  s.bizInstagram=txt('settingBizInstagram');
+  s.defaultNotes=txt('settingDefaultNotes');
+  s.defaultTerms=txt('settingDefaultTerms');
 
   // Merge into whatever else already lives under PRICING_KEY (e.g. QQ presets
   // saved by the legacy tool) rather than clobbering the whole object.
@@ -4541,7 +4598,7 @@ function getProjectAmount(p){
       if(dtype==='flat')disc=Math.min(dval,sub);
       let taxable=sub-disc;
       if(pd.minCharge&&taxable<(parseFloat(pd.minChargeVal)||0))taxable=parseFloat(pd.minChargeVal)||0;
-      const withTax=pd.taxExempt?taxable:taxable+taxable*0.0825;
+      const withTax=pd.taxExempt?taxable:taxable+taxable*(pd.taxRate!=null?pd.taxRate:8.25)/100;
       // Same rule as the Estimate PDF and the client page: the card fee is
       // charged on top of taxable + tax. Leaving it out made Sales show a
       // lower total than the client actually pays through Stripe.
@@ -4570,6 +4627,7 @@ function openPricer(projNum, clientId){
 
   pricerState={
     editingId:null, // set after the first save, so later saves update the same job
+    taxRate:getRates().taxRate, // locked into the job when saved
     projectNum:String(projNum),
     clientId:clientId||'',
     clientName:cl?cl.name:'',
@@ -4590,8 +4648,10 @@ function openPricer(projNum, clientId){
   document.getElementById('pricerEstNo').value=pricerState.estNo;
   document.getElementById('pricerDate').value=pricerState.date;
   syncJobIdentity();
-  document.getElementById('pricerNotes').value='';
-  document.getElementById('pricerTerms').value='';
+  // New estimates start with your saved default notes/terms (Settings → Business).
+  const biz=getBusinessInfo();
+  document.getElementById('pricerNotes').value=biz.defaultNotes||'';
+  document.getElementById('pricerTerms').value=biz.defaultTerms||'';
   document.getElementById('setupHrs').value='0';
   document.getElementById('setupMins').value='15';
   document.getElementById('pricerHardware').value='0';
@@ -4635,6 +4695,7 @@ function loadPricerFromSaved(project){
 
   pricerState={
     editingId:project.id,
+    taxRate:(()=>{ try{ const r=JSON.parse(f.pricerData||'{}').taxRate; return r!=null?r:8.25; }catch(e){ return 8.25; } })(),
     projectNum:String(project.projectNum),
     clientId:f.clientId||'',
     clientName:cl?cl.name:(f.billingName||''),
@@ -5429,8 +5490,10 @@ function recalc(){
 
   // Tax exempt — zeroes tax entirely for this job
   const taxExempt=document.getElementById('taxExemptChk')?.checked;
-  const tax=taxExempt?0:taxable*0.0825;
+  const taxRate=pricerState.taxRate??getRates().taxRate;
+  const tax=taxExempt?0:taxable*taxRate/100;
   const total=taxable+tax;
+  ['strip-tax-label','mp-tax-label'].forEach(id=>{const e=document.getElementById(id); if(e)e.textContent='Tax '+taxRate+'%';});
 
   // Update right panel
   document.getElementById('t-materials').textContent='$'+totalMat.toFixed(2);
@@ -5544,7 +5607,7 @@ function renderLivePreview(d){
       ${extraRows}
       <div class="lp-row subtotal"><span>Subtotal</span><span>$${d.sub.toFixed(2)}</span></div>
       ${discRow}
-      <div class="lp-row"><span>Tax ${d.taxExempt?'(Exempt)':'(8.25%)'}</span><span>${d.taxExempt?'$0.00':'$'+d.tax.toFixed(2)}</span></div>
+      <div class="lp-row"><span>Tax ${d.taxExempt?'(Exempt)':'('+(d.taxRate??8.25)+'%)'}</span><span>${d.taxExempt?'$0.00':'$'+d.tax.toFixed(2)}</span></div>
       ${d.processingFeeOn&&d.processingFee>0?`<div class="lp-row"><span>Card Processing Fee</span><span>$${d.processingFee.toFixed(2)}</span></div>`:''}
       <div class="lp-total-row"><span>Total</span><span class="val">$${d.total.toFixed(2)}</span></div>
     </div>
@@ -5640,6 +5703,7 @@ function savePricerProject(){
       minCharge:document.getElementById('minChargeChk').checked,
       minChargeVal:document.getElementById('minChargeVal').value,
       processingFeeOn:document.getElementById('processingFeeChk')?.checked!==false,
+      taxRate:pricerState.taxRate??getRates().taxRate,
     }),
   }};
 
@@ -6056,7 +6120,7 @@ function printTaxReport(){
     <table><thead><tr><th>Sales Summary</th><th class="num"></th></tr></thead><tbody>
       <tr><td>Gross sales collected</td><td class="num">$${grossSales.toFixed(2)}</td></tr>
       <tr><td>Taxable sales (gross minus tax)</td><td class="num">$${taxableSales.toFixed(2)}</td></tr>
-      <tr><td><b>Sales tax collected (8.25%)</b></td><td class="num"><b>$${rep.taxCollected.toFixed(2)}</b></td></tr>
+      <tr><td><b>Sales tax collected</b></td><td class="num"><b>$${rep.taxCollected.toFixed(2)}</b></td></tr>
     </tbody></table>
     <div class="summary">
       <div class="summary-row total"><span>Estimated tax due</span><span>$${rep.taxCollected.toFixed(2)}</span></div>
@@ -6100,7 +6164,8 @@ function gatherPricerPDFData(){
   let minChargeAdj=0;
   if(minChargeOn&&taxable<minChargeVal){minChargeAdj=minChargeVal-taxable;taxable=minChargeVal;}
   const taxExempt=document.getElementById('taxExemptChk')?.checked;
-  const tax=taxExempt?0:taxable*0.0825;
+  const taxRate=pricerState.taxRate??getRates().taxRate;
+  const tax=taxExempt?0:taxable*taxRate/100;
   // Card processing fee — manual, opt-in per job (checked by default),
   // applied on top of tax+taxable so it reflects what actually gets run
   // through the card, not just the pre-tax price.
@@ -6124,7 +6189,7 @@ function gatherPricerPDFData(){
   const clientPhone=client?client.phone||'':'';
 
   return{lineData,totalMat,totalInstall,designTotal,setupTotal,hardwareTotal,sub,dtype,dval,disc,taxable,tax,total,taxExempt,minChargeApplied:minChargeOn,minChargeAdj,
-    processingFee,processingFeeOn,
+    processingFee,processingFeeOn,taxRate,
     jobName,notes,terms,date,estNo,invNo,clientName,clientAddr,clientCityLine,clientPhone};
 }
 
@@ -6147,8 +6212,10 @@ function gatherPricerPDFDataFromSaved(p){
   const rates=getRates(), vinyl=getVinyl(), laminate=getLaminate(), substrate=getSubstrate();
   let lineData=[], dtype='none', dval=0, hardwareTotal=0, setupTotal=0, taxExempt=false, minCharge=false, minChargeVal=0, processingFeeOn=false;
 
+  let taxRate=8.25; // jobs saved before the setting existed were priced at 8.25%
   if(f.pricerData){
     const pd=JSON.parse(f.pricerData);
+    if(pd.taxRate!=null)taxRate=pd.taxRate;
     dtype=pd.discType||'none';
     dval=parseFloat(pd.discVal)||0;
     taxExempt=!!pd.taxExempt;
@@ -6178,7 +6245,7 @@ function gatherPricerPDFDataFromSaved(p){
   let taxable=sub-disc;
   let minChargeAdj=0;
   if(minCharge&&taxable<minChargeVal){minChargeAdj=minChargeVal-taxable;taxable=minChargeVal;}
-  const tax=taxExempt?0:taxable*0.0825;
+  const tax=taxExempt?0:taxable*taxRate/100;
   const processingFee=processingFeeOn?(taxable+tax)*(rates.processingFeeRate/100):0;
   const total=taxable+tax+processingFee;
 
@@ -6190,7 +6257,7 @@ function gatherPricerPDFDataFromSaved(p){
   const clientPhone=client?client.phone||'':'';
 
   return{lineData,totalMat,totalInstall,designTotal,setupTotal,hardwareTotal,sub,dtype,dval,disc,taxable,tax,total,taxExempt,minChargeApplied:minCharge,minChargeAdj,
-    processingFee,processingFeeOn,
+    processingFee,processingFeeOn,taxRate,
     jobName:f.jobName||'Untitled Job',
     notes:f.notes||'',
     terms:f.terms||'',
@@ -6362,8 +6429,9 @@ function drawEstimatePDF(doc,W,H,M,d){
   doc.text('Email:',M+158,footTop+17);
   doc.text('Call us or Text:',M+330,footTop+17);
   doc.setFont('helvetica','normal');doc.setTextColor(60);
-  doc.text('inkablestudios@gmail.com',M+158,footTop+31);
-  doc.text('281-995-2973',M+330,footTop+31);
+  const biz=getBusinessInfo();
+  doc.text(biz.bizEmail,M+158,footTop+31);
+  doc.text(biz.bizPhone,M+330,footTop+31);
   doc.addImage('data:image/png;base64,'+QR_B64,'PNG',W-M-38,footTop+5,36,36);
 }
 
@@ -6472,8 +6540,8 @@ function drawInvoicePDF(doc,W,H,M,d){
   const textX=ic2x+icR+10;
   doc.setFont('helvetica','normal');doc.setFontSize(9.5);doc.setTextColor(255,255,255);
   doc.setCharSpace(0.8);
-  doc.text('@inkablehtx',textX,footY+FOOT_H/2-4);
-  doc.text('inkablestudios@gmail.com',textX,footY+FOOT_H/2+10);
+  doc.text(getBusinessInfo().bizInstagram,textX,footY+FOOT_H/2-4);
+  doc.text(getBusinessInfo().bizEmail,textX,footY+FOOT_H/2+10);
   doc.setCharSpace(0);
 
   const QR_SZ=42;
@@ -6559,8 +6627,8 @@ function drawReceiptPDF(doc,W,H,M,d){
   const textX=ic2x+icR+10;
   doc.setFont('helvetica','normal');doc.setFontSize(9.5);doc.setTextColor(255,255,255);
   doc.setCharSpace(0.3);
-  doc.text('@inkablehtx',textX,H-FOOT_H+FOOT_H/2-2);
-  doc.text('inkablestudios@gmail.com',textX,H-FOOT_H+FOOT_H/2+10);
+  doc.text(getBusinessInfo().bizInstagram,textX,H-FOOT_H+FOOT_H/2-2);
+  doc.text(getBusinessInfo().bizEmail,textX,H-FOOT_H+FOOT_H/2+10);
   doc.setCharSpace(0);
   doc.addImage('data:image/png;base64,'+QR_B64,'PNG',W-M-QR_SZ,H-FOOT_H+(FOOT_H-QR_SZ)/2,QR_SZ,QR_SZ);
 }
@@ -6682,7 +6750,7 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
   if(d.disc>0) row('Discount',-d.disc,d.dtype==='pct'?'('+d.dval+'%)':null);
   if(d.minChargeApplied&&d.minChargeAdj>0) row('Minimum Job Charge Adj.',d.minChargeAdj);
   row('Subtotal',d.sub-d.disc);
-  row(d.taxExempt?'Sales Tax (Exempt)':'Sales Tax',d.tax,d.taxExempt?null:'(8.25%)');
+  row(d.taxExempt?'Sales Tax (Exempt)':'Sales Tax',d.tax,d.taxExempt?null:'('+(d.taxRate??8.25)+'%)');
   if(d.processingFeeOn&&d.processingFee>0) row('Card Processing Fee',d.processingFee);
 
   y+=4;
@@ -6890,7 +6958,7 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
       <div class="stat-strip">
         <div class="stat-block"><div class="stat-label">Subtotal</div><div class="stat-val" id="strip-subtotal">$0.00</div></div>
         <div class="stat-block"><div class="stat-label">Discount</div><div class="stat-val discount" id="strip-discount">—</div></div>
-        <div class="stat-block"><div class="stat-label">Tax 8.25%</div><div class="stat-val" id="strip-tax">$0.00</div></div>
+        <div class="stat-block"><div class="stat-label" id="strip-tax-label">Tax 8.25%</div><div class="stat-val" id="strip-tax">$0.00</div></div>
         <div class="stat-block"><div class="stat-label">Total</div><div class="stat-val total" id="strip-total">$0.00</div></div>
       </div>
 
@@ -6916,7 +6984,7 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
           <div class="si"><div class="lb">Install</div><div class="vl" id="mp-install">—</div></div>
           <div class="si"><div class="lb">Hardware</div><div class="vl" id="mp-hardware">—</div></div>
           <div class="si" style="border-left:1px solid var(--border);padding-left:8px"><div class="lb">Total Cost</div><div class="vl" id="mp-totalcost">—</div></div>
-          <div class="si" style="border-left:1px solid var(--border);padding-left:8px"><div class="lb">Tax (8.25%)</div><div class="vl" id="mp-tax">—</div></div>
+          <div class="si" style="border-left:1px solid var(--border);padding-left:8px"><div class="lb" id="mp-tax-label">Tax (8.25%)</div><div class="vl" id="mp-tax">—</div></div>
           <div class="si" style="border-left:1px solid var(--border);padding-left:8px">
             <div class="lb">Margin</div>
             <div class="vl" id="t-margin-dollar" style="font-weight:800">—</div>
@@ -6940,6 +7008,7 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
   </div>
   <div class="settings-tabs">
     <button class="settings-tab active" onclick="switchSettingsTab('shop',this)">Shop</button>
+    <button class="settings-tab" onclick="switchSettingsTab('business',this)">Business</button>
     <button class="settings-tab" onclick="switchSettingsTab('vinyl',this)">Vinyl</button>
     <button class="settings-tab" onclick="switchSettingsTab('laminate',this)">Laminate</button>
     <button class="settings-tab" onclick="switchSettingsTab('substrate',this)">Substrate</button>
@@ -6994,6 +7063,23 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
       </div>
     </div>
 
+    <!-- BUSINESS TAB -->
+    <div class="settings-tab-panel" id="stab-business">
+      <div class="settings-section-title">Contact details</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.6">Printed on estimates, invoices and receipts, and shown on the client page.</div>
+      <div class="shop-row"><div><label>Email</label></div><input id="settingBizEmail" type="email" style="width:100%;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;box-sizing:border-box;max-width:260px"/></div>
+      <div class="shop-row"><div><label>Phone</label><small>Call or text</small></div><input id="settingBizPhone" type="tel" style="width:100%;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;box-sizing:border-box;max-width:260px"/></div>
+      <div class="shop-row"><div><label>Instagram</label></div><input id="settingBizInstagram" type="text" style="width:100%;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;box-sizing:border-box;max-width:260px"/></div>
+      <div class="settings-section-title" style="margin-top:20px">Money</div>
+      <div class="shop-row"><div><label>Deposit</label><small>% of the total a client pays to start (client page "Pay Deposit" button and the "deposit paid" alert)</small></div><div class="pi"><span>%</span><input id="settingDepositPct" type="number" step="5" min="1" max="100"/></div></div>
+      <div class="shop-row"><div><label>Sales tax rate</label><small>For NEW estimates. Saved jobs keep the rate they were priced with.</small></div><div class="pi"><span>%</span><input id="settingTaxRate" type="number" step="0.01" min="0"/></div></div>
+      <div class="settings-section-title" style="margin-top:20px">New estimate defaults</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.6">Filled in automatically on every new estimate. You can still edit them per job.</div>
+      <label style="font-size:11px;color:var(--muted)">Default notes</label>
+      <textarea id="settingDefaultNotes" rows="3" style="width:100%;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;box-sizing:border-box;margin:4px 0 12px"></textarea>
+      <label style="font-size:11px;color:var(--muted)">Default terms</label>
+      <textarea id="settingDefaultTerms" rows="4" placeholder="e.g. {50% deposit to start, balance due at install or pickup. Proofs approved in writing.}" style="width:100%;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;box-sizing:border-box;margin-top:4px"></textarea>
+    </div>
     <!-- VINYL TAB -->
     <div class="settings-tab-panel" id="stab-vinyl">
       <div class="settings-section-title">Vinyl — your cost per sqft</div>
@@ -7024,11 +7110,21 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
         </div>
         <button class="btn btn-ghost" style="border-color:var(--red);color:var(--red)" onclick="logout()">Log Out</button>
       </div>
+      <div style="background:var(--dark);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px">
+        <div style="font-weight:700;font-size:13px;margin-bottom:8px">Change password</div>
+        <input id="pwCurrent" type="password" autocomplete="current-password" placeholder="Current password" style="width:100%;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;box-sizing:border-box;margin-bottom:8px"/>
+        <input id="pwNew" type="password" autocomplete="new-password" placeholder="New password (at least 8 characters)" style="width:100%;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;box-sizing:border-box;margin-bottom:8px"/>
+        <input id="pwConfirm" type="password" autocomplete="new-password" placeholder="Type the new password again" style="width:100%;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;box-sizing:border-box;margin-bottom:10px"/>
+        <div style="display:flex;align-items:center;gap:10px">
+          <button class="btn btn-primary" onclick="changePassword()">Change Password</button>
+          <span id="pwStatus" style="font-size:11px"></span>
+        </div>
+        <div style="font-size:10.5px;color:var(--muted2);margin-top:8px">Other devices stay logged in until they log out.</div>
+      </div>
 
       <div class="settings-section-title">Backup &amp; restore</div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.6">
-        Everything in this tool — every project, client, payment, and rate — lives only in this browser. Nothing is stored anywhere else. If this browser's data ever gets cleared, or you switch devices, there's no way to get it back unless you've exported a backup first.
-      </div>
+        Your data lives in the cloud database and syncs to every device you log in on. A backup file is an extra safety copy you keep yourself: download one every month or so and keep it somewhere safe (email it to yourself, or save it to Drive).</div>
 
       <div style="background:var(--dark);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px">
         <div style="font-weight:700;font-size:13px;margin-bottom:4px">Export a backup</div>
@@ -7039,7 +7135,7 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
 
       <div style="background:var(--dark);border:1px solid var(--border);border-radius:10px;padding:16px">
         <div style="font-weight:700;font-size:13px;margin-bottom:4px;color:var(--red)">Restore from a backup</div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.5">This replaces everything currently in the tool with what's in the backup file. Anything created since that backup was made will be lost. There's no undo.</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.5">Puts every job and client in the backup file back the way it was when the backup was made. Jobs, clients and payments added after the backup are kept.</div>
         <input type="file" id="restoreFileInput" accept="application/json" style="display:none" onchange="handleRestoreFile(event)"/>
         <button class="btn btn-ghost" style="border-color:var(--red);color:var(--red)" onclick="document.getElementById('restoreFileInput').click()">Choose Backup File…</button>
       </div>
