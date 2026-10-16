@@ -2010,6 +2010,8 @@ function deleteProjectConfirm(id){
 
   const updated=projects.filter(pr=>pr.id!==id);
   localStorage.setItem(SAVED_KEY,JSON.stringify(updated));
+  // Unsent edits for this job (payments, status...) would only be rejected now.
+  const box=readOutbox(); delete box['/job-meta:'+id]; writeOutbox(box);
   syncProjectDeleteToServer(id);
 
   // Clean up the associated status/tags/notes/payments too, so nothing
@@ -3112,7 +3114,11 @@ function queueUnsent(path,method,body,stamp){
   }
   const box=readOutbox();
   const key=outboxKey(path,body);
-  if(!box[key]||box[key].stamp<=stamp)box[key]={path,method,body,stamp};
+  if(!box[key]||box[key].stamp<=stamp){
+    // A retry of the same change keeps its rejection count; a newer change starts fresh.
+    const rejected=box[key]&&box[key].stamp===stamp?box[key].rejected:0;
+    box[key]={path,method,body,stamp,rejected};
+  }
   writeOutbox(box);
 }
 async function cloudPush(path,method,body,opts2){
@@ -3124,7 +3130,7 @@ async function cloudPush(path,method,body,opts2){
     const opts={method,headers};
     if(body!==undefined)opts.body=JSON.stringify(body);
     const res=await fetch(CLOUD_API_BASE+path,opts);
-    if(!res.ok)throw new Error('Server returned '+res.status);
+    if(!res.ok){ const e=new Error('Server returned '+res.status); e.httpStatus=res.status; throw e; }
     // Delivered — drop a queued copy of this record unless a newer change
     // for it was queued after this one started.
     const box=readOutbox(), key=outboxKey(path,body);
@@ -3133,6 +3139,7 @@ async function cloudPush(path,method,body,opts2){
     return await res.json();
   }catch(err){
     console.warn('Cloud sync failed for',path,err);
+    lastPushHttpStatus=err.httpStatus||0;
     queueUnsent(path,method,body,stamp);
     updateSyncIndicator(false);
     return null;
@@ -3140,11 +3147,27 @@ async function cloudPush(path,method,body,opts2){
 }
 // Re-sends everything waiting in the outbox, oldest first. True only if
 // nothing is left unsent.
+// One change the server keeps REJECTING (not just unreachable) — e.g. a
+// payment for a job that was since deleted — must not block every other
+// change forever: after 5 rejected tries it's dropped, with a notice.
+// Changes that simply couldn't reach the server are never dropped.
+let lastPushHttpStatus=0;
 async function flushOutbox(){
   const entries=Object.values(readOutbox()).sort((a,b)=>a.stamp-b.stamp);
   for(const e of entries){
     const result=await cloudPush(e.path,e.method,e.body,{stamp:e.stamp});
-    if(result===null)return false;
+    if(result!==null)continue;
+    if(!lastPushHttpStatus)return false; // offline / unreachable: stop, try later
+    if(lastPushHttpStatus===401)return false; // logged out: keep it for after login
+    const box=readOutbox(), key=outboxKey(e.path,e.body);
+    if(!box[key])continue;
+    box[key].rejected=(box[key].rejected||0)+1;
+    if(box[key].rejected>=5){
+      console.error('Dropping a change the server keeps rejecting:',box[key]);
+      delete box[key];
+      showToast('⚠️','A change could not be saved to the cloud',`The server kept rejecting an update (${e.path.split('?')[0].replace('/','')}). Check that job and re-enter the change if it's missing.`,{color:'var(--red)',duration:15000});
+    }
+    writeOutbox(box);
   }
   return Object.keys(readOutbox()).length===0;
 }
@@ -3636,10 +3659,10 @@ function openSettings(){
   document.getElementById('settingsOverlay').classList.add('open');
 }
 
-// ── Backup / Restore — every localStorage key this app uses, bundled into
-// one downloadable file. This is the only way data survives a cleared
-// browser, a new device, or a browser reinstall — nothing here is synced
-// anywhere else.
+// ── Backup / Restore — the app's main data (jobs, clients, job status and
+// payments, pricing) bundled into one downloadable file, as a safety copy
+// independent of the cloud database. Not included: stored PDF files and
+// client-link responses, which live only in the cloud.
 const BACKUP_KEYS={
   inkable_saved_estimates:SAVED_KEY,
   inkable_clients:CLIENTS_KEY,
@@ -3689,7 +3712,7 @@ function handleRestoreFile(event){
     const projCount=(backup.data.inkable_saved_estimates||[]).length;
     const clientCount=(backup.data.inkable_clients||[]).length;
     const madeOn=backup.exportedAt||'an unknown date';
-    const warn=`Restore this backup?\n\nBackup made: ${madeOn}\nContains: ${projCount} project(s), ${clientCount} client(s)\n\nThis REPLACES everything currently in the tool — on THIS DEVICE AND in the cloud, once synced. Anything created since this backup was made will be permanently lost. This can't be undone.`;
+    const warn=`Restore this backup?\n\nBackup made: ${madeOn}\nContains: ${projCount} project(s), ${clientCount} client(s)\n\nEvery job and client in this backup will be put back the way it was when the backup was made, on this device and in the cloud. Jobs, clients and payments added AFTER the backup are kept. This can't be undone.`;
     if(!confirm(warn)){ event.target.value=''; return; }
 
     Object.keys(BACKUP_KEYS).forEach(key=>{

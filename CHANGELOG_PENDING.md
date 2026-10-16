@@ -62,3 +62,13 @@
     client's old response, same as the job window already did.
   - Search also finds jobs by the billing name on the estimate (jobs with no client record).
   - Client detail shows "Paid to date" and "Owed now", and paid-of-total per job, newest first.
+- Final review pass:
+  - Pricing math checked: 60 random estimates (flat/material lines, design, install hourly/flat,
+    discounts, minimum charge, tax-exempt, card fee) give the same total in the live preview, the PDF,
+    the saved job and Sales. No changes needed.
+  - Outbox hardening: a change the server keeps rejecting (e.g. an offline edit to a job that was then
+    deleted) no longer blocks all syncing. Other queued changes still go out; after 5 rejections it's
+    dropped with a red notice. Changes that just couldn't reach the server are never dropped. Deleting a
+    job clears its queued edits.
+  - Restore-from-backup message now says what it really does (puts backed-up jobs/clients back; keeps
+    anything added later) instead of claiming everything newer is lost.
