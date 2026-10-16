@@ -40,6 +40,11 @@ Written after a read-through of v2.38 on 2026-10-16. Keep this updated when the 
    (Likely related to the `inkable_saved_estimates` storage error in the old screenshot; older versions
    kept PDF bytes in the browser. Not fully confirmed.)
 
+## Decisions made
+- Money owed = committed jobs only (paid something, or Proof Approved / In Production / Done).
+- Stripe's fee is recorded as a job expense automatically.
+- Same price for every payment method; Processing Fee box ON by default.
+
 ## Known gaps / decisions for the owner
 - DONE: client page works before a proof; estimate visual slot; card payment alerts; one open
   checkout per job; frozen totals. (See CHANGELOG_PENDING.md.)

@@ -1337,6 +1337,13 @@ function removePayment(id,paymentId){
 function getAmountPaid(id){
   return getPayments(id).reduce((s,p)=>s+p.amount,0);
 }
+// A job counts as money owed only once the client has committed: they've
+// paid something, or it has reached Proof Approved / In Production / Done.
+// Estimates that were never accepted aren't debts.
+const COMMITTED_STATUSES=['approved','prod','done'];
+function isJobCommitted(id){
+  return getAmountPaid(id)>0.005||COMMITTED_STATUSES.includes(getJobMeta(id).status);
+}
 function getPaymentStatus(id,total){
   const paid=getAmountPaid(id);
   if(paid<=0)return 'unpaid';
@@ -1676,7 +1683,7 @@ function updateStats(projects){
   // (unpaid jobs specifically, not every job ever sold), Clients doesn't
   // get one — a client count isn't really an "action needed" signal the
   // way the other two are.
-  const unpaidCount=projects.filter(p=>getPaymentStatus(p.id,getProjectAmount(p))==='unpaid').length;
+  const unpaidCount=projects.filter(p=>!getJobMeta(p.id).excluded&&isJobCommitted(p.id)&&getPaymentStatus(p.id,getProjectAmount(p))!=='paid').length;
   document.getElementById('badge-projects').textContent=active;
   document.getElementById('badge-sales').textContent=unpaidCount;
 }
@@ -1699,8 +1706,9 @@ function renderSales(){
     const paid=getAmountPaid(p.id);
     const balance=Math.max(0,total-paid);
     const status=getPaymentStatus(p.id,total);
-    const badgeClass=status==='paid'?'pay-paid':status==='partial'?'pay-partial':'pay-unpaid';
-    const badgeLabel=status==='paid'?'Paid':status==='partial'?'Partial':'Unpaid';
+    const committed=isJobCommitted(p.id);
+    const badgeClass=status==='paid'?'pay-paid':status==='partial'?'pay-partial':committed?'pay-unpaid':'';
+    const badgeLabel=status==='paid'?'Paid':status==='partial'?'Partial':committed?'Unpaid':'Estimate';
     const excluded=getJobMeta(p.id).excluded;
     const fin=getJobFinancials(p);
     const marginPct=fin.taxable>0?(fin.profit/fin.taxable*100):0;
@@ -1722,10 +1730,10 @@ function renderSales(){
       </div>
       <div class="amount">$${total.toFixed(2)}</div>
       <div class="amount" style="color:${paidColor}">$${paid.toFixed(2)}</div>
-      <div class="amount" style="color:${balance>0?'var(--red)':'var(--muted)'}">$${balance.toFixed(2)}</div>
+      <div class="amount" style="color:${balance>0&&committed?'var(--red)':'var(--muted)'}" title="${committed?'':'Not committed yet: not counted as owed'}">$${balance.toFixed(2)}</div>
       <div class="amount" onclick="event.stopPropagation();openExpenseListModal('${p.id}')" style="color:${costColor};cursor:pointer;text-decoration:underline;text-underline-offset:2px" title="View or edit this job's expenses">$${fin.cost.total.toFixed(2)}</div>
       <div class="amount" style="color:${profitColor}">$${fin.profit.toFixed(2)}<div style="font-size:9.5px;color:var(--muted);font-weight:400">${marginPct.toFixed(0)}%</div></div>
-      <div><span class="${badgeCls}" style="${isResolved?'background:var(--panel2);color:var(--muted)':''}">${badgeLabel}</span></div>
+      <div><span class="${badgeCls}" style="${isResolved||!badgeClass?'background:var(--panel2);color:var(--muted)':''}">${badgeLabel}</span></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
         <button class="pay-record-btn" onclick="openPaymentModal('${p.id}')">+ Payment</button>
         <button class="pay-record-btn" onclick="openExpenseModal('${p.id}')" style="border-color:var(--amber);color:var(--amber)">+ Expense</button>
@@ -1829,7 +1837,10 @@ function updateExpense(id,expenseId,description,amount,date){
 function removeExpense(id,expenseId){
   const meta=getJobMeta(id);
   const expenses=(meta.expenses||[]).filter(e=>e.id!==expenseId);
-  setJobMeta(id,{...meta,expenses});
+  // Same as payments: the server merges lists (the Stripe fee is added
+  // there), so a deletion has to be stated explicitly.
+  const removedExpenseIds=[...new Set([...(meta.removedExpenseIds||[]),expenseId])];
+  setJobMeta(id,{...meta,expenses,removedExpenseIds});
 }
 function getTotalExpenses(id){
   return getExpenses(id).reduce((s,e)=>s+e.amount,0);
@@ -2677,6 +2688,7 @@ function computeReportsDataForRange(range){
         taxCollected+=pmt.amount*taxRatio;
       }
     });
+    if(!isJobCommitted(p.id))return; // open estimates aren't owed money
     if(fin.balance>0.005)outstandingBalance+=fin.balance;
     const status=getPaymentStatus(p.id,fin.revenue);
     if(status==='unpaid'){unpaidCount++;unpaidTotal+=fin.revenue;}
@@ -3069,16 +3081,19 @@ function syncProjectToServer(project){ cloudPush('/projects','POST',project); }
 function syncProjectDeleteToServer(id){ cloudPush('/projects?id='+encodeURIComponent(id),'DELETE'); }
 async function syncJobMetaToServer(projectId,data){
   const saved=await cloudPush('/job-meta','POST',{projectId,...data});
-  if(!saved||!Array.isArray(saved.payments))return;
-  // Adopt the server's merged payment list — it may hold a Stripe payment
-  // this device hadn't pulled yet. Deletions it confirmed are done, so
-  // their pending-delete markers can go.
+  if(!saved)return;
+  // Adopt the server's merged lists — they may hold a Stripe payment or
+  // Stripe fee this device hadn't pulled yet. Deletions the server just
+  // confirmed are done, so their pending-delete markers can go.
   const m=getMeta();
   if(!m[projectId])return;
-  const sent=new Set(data.removedPaymentIds||[]);
-  const stillPending=(m[projectId].removedPaymentIds||[]).filter(pid=>!sent.has(pid));
-  m[projectId].payments=saved.payments.filter(p=>!stillPending.includes(p.id));
-  if(stillPending.length)m[projectId].removedPaymentIds=stillPending;else delete m[projectId].removedPaymentIds;
+  [['payments','removedPaymentIds'],['expenses','removedExpenseIds']].forEach(([listKey,removedKey])=>{
+    if(!Array.isArray(saved[listKey]))return;
+    const sent=new Set(data[removedKey]||[]);
+    const stillPending=(m[projectId][removedKey]||[]).filter(x=>!sent.has(x));
+    m[projectId][listKey]=saved[listKey].filter(x=>!stillPending.includes(x.id));
+    if(stillPending.length)m[projectId][removedKey]=stillPending;else delete m[projectId][removedKey];
+  });
   saveMeta(m);
 }
 function syncPricingToServer(data){ cloudPush('/pricing','POST',data); }
@@ -3239,7 +3254,7 @@ function computeReminders(){
 
     const total=getProjectAmount(p);
     const balance=Math.max(0,total-getAmountPaid(p.id));
-    if(balance>0.005&&daysOld>=overdueBalanceDays){
+    if(balance>0.005&&daysOld>=overdueBalanceDays&&isJobCommitted(p.id)){
       reminders.push({
         type:'overdue',projectId:p.id,estNo:p.estNo,
         message:`${who} has a $${balance.toFixed(2)} balance outstanding, ${daysOld} days old`,
@@ -5777,9 +5792,10 @@ function printSalesList(){
     const balance=Math.max(0,total-paid);
     const fin=getJobFinancials(p);
     const excluded=getJobMeta(p.id).excluded;
-    if(!excluded){totalAll+=total;paidAll+=paid;balAll+=balance;marginAll+=fin.profit;expensesAll+=fin.cost.total;}
+    const committed=isJobCommitted(p.id);
+    if(!excluded&&committed){totalAll+=total;paidAll+=paid;balAll+=balance;marginAll+=fin.profit;expensesAll+=fin.cost.total;}
     const status=getPaymentStatus(p.id,total);
-    const statusLabel=status==='paid'?'Paid':status==='partial'?'Partial':'Unpaid';
+    const statusLabel=status==='paid'?'Paid':status==='partial'?'Partial':committed?'Unpaid':'Estimate';
     return `<tr>
       <td>${clientName}</td>
       <td class="muted">${p.estNo||'—'}</td>
@@ -5795,7 +5811,7 @@ function printSalesList(){
     <th>Client</th><th>Job #</th><th class="num">Total</th><th class="num">Paid</th><th class="num">Balance</th><th class="num">Expenses</th><th class="num">Margin</th><th>Status</th>
   </tr></thead><tbody>${rows||'<tr><td colspan="8" class="muted">No sales yet.</td></tr>'}</tbody></table>
   <div class="summary">
-    <div class="summary-row"><span>Total invoiced</span><span>$${totalAll.toFixed(2)}</span></div>
+    <div class="summary-row"><span>Total sold (committed jobs)</span><span>$${totalAll.toFixed(2)}</span></div>
     <div class="summary-row"><span>Total collected</span><span>$${paidAll.toFixed(2)}</span></div>
     <div class="summary-row total"><span>Balance outstanding</span><span>$${balAll.toFixed(2)}</span></div>
     <div class="summary-row"><span>Total expenses</span><span>$${expensesAll.toFixed(2)}</span></div>

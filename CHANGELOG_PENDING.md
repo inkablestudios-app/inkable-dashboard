@@ -35,3 +35,10 @@
   - Printed Sales list: excluded jobs are still listed but no longer added into the totals.
   - Payment and expense dates use a date picker (free text could silently drop a payment from
     every report if the date didn't parse).
+- Only COMMITTED jobs count as owed (paid something, or status Proof Approved / In Production /
+  Done): Reports "Balance owed", unpaid/partial counts, Sales sidebar badge, overdue reminders and the
+  printed Sales totals. Open estimates show an "Estimate" badge in Sales instead of red "Unpaid".
+- Stripe's fee is recorded automatically as a job expense ("Stripe card fee") when a card payment
+  arrives: the exact fee from Stripe, or 2.9% + 30c marked "(estimated)" if the lookup fails.
+- Expenses are now merged on the server like payments (so a Dashboard save can't wipe the Stripe fee);
+  deleting an expense sends an explicit removedExpenseIds.

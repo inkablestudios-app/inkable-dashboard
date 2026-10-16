@@ -47,11 +47,17 @@ export default async (req) => {
         ...incomingPayments.map(p => p && p.id).filter(Boolean),
         ...(Array.isArray(m.removedPaymentIds) ? m.removedPaymentIds : []),
       ].map(String));
+      // Same rule for expenses — the webhook adds the Stripe fee there.
+      const incomingExpenses = Array.isArray(m.expenses) ? m.expenses : [];
+      const keepOutExpenseIds = JSON.stringify([
+        ...incomingExpenses.map(e => e && e.id).filter(Boolean),
+        ...(Array.isArray(m.removedExpenseIds) ? m.removedExpenseIds : []),
+      ].map(String));
       const [row] = await db.sql`
         INSERT INTO job_meta (project_id, status, tags, notes, install_date, install_time, proof_link, estimate_visual_link, payments, expenses, is_excluded, calendar_event_id, updated_at)
         VALUES (${m.projectId}, ${m.status || "send"}, ${JSON.stringify(m.tags || [])}, ${m.notes || ""},
                 ${m.installDate || ""}, ${m.installTime || ""}, ${m.proofLink || ""}, ${m.estimateVisualLink || ""}, ${JSON.stringify(incomingPayments)}::jsonb,
-                ${JSON.stringify(m.expenses || [])}, ${!!m.excluded}, ${m.calendarEventId || ""}, NOW())
+                ${JSON.stringify(incomingExpenses)}::jsonb, ${!!m.excluded}, ${m.calendarEventId || ""}, NOW())
         ON CONFLICT (project_id) DO UPDATE SET
           status=EXCLUDED.status, tags=EXCLUDED.tags, notes=EXCLUDED.notes,
           install_date=EXCLUDED.install_date, install_time=EXCLUDED.install_time, proof_link=EXCLUDED.proof_link, estimate_visual_link=EXCLUDED.estimate_visual_link,
@@ -61,7 +67,12 @@ export default async (req) => {
             ) AS e
             WHERE NOT jsonb_exists(${keepOutIds}::jsonb, e->>'id')
           ), '[]'::jsonb),
-          expenses=EXCLUDED.expenses,
+          expenses=EXCLUDED.expenses || COALESCE((
+            SELECT jsonb_agg(e) FROM jsonb_array_elements(
+              CASE WHEN jsonb_typeof(job_meta.expenses) = 'array' THEN job_meta.expenses ELSE '[]'::jsonb END
+            ) AS e
+            WHERE NOT jsonb_exists(${keepOutExpenseIds}::jsonb, e->>'id')
+          ), '[]'::jsonb),
           is_excluded=EXCLUDED.is_excluded, calendar_event_id=EXCLUDED.calendar_event_id, updated_at=NOW()
         RETURNING *
       `;

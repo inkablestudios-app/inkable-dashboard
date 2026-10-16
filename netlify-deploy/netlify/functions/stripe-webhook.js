@@ -34,6 +34,28 @@ function verifyStripeSignature(rawBody, signatureHeader, secret) {
   return crypto.timingSafeEqual(expectedBuf, actualBuf);
 }
 
+// Stripe's actual fee for this payment (in dollars). It lives on the
+// charge's balance transaction, which the checkout event doesn't include,
+// so look it up. If that fails for any reason, fall back to Stripe's
+// standard US card rate so the job still shows a realistic cost.
+async function getStripeFee(session, amount) {
+  const estimate = Math.round((amount * 0.029 + 0.30) * 100) / 100;
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key || !session.payment_intent) return { fee: estimate, exact: false };
+  try {
+    const res = await fetch(
+      `https://api.stripe.com/v1/payment_intents/${encodeURIComponent(session.payment_intent)}?expand[]=latest_charge.balance_transaction`,
+      { headers: { Authorization: "Basic " + Buffer.from(key + ":").toString("base64") } }
+    );
+    const pi = await res.json();
+    const cents = pi?.latest_charge?.balance_transaction?.fee;
+    if (res.ok && typeof cents === "number") return { fee: cents / 100, exact: true };
+  } catch (err) {
+    console.warn("stripe-webhook: fee lookup failed, using estimate", err);
+  }
+  return { fee: estimate, exact: false };
+}
+
 export default async (req) => {
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
@@ -68,11 +90,23 @@ export default async (req) => {
       const amount = (session.amount_total || 0) / 100;
 
       if (projectId && amount > 0) {
+        const today = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+        const { fee, exact } = await getStripeFee(session, amount);
+        // Recorded as a regular job expense so Sales/Reports profit reflects
+        // what actually reaches the bank. Editable/deletable like any other.
+        const feeExpense = {
+          id: "exp_stripe_" + session.id,
+          description: "Stripe card fee" + (exact ? "" : " (estimated)"),
+          amount: fee,
+          date: today,
+          source: "stripe",
+          stripeSessionId: session.id,
+        };
         const payment = {
           id: "pmt_" + Date.now() + "_" + Math.floor(Math.random() * 100000),
           amount,
           method: "Card (Stripe) — " + description,
-          date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+          date: today,
           stripeSessionId: session.id,
         };
         // One atomic statement: append to whatever is in the database at
@@ -80,15 +114,21 @@ export default async (req) => {
         // into), and skip it if this session was already recorded —
         // Stripe retries deliveries, so the same session can arrive twice.
         const newList = JSON.stringify([payment]);
+        const feeList = JSON.stringify(fee > 0 ? [feeExpense] : []);
         const sessionMatch = JSON.stringify([{ stripeSessionId: session.id }]);
         await db.sql`
-          INSERT INTO job_meta (project_id, payments, updated_at)
-          VALUES (${projectId}, ${newList}::jsonb, NOW())
+          INSERT INTO job_meta (project_id, payments, expenses, updated_at)
+          VALUES (${projectId}, ${newList}::jsonb, ${feeList}::jsonb, NOW())
           ON CONFLICT (project_id) DO UPDATE SET
             payments = CASE
               WHEN jsonb_typeof(job_meta.payments) = 'array' AND job_meta.payments @> ${sessionMatch}::jsonb
                 THEN job_meta.payments
               ELSE (CASE WHEN jsonb_typeof(job_meta.payments) = 'array' THEN job_meta.payments ELSE '[]'::jsonb END) || ${newList}::jsonb
+            END,
+            expenses = CASE
+              WHEN jsonb_typeof(job_meta.expenses) = 'array' AND job_meta.expenses @> ${sessionMatch}::jsonb
+                THEN job_meta.expenses
+              ELSE (CASE WHEN jsonb_typeof(job_meta.expenses) = 'array' THEN job_meta.expenses ELSE '[]'::jsonb END) || ${feeList}::jsonb
             END,
             updated_at = NOW()
         `;
