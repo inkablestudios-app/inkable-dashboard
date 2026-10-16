@@ -775,6 +775,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
             <input type="text" id="cf-phone" placeholder="(281) 555-0100"/>
           </div>
           <div class="jdc-field" style="margin-bottom:10px">
+            <label>Email</label>
+            <input type="email" id="cf-email" placeholder="name@example.com"/>
+          </div>
+          <div class="jdc-field" style="margin-bottom:10px">
             <label>Address</label>
             <input type="text" id="cf-addr" placeholder="Street address"/>
           </div>
@@ -1173,6 +1177,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
           <input type="text" id="cp-phone" placeholder="(281) 555-0100"/>
         </div>
         <div class="modal-field">
+          <label>Email</label>
+          <input type="email" id="cp-email" placeholder="name@example.com"/>
+        </div>
+        <div class="modal-field">
           <label>Address</label>
           <input type="text" id="cp-addr" placeholder="Street address"/>
         </div>
@@ -1453,6 +1461,7 @@ function addClient(data){
     id:'cl_'+Date.now()+'_'+Math.floor(Math.random()*1000),
     name:(data.name||'').trim(),
     phone:(data.phone||'').trim(),
+    email:(data.email||'').trim(),
     addr:(data.addr||'').trim(),
     city:(data.city||'').trim(),
     state:(data.state||'').trim(),
@@ -1477,6 +1486,7 @@ function openCustomerPicker(onSelect){
   document.getElementById('cp-search').value='';
   document.getElementById('cp-name').value='';
   document.getElementById('cp-phone').value='';
+  document.getElementById('cp-email').value='';
   document.getElementById('cp-addr').value='';
   document.getElementById('cp-city').value='';
   document.getElementById('cp-state').value='';
@@ -1542,6 +1552,7 @@ function cpCreateAndContinue(){
   const client=addClient({
     name,
     phone:document.getElementById('cp-phone').value,
+    email:document.getElementById('cp-email').value,
     addr:document.getElementById('cp-addr').value,
     city:document.getElementById('cp-city').value,
     state:document.getElementById('cp-state').value,
@@ -2089,7 +2100,7 @@ function renderClients(){
     return `<div class="client-card" onclick="openClientDetail('${cl.id}')">
       <div>
         <div class="client-name">${cl.name}</div>
-        <div class="client-detail">${[cl.addr,cl.city?(cl.city+(cl.state?', '+cl.state:'')+(cl.zip?' '+cl.zip:'')):'',cl.phone].filter(Boolean).join(' · ')}</div>
+        <div class="client-detail">${[cl.addr,cl.city?(cl.city+(cl.state?', '+cl.state:'')+(cl.zip?' '+cl.zip:'')):'',cl.phone,cl.email].filter(Boolean).join(' · ')}</div>
         ${cl.notes?`<div class="client-notes">${cl.notes}</div>`:''}
         <div style="font-size:10.5px;color:${contactColor};margin-top:4px">${contactLabel}</div>
       </div>
@@ -2142,6 +2153,7 @@ function openClientForm(clientId){
     title.textContent='Edit Client';
     document.getElementById('cf-name').value=client.name||'';
     document.getElementById('cf-phone').value=client.phone||'';
+    document.getElementById('cf-email').value=client.email||'';
     document.getElementById('cf-addr').value=client.addr||'';
     document.getElementById('cf-city').value=client.city||'';
     document.getElementById('cf-state').value=client.state||'';
@@ -2150,7 +2162,7 @@ function openClientForm(clientId){
     document.getElementById('cf-notes').value=client.notes||'';
   }else{
     title.textContent='New Client';
-    ['cf-name','cf-phone','cf-addr','cf-city','cf-state','cf-zip','cf-lead-source','cf-notes'].forEach(id=>{document.getElementById(id).value='';});
+    ['cf-name','cf-phone','cf-email','cf-addr','cf-city','cf-state','cf-zip','cf-lead-source','cf-notes'].forEach(id=>{document.getElementById(id).value='';});
   }
   document.getElementById('clientFormModal').classList.add('open');
 }
@@ -2164,6 +2176,7 @@ function saveClientForm(){
   const data={
     name,
     phone:document.getElementById('cf-phone').value,
+    email:document.getElementById('cf-email').value,
     addr:document.getElementById('cf-addr').value,
     city:document.getElementById('cf-city').value,
     state:document.getElementById('cf-state').value,
@@ -2178,7 +2191,7 @@ function saveClientForm(){
     const idx=clients.findIndex(c=>c.id===clientFormEditingId);
     if(idx>=0){
       clients[idx]={...clients[idx],
-        name:data.name.trim(),phone:data.phone.trim(),addr:data.addr.trim(),
+        name:data.name.trim(),phone:data.phone.trim(),email:(data.email||'').trim(),addr:data.addr.trim(),
         city:data.city.trim(),state:data.state.trim(),zip:data.zip.trim(),
         leadSource:data.leadSource.trim(),notes:data.notes.trim()};
       localStorage.setItem(CLIENTS_KEY,JSON.stringify(clients));
@@ -2233,6 +2246,7 @@ function openClientDetail(clientId){
 
   document.getElementById('clientDetailBody').innerHTML=`
     <div style="font-size:13px;color:var(--text);margin-bottom:2px">${client.phone||'<span style=\"color:var(--muted2)\">No phone</span>'}</div>
+    <div style="font-size:13px;color:var(--text);margin-bottom:2px">${client.email?`<a href="mailto:${escapeHtml(client.email)}" style="color:var(--blue);text-decoration:none">${escapeHtml(client.email)}</a>`:'<span style="color:var(--muted2)">No email</span>'}</div>
     <div style="font-size:13px;color:var(--text);margin-bottom:8px">${addrLine||'<span style="color:var(--muted2)">No address</span>'}</div>
     ${client.leadSource?`<div style="font-size:11px;color:var(--blue);margin-bottom:8px">Source: ${LEAD_SOURCE_LABELS[client.leadSource]||client.leadSource}</div>`:''}
     ${client.notes?`<div style="font-size:12px;color:var(--muted);background:var(--dark);border-radius:6px;padding:8px 10px;margin-bottom:8px">${client.notes}</div>`:''}
@@ -3747,7 +3761,7 @@ function getRates(){
 }
 // Business details and estimate defaults — shown on PDFs, the client page
 // and new estimates. Edited in Settings → Business.
-// Phone left blank = "coming soon" on PDFs and the client page.
+// Phone left blank = not shown on PDFs or the client page.
 const DEFAULT_BUSINESS={bizEmail:'inkablestudios@gmail.com',bizPhone:'',bizInstagram:'@inkablehtx',defaultNotes:'',defaultTerms:''};
 function getBusinessInfo(){
   const pd=getPricingData();
@@ -4330,7 +4344,31 @@ function renderClientLinkSection(jobId,data){
       <input type="text" readonly value="${shareUrl}" style="flex:1;font-size:10px;background:var(--dark);border:1px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--muted)" onclick="this.select()"/>
       <button class="btn btn-ghost" style="font-size:10.5px;padding:5px 10px" onclick="navigator.clipboard.writeText('${shareUrl}');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)">Copy</button>
     </div>
+    ${emailLinkButtonHtml(jobId,shareUrl)}
     ${statusHtml}`;
+}
+// "Email link" — opens your own email app with the message already written
+// to the client (nothing is sent until you press Send there).
+function buildClientLinkEmail(jobId,shareUrl){
+  const p=getProjects().find(x=>x.id===jobId);
+  const cl=p?getClients().find(c=>c.id===p.clientId):null;
+  const meta=getJobMeta(jobId);
+  const first=((cl?.name||p?.state?.form?.billingName||'').trim().split(/\s+/)[0])||'there';
+  const job=p?.name||'your project';
+  const subject=`Your project with Inkable Studios${p?.estNo?' — '+p.estNo:''}`;
+  const what=meta.proofLink
+    ?'your proof is ready to review. You can approve it or request changes'
+    :'here are your estimate and project details. You can also pay the deposit to get started';
+  const body=`Hi ${first},\n\nThanks for choosing Inkable Studios! For ${job}, ${what} at this link:\n\n${shareUrl}\n\nAny questions, just reply to this email.\n\nInkable Studios`;
+  return {to:cl?.email||'',subject,body};
+}
+function emailLinkButtonHtml(jobId,shareUrl){
+  const e=buildClientLinkEmail(jobId,shareUrl);
+  const href='mailto:'+encodeURIComponent(e.to)+'?subject='+encodeURIComponent(e.subject)+'&body='+encodeURIComponent(e.body);
+  return `<div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+      <a class="btn btn-primary" style="font-size:10.5px;padding:5px 12px;text-decoration:none" href="${href}">✉ Email link</a>
+      <span style="font-size:10px;color:var(--muted2)">${e.to?'To '+escapeHtml(e.to):'No email on file for this client — add one in Clients, or type it in your email app'}</span>
+    </div>`;
 }
 async function getOrCreateClientLink(jobId){
   const container=document.getElementById('clientLinkSection-'+jobId);
@@ -6568,11 +6606,11 @@ function drawEstimatePDF(doc,W,H,M,d){
   doc.setFont('helvetica','bold');doc.setFontSize(8);doc.setTextColor(0);
   doc.text('Questions?',M,footTop+17);
   doc.text('Email:',M+158,footTop+17);
-  doc.text('Call us or Text:',M+330,footTop+17);
-  doc.setFont('helvetica','normal');doc.setTextColor(60);
   const biz=getBusinessInfo();
+  if(biz.bizPhone)doc.text('Call us or Text:',M+330,footTop+17); // no phone yet: leave it off
+  doc.setFont('helvetica','normal');doc.setTextColor(60);
   doc.text(biz.bizEmail,M+158,footTop+31);
-  doc.text(biz.bizPhone||'Coming soon',M+330,footTop+31);
+  if(biz.bizPhone)doc.text(biz.bizPhone,M+330,footTop+31);
   doc.addImage('data:image/png;base64,'+QR_B64,'PNG',W-M-38,footTop+5,36,36);
 }
 
@@ -7214,7 +7252,7 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
       <div class="settings-section-title">Contact details</div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.6">Printed on estimates, invoices and receipts, and shown on the client page.</div>
       <div class="shop-row"><div><label>Email</label></div><input id="settingBizEmail" type="email" style="width:100%;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;box-sizing:border-box;max-width:260px"/></div>
-      <div class="shop-row"><div><label>Phone</label><small>Call or text. Leave blank to show "coming soon".</small></div><input id="settingBizPhone" type="tel" style="width:100%;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;box-sizing:border-box;max-width:260px"/></div>
+      <div class="shop-row"><div><label>Phone</label><small>Call or text. Leave blank to keep it off PDFs and the client page.</small></div><input id="settingBizPhone" type="tel" style="width:100%;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;box-sizing:border-box;max-width:260px"/></div>
       <div class="shop-row"><div><label>Instagram</label></div><input id="settingBizInstagram" type="text" style="width:100%;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;box-sizing:border-box;max-width:260px"/></div>
       <div class="settings-section-title" style="margin-top:20px">Money</div>
       <div class="shop-row"><div><label>Deposit</label><small>% of the total a client pays to start (client page "Pay Deposit" button and the "deposit paid" alert)</small></div><div class="pi"><span>%</span><input id="settingDepositPct" type="number" step="5" min="1" max="100"/></div></div>

@@ -106,3 +106,8 @@
   to collect. Sidebar badge = overdue + next 7 days. Done and excluded jobs are left out.
 - Backup reminder in the bell when no backup has been downloaded in 30 days (Settings → Reminders);
   clicking it opens Settings → Data. The last backup date syncs across devices.
+- Phone: when no phone is set, it's simply left off (client page and PDFs) — no "coming soon".
+- Client email field (client form + new-client picker; shown in client details). Needs migration 010.
+- "✉ Email link" button in the job window's client-link section: opens your email app with a ready
+  message to the client (first name, job, the link; says "proof ready" or "estimate + deposit"
+  depending on whether a proof is uploaded). Nothing is sent until you press Send.

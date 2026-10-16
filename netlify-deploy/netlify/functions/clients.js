@@ -19,7 +19,7 @@ export default async (req) => {
       // about snake_case, matching how projects.js/sync-all.js already
       // handle their own multi-word columns.
       const out = rows.map(r => ({
-        id: r.id, name: r.name, phone: r.phone, addr: r.addr, city: r.city,
+        id: r.id, name: r.name, phone: r.phone, email: r.email || "", addr: r.addr, city: r.city,
         state: r.state, zip: r.zip, notes: r.notes, log: r.log,
         leadSource: r.lead_source,
       }));
@@ -32,18 +32,18 @@ export default async (req) => {
         return Response.json({ error: "id and name are required" }, { status: 400 });
       }
       const [row] = await db.sql`
-        INSERT INTO clients (id, name, phone, addr, city, state, zip, notes, log, lead_source, updated_at)
-        VALUES (${c.id}, ${c.name}, ${c.phone || ""}, ${c.addr || ""}, ${c.city || ""},
+        INSERT INTO clients (id, name, phone, email, addr, city, state, zip, notes, log, lead_source, updated_at)
+        VALUES (${c.id}, ${c.name}, ${c.phone || ""}, ${c.email || ""}, ${c.addr || ""}, ${c.city || ""},
                 ${c.state || ""}, ${c.zip || ""}, ${c.notes || ""}, ${JSON.stringify(c.log || [])},
                 ${c.leadSource || ""}, NOW())
         ON CONFLICT (id) DO UPDATE SET
-          name=EXCLUDED.name, phone=EXCLUDED.phone, addr=EXCLUDED.addr, city=EXCLUDED.city,
+          name=EXCLUDED.name, phone=EXCLUDED.phone, email=EXCLUDED.email, addr=EXCLUDED.addr, city=EXCLUDED.city,
           state=EXCLUDED.state, zip=EXCLUDED.zip, notes=EXCLUDED.notes, log=EXCLUDED.log,
           lead_source=EXCLUDED.lead_source, updated_at=NOW()
         RETURNING *
       `;
       return Response.json({
-        id: row.id, name: row.name, phone: row.phone, addr: row.addr, city: row.city,
+        id: row.id, name: row.name, phone: row.phone, email: row.email || "", addr: row.addr, city: row.city,
         state: row.state, zip: row.zip, notes: row.notes, log: row.log,
         leadSource: row.lead_source,
       });
