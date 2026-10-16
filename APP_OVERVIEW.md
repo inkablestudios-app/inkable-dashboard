@@ -41,16 +41,13 @@ Written after a read-through of v2.38 on 2026-10-16. Keep this updated when the 
    kept PDF bytes in the browser. Not fully confirmed.)
 
 ## Known gaps / decisions for the owner
-- **Client page needs a proof before it shows anything**, including the pay buttons. So a client can't pay
-  the 50% deposit "to start" until a proof is uploaded. Decide: allow paying before the proof?
-- **No alert for Stripe payments.** The "50% paid" toast only fires for payments typed in by hand.
-  A card payment just appears after the next sync. (Roadmap item: owner notifications.)
-- **Totals can drift**: if shop rates change, the Dashboard's total for an old job changes, but the client
-  page/Stripe still use the frozen total from when it was saved.
-- **Double payment possible**: a client who opens two payment tabs could pay the deposit twice
-  (Stripe would show both; refund one).
+- DONE: client page works before a proof; estimate visual slot; card payment alerts; one open
+  checkout per job; frozen totals. (See CHANGELOG_PENDING.md.)
+- Card payment alerts only appear when the Dashboard is open/synced. For alerts while away, turn on
+  Stripe's own email: Stripe Settings > Notifications > Successful payments.
 - **Client approval vs. Dashboard save**: approving on the client page sets the status on the server;
   a Dashboard tab with an older copy can set it back when saving that job (v2.37 reduced but did not
   remove this).
-- Cash/check clients are quoted a total that includes the card fee (decide on a "remove fee" path).
+- Decided: same price for all payment methods; Processing Fee box ON by default. Payment method is
+  recorded per payment (Cash/Check/Card/Zelle/Other; Stripe = "Card (Stripe)").
 - Login has no limit on wrong-password attempts (low risk for now; use a strong password).

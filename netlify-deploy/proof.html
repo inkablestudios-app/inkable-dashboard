@@ -202,6 +202,15 @@
   }
 
   function proofSectionHtml(data){
+    // No proof yet is normal early on — the client can still see the
+    // estimate and pay the deposit that gets the design work started.
+    if(!data.proofEmbedUrl){
+      return `
+        <section>
+          <div class="sectiontitle">Proof</div>
+          <div class="sectionsub">Your proof is being prepared. We'll let you know as soon as it's ready to review.</div>
+        </section>`;
+    }
     if(data.response){
       const isApproved = data.response === 'approved';
       return `
@@ -244,8 +253,21 @@
       </section>`;
   }
 
+  // Estimate graphics (e.g. the vehicle with the wrap areas marked) — for
+  // looking only, no approve/reject; that's what the proof is for.
+  function estimateVisualHtml(data){
+    if(!data.estimateVisualEmbedUrl) return '';
+    return `
+      <section>
+        <div class="sectiontitle">Estimate visuals</div>
+        <div class="sectionsub">A look at what's included in this estimate.</div>
+        <iframe class="proofbox" src="${data.estimateVisualEmbedUrl}"></iframe>
+        <a class="newtab" href="${data.estimateVisualEmbedUrl.replace('/preview','/view')}" target="_blank" rel="noopener">Open in a new tab ↗</a>
+      </section>`;
+  }
+
   function wireProofActions(data){
-    if(data.response) return; // already responded — no action buttons to wire
+    if(data.response || !data.proofEmbedUrl) return; // nothing to approve (yet)
     document.getElementById('approveBtn').onclick = () => {
       document.getElementById('mainActions').style.display = 'none';
       document.getElementById('approveConfirm').style.display = 'block';
@@ -352,7 +374,7 @@
   }
 
   function render(data){
-    card.innerHTML = jobHeadHtml(data) + proofSectionHtml(data) + estimateHtml(data.estimateSummary) + paymentSectionHtml(data) + contactSectionHtml();
+    card.innerHTML = jobHeadHtml(data) + proofSectionHtml(data) + estimateVisualHtml(data) + estimateHtml(data.estimateSummary) + paymentSectionHtml(data) + contactSectionHtml();
     wireProofActions(data);
     const toggle = document.getElementById('estimateToggle');
     if(toggle){

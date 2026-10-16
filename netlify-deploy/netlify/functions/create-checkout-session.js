@@ -38,7 +38,7 @@ export default async (req) => {
     }
 
     const rows = await db.sql`
-      SELECT ps.token, ps.project_id, p.name AS job_name, p.est_no, p.state, jm.payments
+      SELECT ps.token, ps.project_id, ps.checkout_session_id, p.name AS job_name, p.est_no, p.state, jm.payments
       FROM proof_shares ps
       JOIN projects p ON p.id = ps.project_id
       LEFT JOIN job_meta jm ON jm.project_id = ps.project_id
@@ -90,6 +90,16 @@ export default async (req) => {
     const jobName = state?.form?.jobName || r.job_name || "Your job";
     const productName = `${jobName}${r.est_no ? " — " + r.est_no : ""} (${description})`;
 
+    // Only one open checkout per job: cancel the previous one if it was never
+    // finished. Stripe refuses to expire a session that was already paid or
+    // already expired, which is fine — that error is ignored, and completed
+    // payments are never affected.
+    if (r.checkout_session_id) {
+      try {
+        await stripeRequest(`/checkout/sessions/${encodeURIComponent(r.checkout_session_id)}/expire`, {});
+      } catch { /* already completed or expired */ }
+    }
+
     const session = await stripeRequest("/checkout/sessions", {
       "mode": "payment",
       "success_url": successUrl,
@@ -102,6 +112,8 @@ export default async (req) => {
       "metadata[token]": token,
       "metadata[description]": description,
     });
+
+    await db.sql`UPDATE proof_shares SET checkout_session_id = ${session.id} WHERE token = ${token}`;
 
     return Response.json({ url: session.url });
   } catch (err) {

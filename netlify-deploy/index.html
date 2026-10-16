@@ -3105,6 +3105,7 @@ async function pullFromServerOnLoad(){
     const res=await fetch(CLOUD_API_BASE+'/sync-all',{headers});
     if(!res.ok)throw new Error('Server returned '+res.status);
     const data=await res.json();
+    const oldMeta=getMeta();
     localStorage.setItem(CLIENTS_KEY,JSON.stringify(data.clients||[]));
     localStorage.setItem(SAVED_KEY,JSON.stringify(data.projects||[]));
     localStorage.setItem(META_KEY,JSON.stringify(data.jobMeta||{}));
@@ -3115,6 +3116,7 @@ async function pullFromServerOnLoad(){
     if(typeof renderClients==='function')renderClients();
     if(typeof renderReports==='function')renderReports();
     checkForNewClientResponses(data.proofResponses||{});
+    checkForNewCardPayments(oldMeta,data.jobMeta||{});
     refreshReminders();
   }catch(err){
     console.warn('Initial cloud sync failed — using whatever is already on this device:',err);
@@ -3156,6 +3158,66 @@ function checkForNewClientResponses(proofResponses){
     })
     .sort((a,b)=>new Date(b.responseAt)-new Date(a.responseAt));
   renderNotificationBell();
+}
+
+// ── Card payment alerts — Stripe payments are recorded by the server, so
+// this device only learns about them on a sync. Each one gets a toast once
+// (per device) and stays in the bell until clicked. The very first run
+// just remembers what already exists, so turning this on doesn't alert
+// on every old payment.
+const CARD_SEEN_KEY='inkable_card_payments_seen';
+const CARD_UNREAD_KEY='inkable_card_payments_unread';
+function readJSONKey(key,fallback){
+  try{ const v=localStorage.getItem(key); return v?JSON.parse(v):fallback; }catch(e){ return fallback; }
+}
+let newCardPayments=readJSONKey(CARD_UNREAD_KEY,[]);
+function checkForNewCardPayments(oldMeta,newMeta){
+  const all=[];
+  Object.keys(newMeta).forEach(pid=>{
+    (newMeta[pid].payments||[]).forEach(pm=>{ if(pm&&pm.stripeSessionId)all.push({...pm,projectId:pid}); });
+  });
+  const firstRun=localStorage.getItem(CARD_SEEN_KEY)===null;
+  const seen=new Set(readJSONKey(CARD_SEEN_KEY,[]));
+  const fresh=firstRun?[]:all.filter(pm=>!seen.has(pm.stripeSessionId));
+  all.forEach(pm=>seen.add(pm.stripeSessionId));
+  try{ localStorage.setItem(CARD_SEEN_KEY,JSON.stringify([...seen])); }catch(e){}
+  if(!fresh.length)return;
+
+  const projects=getProjects(), clients=getClients();
+  fresh.forEach(pm=>{
+    const proj=projects.find(p=>p.id===pm.projectId);
+    const cl=proj?clients.find(c=>c.id===proj.clientId):null;
+    const who=cl?cl.name:(proj?.estNo||'A client');
+    newCardPayments.unshift({projectId:pm.projectId,amount:pm.amount,method:pm.method,date:pm.date,
+      stripeSessionId:pm.stripeSessionId,who,estNo:proj?.estNo||''});
+    showToast('💳',`${fmt(pm.amount)} card payment`,`${who}${proj?.estNo?' ('+proj.estNo+')':''} — ${pm.method||'Card (Stripe)'}`,
+      {color:'var(--blue)',duration:10000,onClick:()=>openNotifCardPayment(pm.stripeSessionId)});
+
+    // Same "50% paid" signal as a payment typed in by hand.
+    if(proj){
+      const total=getProjectAmount(proj);
+      const paidAfter=getAmountPaid(pm.projectId);
+      const paidBefore=paidAfter-fresh.filter(f=>f.projectId===pm.projectId).reduce((t,f)=>t+(parseFloat(f.amount)||0),0);
+      if(total>0&&paidBefore<total*0.5&&paidAfter>=total*0.5&&fresh.find(f=>f.projectId===pm.projectId)===pm){
+        showToast('💰','50% paid — ready to start the proof',`${who} (${proj.estNo||''}) just crossed the halfway mark.`,{color:'var(--amber)',duration:9000});
+      }
+    }
+  });
+  try{ localStorage.setItem(CARD_UNREAD_KEY,JSON.stringify(newCardPayments)); }catch(e){}
+  renderNotificationBell();
+  if(typeof renderSales==='function')renderSales();
+}
+function openNotifCardPayment(sessionId){
+  const item=newCardPayments.find(n=>n.stripeSessionId===sessionId);
+  newCardPayments=newCardPayments.filter(n=>n.stripeSessionId!==sessionId);
+  try{ localStorage.setItem(CARD_UNREAD_KEY,JSON.stringify(newCardPayments)); }catch(e){}
+  renderNotificationBell();
+  const dd=document.getElementById('notifDropdown');
+  if(dd)dd.style.display='none';
+  if(item&&getProjects().find(p=>p.id===item.projectId)){
+    switchTab('projects');
+    openJobModal(item.projectId);
+  }
 }
 
 // Stale estimates and overdue balances are ongoing STATES, not one-time
@@ -3207,7 +3269,7 @@ function renderNotificationBell(){
   const badge=document.getElementById('notifBadge');
   const btn=document.getElementById('notifBellBtn');
   if(!badge||!btn)return;
-  const total=newClientResponses.length+activeReminders.length;
+  const total=newCardPayments.length+newClientResponses.length+activeReminders.length;
   if(total>0){
     badge.textContent=total;
     badge.style.display='flex';
@@ -3231,6 +3293,10 @@ function toggleNotifDropdown(){
         ${n.responseNote?`<div style="font-size:11px;color:var(--muted);margin-top:3px;font-style:italic">"${n.responseNote}"</div>`:''}
       </div>`;
     }).join('');
+    const cardItems=newCardPayments.map(n=>`<div class="menu-item" style="white-space:normal;line-height:1.4;padding:10px 12px" onclick="openNotifCardPayment('${n.stripeSessionId}')">
+        <div style="font-size:12px;color:var(--text)">💳 <b>${n.who}</b> paid ${fmt(n.amount)} by card</div>
+        <div style="font-size:10.5px;color:var(--muted)">${n.estNo||''} · ${n.date||''}</div>
+      </div>`).join('');
     const reminderItems=activeReminders.map(r=>{
       const icon=r.type==='stale'?'⏳':'💵';
       return`<div class="menu-item" style="white-space:normal;line-height:1.4;padding:10px 12px" onclick="openNotifReminder('${r.projectId}')">
@@ -3238,7 +3304,7 @@ function toggleNotifDropdown(){
         <div style="font-size:10.5px;color:var(--muted)">${r.estNo||''}</div>
       </div>`;
     }).join('');
-    dd.innerHTML=(responseItems+reminderItems)||'<div style="padding:16px;font-size:12px;color:var(--muted2);text-align:center">Nothing new</div>';
+    dd.innerHTML=(cardItems+responseItems+reminderItems)||'<div style="padding:16px;font-size:12px;color:var(--muted2);text-align:center">Nothing new</div>';
   }
   document.querySelectorAll('[id^="menu-"],#notifDropdown').forEach(el=>{if(el!==dd)el.style.display='none';});
   dd.style.display=opening?'block':'none';
@@ -3851,34 +3917,78 @@ function handleProofFileSelected(jobId,inputEl){
   inputEl.value='';
 }
 
-// Renders the proof section inside the Job Modal — either the connect
-// prompt, the upload control, or the link to what's already uploaded.
+// Renders the proof area inside the Job Modal: the proof itself, the
+// estimate visual (graphics sent with the estimate, before any proof), and
+// the client link. The client link no longer waits for a proof — clients
+// can see the estimate and pay the deposit first.
 function renderProofSection(jobId){
   const el=document.getElementById('proof-area-content');
   if(!el)return;
   const meta=getJobMeta(jobId);
+  const estNo=getProjects().find(p=>p.id===jobId)?.estNo||'';
+  const driveOn=isDriveConnected();
+  const noDrive=`<p style="font-size:11px;color:var(--muted)">Connect Google Drive in Settings → Proofs / Drive to enable uploads here.</p>`;
+
+  let proofHtml;
   if(meta.proofLink){
-    el.innerHTML=`
+    proofHtml=`
       <div style="font-size:12px;color:var(--green);margin-bottom:6px">✓ Proof uploaded</div>
-      <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px" onclick="openDocViewer('Proof — ${(getProjects().find(p=>p.id===jobId)?.estNo||'')}',getDriveEmbedUrl('${meta.proofLink}'),false)">👁 View Proof</button>
+      <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px" onclick="openDocViewer('Proof — ${estNo}',getDriveEmbedUrl('${meta.proofLink}'),false)">👁 View Proof</button>
       <div style="margin-top:8px">
         <input type="file" id="proofFileInput" style="display:none" onchange="handleProofFileSelected('${jobId}',this)"/>
         <button class="btn btn-ghost" style="font-size:10.5px;padding:4px 10px" onclick="document.getElementById('proofFileInput').click()">Replace file</button>
-      </div>
-      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)" id="clientLinkSection-${jobId}">
-        <div style="font-size:10.5px;color:var(--muted)">Checking for a client link…</div>
       </div>`;
-    loadClientLinkStatus(jobId);
-    return;
+  }else if(driveOn){
+    proofHtml=`
+      <input type="file" id="proofFileInput" style="display:none" onchange="handleProofFileSelected('${jobId}',this)"/>
+      <button class="btn btn-primary" style="font-size:11px;padding:6px 12px" onclick="document.getElementById('proofFileInput').click()">Upload Proof</button>
+      <div id="proofUploadStatus" style="font-size:10.5px;margin-top:6px"></div>`;
+  }else{
+    proofHtml=noDrive;
   }
-  if(!isDriveConnected()){
-    el.innerHTML=`<p style="font-size:11px;color:var(--muted)">Connect Google Drive in Settings → Proofs / Drive to enable uploads here.</p>`;
-    return;
+
+  let visualHtml;
+  if(meta.estimateVisualLink){
+    visualHtml=`
+      <div style="font-size:11.5px;color:var(--green);margin-bottom:6px">✓ Estimate visual uploaded</div>
+      <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px" onclick="openDocViewer('Estimate visual — ${estNo}',getDriveEmbedUrl('${meta.estimateVisualLink}'),false)">👁 View</button>
+      ${driveOn?`<button class="btn btn-ghost" style="font-size:10.5px;padding:4px 10px" onclick="document.getElementById('visualFileInput').click()">Replace file</button>`:''}`;
+  }else if(driveOn){
+    visualHtml=`<button class="btn btn-ghost" style="font-size:11px;padding:6px 12px" onclick="document.getElementById('visualFileInput').click()">Upload Estimate Visual</button>`;
+  }else{
+    visualHtml=`<div style="font-size:10.5px;color:var(--muted2)">None</div>`;
   }
+
   el.innerHTML=`
-    <input type="file" id="proofFileInput" style="display:none" onchange="handleProofFileSelected('${jobId}',this)"/>
-    <button class="btn btn-primary" style="font-size:11px;padding:6px 12px" onclick="document.getElementById('proofFileInput').click()">Upload Proof</button>
-    <div id="proofUploadStatus" style="font-size:10.5px;margin-top:6px"></div>`;
+    ${proofHtml}
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+      <div style="font-size:10.5px;color:var(--muted);margin-bottom:6px">Estimate visual <span style="color:var(--muted2)">(shown with the estimate — one file; use a PDF for several images)</span></div>
+      <input type="file" id="visualFileInput" style="display:none" onchange="handleEstimateVisualSelected('${jobId}',this)"/>
+      ${visualHtml}
+      <div id="visualUploadStatus" style="font-size:10.5px;margin-top:6px"></div>
+    </div>
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)" id="clientLinkSection-${jobId}">
+      <div style="font-size:10.5px;color:var(--muted)">Checking for a client link…</div>
+    </div>`;
+  loadClientLinkStatus(jobId);
+}
+
+// Estimate visual upload — same Drive folder and pipeline as proofs, but
+// it doesn't touch the job's status or the client's proof response.
+function handleEstimateVisualSelected(jobId,inputEl){
+  const file=inputEl.files?.[0];
+  if(!file)return;
+  const statusEl=document.getElementById('visualUploadStatus');
+  if(statusEl){ statusEl.textContent='Uploading…'; statusEl.style.color='var(--muted)'; }
+  uploadProofFile(jobId,file).then(({link})=>{
+    const meta=getJobMeta(jobId);
+    setJobMeta(jobId,{...meta,estimateVisualLink:link});
+    renderProofSection(jobId);
+  }).catch(err=>{
+    console.error('Estimate visual upload error:',err);
+    if(statusEl){ statusEl.textContent='Upload failed: '+err.message; statusEl.style.color='var(--red)'; }
+  });
+  inputEl.value='';
 }
 
 // ── Client proof-review link — a public page (no login) a client opens
@@ -3936,7 +4046,7 @@ function renderClientLinkSection(jobId,data){
     container.innerHTML=`<button class="btn btn-primary" style="font-size:11px;padding:6px 12px" onclick="getOrCreateClientLink('${jobId}')">🔗 Get Client Link</button>`;
     return;
   }
-  const shareUrl='https://inkable-dashboard.netlify.app/proof.html?token='+data.token;
+  const shareUrl=window.location.origin+'/proof.html?token='+data.token;
   let statusHtml='';
   if(data.response==='approved'){
     statusHtml=`<div style="font-size:11px;color:var(--green);margin-top:6px">✓ Client approved on ${fmtShareDate(data.responseAt)}</div>`;
@@ -3968,7 +4078,7 @@ async function getOrCreateClientLink(jobId){
     // client — there's a real, distinct gap between "I've prepared this"
     // and "the client is actually looking at it," and the status should
     // say so rather than just sitting on "Send Proof" indefinitely.
-    markJobAwaitingApproval(jobId);
+    if(getJobMeta(jobId).proofLink)markJobAwaitingApproval(jobId);
     await loadClientLinkStatus(jobId);
   }catch(err){
     console.error('Could not create client link:',err);
@@ -4290,6 +4400,12 @@ function getProjectAmount(p){
   try{
     const f=p.state?.form;
     if(!f)return 0;
+
+    // Jobs saved since v2.38 carry the total frozen at save time — the same
+    // number the client page shows and Stripe charges. Use it, so changing
+    // shop rates later never quietly changes what an old job is worth.
+    const frozen=parseFloat(f.estimateSummary?.total);
+    if(frozen>0)return frozen;
 
     // New multi-line pricer format
     if(f.pricerData){

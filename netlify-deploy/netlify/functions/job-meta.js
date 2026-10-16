@@ -24,6 +24,7 @@ export default async (req) => {
         out[r.project_id] = {
           status: r.status, tags: r.tags, notes: r.notes,
           installDate: r.install_date, installTime: r.install_time, proofLink: r.proof_link,
+          estimateVisualLink: r.estimate_visual_link,
           payments: r.payments, expenses: r.expenses,
           excluded: r.is_excluded, calendarEventId: r.calendar_event_id,
         };
@@ -47,13 +48,13 @@ export default async (req) => {
         ...(Array.isArray(m.removedPaymentIds) ? m.removedPaymentIds : []),
       ].map(String));
       const [row] = await db.sql`
-        INSERT INTO job_meta (project_id, status, tags, notes, install_date, install_time, proof_link, payments, expenses, is_excluded, calendar_event_id, updated_at)
+        INSERT INTO job_meta (project_id, status, tags, notes, install_date, install_time, proof_link, estimate_visual_link, payments, expenses, is_excluded, calendar_event_id, updated_at)
         VALUES (${m.projectId}, ${m.status || "send"}, ${JSON.stringify(m.tags || [])}, ${m.notes || ""},
-                ${m.installDate || ""}, ${m.installTime || ""}, ${m.proofLink || ""}, ${JSON.stringify(incomingPayments)}::jsonb,
+                ${m.installDate || ""}, ${m.installTime || ""}, ${m.proofLink || ""}, ${m.estimateVisualLink || ""}, ${JSON.stringify(incomingPayments)}::jsonb,
                 ${JSON.stringify(m.expenses || [])}, ${!!m.excluded}, ${m.calendarEventId || ""}, NOW())
         ON CONFLICT (project_id) DO UPDATE SET
           status=EXCLUDED.status, tags=EXCLUDED.tags, notes=EXCLUDED.notes,
-          install_date=EXCLUDED.install_date, install_time=EXCLUDED.install_time, proof_link=EXCLUDED.proof_link,
+          install_date=EXCLUDED.install_date, install_time=EXCLUDED.install_time, proof_link=EXCLUDED.proof_link, estimate_visual_link=EXCLUDED.estimate_visual_link,
           payments=EXCLUDED.payments || COALESCE((
             SELECT jsonb_agg(e) FROM jsonb_array_elements(
               CASE WHEN jsonb_typeof(job_meta.payments) = 'array' THEN job_meta.payments ELSE '[]'::jsonb END
@@ -67,6 +68,7 @@ export default async (req) => {
       return Response.json({
         status: row.status, tags: row.tags, notes: row.notes,
         installDate: row.install_date, installTime: row.install_time, proofLink: row.proof_link,
+        estimateVisualLink: row.estimate_visual_link,
         payments: row.payments, expenses: row.expenses,
         excluded: row.is_excluded, calendarEventId: row.calendar_event_id,
       });

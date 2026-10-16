@@ -19,7 +19,7 @@ export default async (req) => {
     if (req.method === "GET") {
       const rows = await db.sql`
         SELECT ps.*, p.name AS job_name, p.est_no, p.state, p.saved_at, p.client_id,
-               jm.proof_link, jm.status, jm.install_date, jm.payments,
+               jm.proof_link, jm.estimate_visual_link, jm.status, jm.install_date, jm.payments,
                c.name AS client_name
         FROM proof_shares ps
         JOIN projects p ON p.id = ps.project_id
@@ -41,9 +41,6 @@ export default async (req) => {
         WHERE token = ${token}
       `;
 
-      if (!r.proof_link) {
-        return Response.json({ error: "No proof has been uploaded for this job yet." }, { status: 404 });
-      }
 
       // state may come back as a JSON string or an already-parsed object
       // depending on the driver — handle both rather than assume.
@@ -67,7 +64,10 @@ export default async (req) => {
         status: r.status || "send",
         requestedDate: r.saved_at || "",
         installDate: r.install_date || "",
-        proofEmbedUrl: getDriveEmbedUrl(r.proof_link),
+        // Both can be empty: the page still shows the estimate and payment
+        // (a deposit usually comes before any design work).
+        proofEmbedUrl: r.proof_link ? getDriveEmbedUrl(r.proof_link) : null,
+        estimateVisualEmbedUrl: r.estimate_visual_link ? getDriveEmbedUrl(r.estimate_visual_link) : null,
         response: r.response,
         responseNote: r.response_note,
         estimateSummary,
