@@ -5666,6 +5666,7 @@ function savePricerProject(){
       hardwareTotal:d.hardwareTotal,disc:d.disc,dtype:d.dtype,dval:d.dval,
       sub:d.sub,taxable:d.taxable,tax:d.tax,total:d.total,taxExempt:d.taxExempt,
       processingFee:d.processingFee,processingFeeOn:d.processingFeeOn,
+      minChargeAdj:d.minChargeAdj||0,
     };
   }catch(err){
     console.warn('Could not build the client-facing estimate summary for this job:',err);

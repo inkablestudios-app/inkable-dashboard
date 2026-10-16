@@ -108,7 +108,7 @@
 <script>
   const STATUS_META = {
     send:{label:'Estimate Sent',color:'#3b82f6'}, art:{label:'Awaiting Artwork',color:'#f59e0b'},
-    prep:{label:'Preparing Proof',color:'#8b5cf6'}, proof:{label:'Proof Sent',color:'#06b6d4'},
+    prep:{label:'Preparing Proof',color:'#8b5cf6'}, proof:{label:'Proof Ready',color:'#06b6d4'},
     awaiting:{label:'Awaiting Your Approval',color:'#eab308'}, revision:{label:'Revising Design',color:'#ec4899'},
     approved:{label:'Proof Approved',color:'#10b981'}, prod:{label:'In Production',color:'#f97316'},
     done:{label:'Completed',color:'#6b7280'},
@@ -160,12 +160,18 @@
         </div>
         <div class="price">${fmtMoney(l.matTotal)}</div>
       </div>`).join('');
+    // A job under the shop minimum is billed at the minimum; show the bump
+    // so the rows add up to the total (older saves only have "taxable").
+    const afterDisc = summary.sub - (summary.disc||0);
+    const minAdj = summary.minChargeAdj != null ? summary.minChargeAdj
+      : Math.max(0, (summary.taxable||afterDisc) - afterDisc);
     const extraRows = [
       summary.setupTotal > 0 ? ['Setup', summary.setupTotal] : null,
       summary.designTotal > 0 ? ['Design & Prep', summary.designTotal] : null,
       summary.totalInstall > 0 ? ['Installation', summary.totalInstall] : null,
       summary.hardwareTotal > 0 ? ['Hardware & Misc', summary.hardwareTotal] : null,
       summary.disc > 0 ? ['Discount', -summary.disc] : null,
+      minAdj > 0.005 ? ['Minimum Job Charge Adjustment', minAdj] : null,
     ].filter(Boolean).map(([lbl,amt]) => `<div class="totrow"><span>${lbl}</span><span>${fmtMoney(amt)}</span></div>`).join('');
 
     return `
@@ -178,7 +184,7 @@
             ${lines}
             <div class="estimate-totals">
               ${extraRows}
-              <div class="totrow"><span>Subtotal</span><span>${fmtMoney(summary.sub - (summary.disc||0))}</span></div>
+              <div class="totrow"><span>Subtotal</span><span>${fmtMoney(afterDisc + minAdj)}</span></div>
               <div class="totrow"><span>${summary.taxExempt ? 'Sales Tax (Exempt)' : 'Sales Tax'}</span><span>${fmtMoney(summary.tax)}</span></div>
               ${summary.processingFeeOn && summary.processingFee > 0 ? `<div class="totrow"><span>Card Processing Fee</span><span>${fmtMoney(summary.processingFee)}</span></div>` : ''}
               <div class="totrow final"><span>Total</span><span>${fmtMoney(summary.total)}</span></div>

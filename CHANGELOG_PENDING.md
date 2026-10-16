@@ -72,3 +72,8 @@
     job clears its queued edits.
   - Restore-from-backup message now says what it really does (puts backed-up jobs/clients back; keeps
     anything added later) instead of claiming everything newer is lost.
+- End-to-end check (pricer → server → Sales, Reports, client page) on 24 varied jobs: totals, paid,
+  balance and status match everywhere. Two fixes from it:
+  - Client page now shows a "Minimum Job Charge Adjustment" row, so its rows add up to the total for
+    jobs under the shop minimum (the total itself was already right).
+  - Status "Send Proof" (your to-do) showed the client "Proof Sent"; it now says "Proof Ready".
