@@ -22,3 +22,16 @@
 - Dashboard job totals use the total frozen when the estimate was saved (same as client page /
   Stripe), so changing shop rates no longer changes old jobs. Older jobs fall back to recalculating.
 - Decision: same price for every payment method; Processing Fee box stays ON by default.
+- Reports review fixes:
+  - Tax Report and Print now use the period on screen (Month/Quarter/Year + ◀ ▶), so any past
+    month/quarter/year can be printed. Before, both always printed the CURRENT period.
+  - Reports counted pricer expenses (Materials, Design, Install, Setup, Hardware) twice: once by
+    the job's save date and again as "extra". Profit was understated by that amount.
+  - Week = last 7 whole days (was a rolling window that could drop a payment from 7 days ago), and
+    weeks can now be browsed with ◀ ▶. Period end dates cover the whole last day.
+  - Trend chart follows the period being browsed and uses the same ranges as the totals.
+  - Job profit (Sales + Reports) = total minus sales tax minus expenses, so the card fee is counted
+    the same way everywhere. Uses the frozen estimate when there is one.
+  - Printed Sales list: excluded jobs are still listed but no longer added into the totals.
+  - Payment and expense dates use a date picker (free text could silently drop a payment from
+    every report if the date didn't parse).

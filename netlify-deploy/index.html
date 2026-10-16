@@ -313,6 +313,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 .jdc-field:last-child{margin-bottom:0}
 .jdc-field label{font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:3px}
 .jdc-sub{font-weight:400;color:var(--muted);font-size:9px;text-transform:none;letter-spacing:0}
+.jdc-field input[type=date]{color-scheme:dark}
 .jdc-field input,.jdc-field textarea{width:100%;background:var(--dark);border:1px solid var(--border);border-radius:6px;padding:5px 9px;color:var(--text);font-size:11px;font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box}
 .jdc-field textarea{resize:vertical;min-height:32px;height:32px;font-size:10.5px;line-height:1.35}
   .menu-item{padding:7px 12px;font-size:12px;color:var(--muted);cursor:pointer;border-radius:5px;white-space:nowrap}
@@ -670,7 +671,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
           </div>
           <div class="jdc-field" style="margin-bottom:16px">
             <label>Date</label>
-            <input type="text" id="pmtDate"/>
+            <input type="date" id="pmtDate"/>
           </div>
           <div style="display:flex;gap:8px;justify-content:flex-end">
             <button class="btn btn-ghost" onclick="closePaymentModal()">Cancel</button>
@@ -703,7 +704,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
           </div>
           <div class="jdc-field" style="margin-bottom:16px">
             <label>Date</label>
-            <input type="text" id="expDate"/>
+            <input type="date" id="expDate"/>
           </div>
           <div style="display:flex;gap:8px;justify-content:flex-end">
             <button class="btn btn-ghost" onclick="closeExpenseModal()">Cancel</button>
@@ -873,21 +874,16 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
       <div class="page-header">
         <div class="page-title">Reports</div>
         <div style="display:flex;gap:8px;position:relative">
-          <button class="btn btn-ghost" onclick="event.stopPropagation();toggleTaxReportMenu()">🧾 Tax Report ▾</button>
-          <div id="menu-tax-report" style="display:none;position:absolute;right:88px;top:100%;margin-top:4px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:4px;z-index:100;min-width:150px;box-shadow:0 4px 16px #00000088">
-            <div onclick="printTaxReport('month')" class="menu-item">This Month</div>
-            <div onclick="printTaxReport('quarter')" class="menu-item">This Quarter</div>
-            <div onclick="printTaxReport('year')" class="menu-item">This Year</div>
-          </div>
+          <button class="btn btn-ghost" onclick="printTaxReport()" title="Sales tax summary for the period shown below (use ◀ ▶ to pick it)">🧾 Tax Report</button>
           <button class="btn btn-ghost" onclick="printReportsSummary()">🖨 Print</button>
         </div>
       </div>
       <div style="padding:4px 28px 0;font-size:11px;color:var(--muted)" id="tax-due-reminder"></div>
       <div style="padding:0 28px;margin-top:16px;display:flex;gap:8px" id="reports-period-row">
-        <button class="filter-pill active" data-period="week" onclick="setReportsPeriod('week',this)">This Week</button>
-        <button class="filter-pill" data-period="month" onclick="setReportsPeriod('month',this)">This Month</button>
-        <button class="filter-pill" data-period="quarter" onclick="setReportsPeriod('quarter',this)">This Quarter</button>
-        <button class="filter-pill" data-period="year" onclick="setReportsPeriod('year',this)">This Year</button>
+        <button class="filter-pill active" data-period="week" onclick="setReportsPeriod('week',this)">Week</button>
+        <button class="filter-pill" data-period="month" onclick="setReportsPeriod('month',this)">Month</button>
+        <button class="filter-pill" data-period="quarter" onclick="setReportsPeriod('quarter',this)">Quarter</button>
+        <button class="filter-pill" data-period="year" onclick="setReportsPeriod('year',this)">Year</button>
         <button class="filter-pill" data-period="all" onclick="setReportsPeriod('all',this)">All Time</button>
       </div>
       <div style="padding:0 28px;margin-top:10px;display:flex;align-items:center;gap:10px" id="reports-history-row">
@@ -1747,7 +1743,7 @@ function openPaymentModal(projectId){
   document.getElementById('pmtAmount').value='';
   document.getElementById('pmtPercent').value='';
   document.getElementById('pmtMethod').value='Cash';
-  document.getElementById('pmtDate').value=new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  document.getElementById('pmtDate').value=storedDateToInput();
 
   const p=getProjects().find(pr=>pr.id===projectId);
   const clients=getClients();
@@ -1779,7 +1775,7 @@ function submitPayment(){
   const amount=parseFloat(document.getElementById('pmtAmount').value)||0;
   if(amount<=0){ alert('Enter an amount greater than $0.'); return; }
   const method=document.getElementById('pmtMethod').value;
-  const date=document.getElementById('pmtDate').value;
+  const date=inputDateToStored(document.getElementById('pmtDate').value);
 
   const proj=getProjects().find(p=>p.id===paymentModalProjectId);
   const total=proj?getProjectAmount(proj):0;
@@ -1870,7 +1866,7 @@ function openExpenseModal(projectId,editId){
   document.getElementById('expSubmitBtn').textContent=existing?'Save Changes':'Save Expense';
   document.getElementById('expDescription').value=existing?existing.description:'';
   document.getElementById('expAmount').value=existing?existing.amount:'';
-  document.getElementById('expDate').value=existing?existing.date:new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  document.getElementById('expDate').value=storedDateToInput(existing?existing.date:null);
 
   // The running total should reflect what's already on the job WITHOUT
   // double-counting the entry currently being edited — otherwise editing
@@ -1926,7 +1922,7 @@ function submitExpense(){
   const amount=parseFloat(amountRaw);
   if(!description){ alert('Add a short description for this expense.'); return; }
   if(amountRaw===''||isNaN(amount)||amount===0){ alert('Enter an amount — positive for a cost, negative for a credit or correction.'); return; }
-  const date=document.getElementById('expDate').value;
+  const date=inputDateToStored(document.getElementById('expDate').value);
   if(expenseModalEditId){
     updateExpense(expenseModalProjectId,expenseModalEditId,description,amount,date);
   }else{
@@ -2288,7 +2284,7 @@ function setReportsPeriod(period,btn){
 // Not offered for Week (too granular to be useful this way) or All Time
 // (there's no "previous all time").
 function navigateReportsPeriod(direction){
-  if(['week','all'].includes(currentReportsPeriod))return;
+  if(currentReportsPeriod==='all')return;
   const next=reportsPeriodOffset+direction;
   if(next<0)return; // can't navigate into the future
   reportsPeriodOffset=next;
@@ -2306,13 +2302,19 @@ function getReportsPeriodLabel(period,offset){
     return `Q${q} ${range.start.getFullYear()}`;
   }
   if(period==='year')return String(range.start.getFullYear());
-  return offset===0?'This Week':'';
+  if(period==='week'){
+    if(offset===0)return 'Last 7 Days';
+    const f=d=>d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+    return f(range.start)+' – '+f(range.end);
+  }
+  return 'All Time';
 }
+function fmtLongDate(d){ return d.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}); }
 
 function renderReportsHistoryNav(){
   const row=document.getElementById('reports-history-row');
   if(!row)return;
-  const supportsHistory=!['week','all'].includes(currentReportsPeriod);
+  const supportsHistory=currentReportsPeriod!=='all';
   row.style.display=supportsHistory?'flex':'none';
   if(!supportsHistory)return;
 
@@ -2342,7 +2344,7 @@ function renderPeriodDelta(elId,current,previous,periodLabel){
 function renderTrendChart(){
   const container=document.getElementById('reports-chart');
   if(!container)return;
-  const buckets=getTrendBuckets(currentReportsPeriod,6);
+  const buckets=getTrendBuckets(currentReportsPeriod,6,reportsPeriodOffset);
   const W=640,H=200,padB=26,padT=10;
   const chartH=H-padB-padT;
   const maxVal=Math.max(1,...buckets.map(m=>Math.max(m.revenue,m.expenses)));
@@ -2372,7 +2374,7 @@ function renderTrendChart(){
 
   const titleEl=document.getElementById('reports-chart-title');
   if(titleEl){
-    const titles={week:'Last 6 Weeks',month:'Last 6 Months',quarter:'Last 6 Quarters',year:'Last 6 Years',all:'Last 6 Years'};
+    const titles={week:'6 Weeks',month:'6 Months',quarter:'6 Quarters',year:'6 Years',all:'Last 6 Years'};
     titleEl.textContent='Revenue vs Expenses — '+(titles[currentReportsPeriod]||'Last 6 Months');
   }
 }
@@ -2396,7 +2398,7 @@ function renderReports(){
 
   const rep=computeReportsData(currentReportsPeriod,reportsPeriodOffset);
   const prevRep=computePreviousPeriodData(currentReportsPeriod,reportsPeriodOffset);
-  const periodLabels={week:'last week',month:'last month',quarter:'last quarter',year:'last year'};
+  const periodLabels={week:'previous 7 days',month:'previous month',quarter:'previous quarter',year:'previous year'};
   const prevLabel=periodLabels[currentReportsPeriod]||'';
   renderReportsHistoryNav();
 
@@ -2546,9 +2548,11 @@ function getJobFinancials(p){
   const f=p.state?.form;
   if(!f||!f.pricerData)return empty;
 
-  const d=gatherPricerPDFDataFromSaved(p); // revenue side: taxable/tax/total — entirely separate
-  // from cost, and always reflects exactly what the client was quoted,
-  // regardless of anything happening on the cost side above.
+  // Revenue side: the estimate frozen at save time (what the client was
+  // quoted and what Stripe charges) when there is one; older jobs fall back
+  // to recalculating from their saved line items.
+  const frozen=f.estimateSummary;
+  const d=(frozen&&parseFloat(frozen.total)>0)?frozen:gatherPricerPDFDataFromSaved(p);
 
   const paid=getAmountPaid(p.id);
   const balance=Math.max(0,d.total-paid);
@@ -2556,36 +2560,40 @@ function getJobFinancials(p){
   return{
     revenue:d.total,taxable:d.taxable,tax:d.tax,paid,balance,
     cost:{materials,design,install,setup,hardware,extra,total:totalCost},
-    profit:d.taxable-totalCost, // pre-tax revenue minus what the job actually cost you
+    // Everything you keep (total minus sales tax, so the card fee counts,
+    // same as Reports) minus what the job actually cost you.
+    profit:(d.total-d.tax)-totalCost,
   };
 }
 
 function getPeriodRange(period,offset){
   offset=offset||0;
   const now=new Date();
+  const endOfDay=d=>new Date(d.getFullYear(),d.getMonth(),d.getDate(),23,59,59,999);
   if(period==='week'){
-    const end=new Date(now); end.setDate(now.getDate()-offset*7);
-    const start=new Date(end); start.setDate(end.getDate()-7);
-    return{start,end:offset===0?now:end};
+    // The last 7 days including today (whole days), stepping back 7 days per offset.
+    const end=endOfDay(new Date(now.getFullYear(),now.getMonth(),now.getDate()-offset*7));
+    const start=new Date(end.getFullYear(),end.getMonth(),end.getDate()-6);
+    return{start,end};
   }
   if(period==='month'){
     const start=new Date(now.getFullYear(),now.getMonth()-offset,1);
-    const end=offset===0?now:new Date(now.getFullYear(),now.getMonth()-offset+1,0);
+    const end=endOfDay(new Date(now.getFullYear(),now.getMonth()-offset+1,0));
     return{start,end};
   }
   if(period==='quarter'){
     const q=Math.floor(now.getMonth()/3);
     const startMonth=q*3-offset*3;
     const start=new Date(now.getFullYear(),startMonth,1);
-    const end=offset===0?now:new Date(now.getFullYear(),startMonth+3,0);
+    const end=endOfDay(new Date(now.getFullYear(),startMonth+3,0));
     return{start,end};
   }
   if(period==='year'){
     const start=new Date(now.getFullYear()-offset,0,1);
-    const end=offset===0?now:new Date(now.getFullYear()-offset,11,31);
+    const end=endOfDay(new Date(now.getFullYear()-offset,11,31));
     return{start,end};
   }
-  return{start:new Date(0),end:now}; // 'all' has no meaningful offset
+  return{start:new Date(0),end:endOfDay(now)}; // 'all' has no meaningful offset
 }
 // The equivalent PRIOR window, same length/type — e.g. current is "This
 // Quarter", previous is the quarter before it. Used for the vs-last-period
@@ -2657,8 +2665,10 @@ function computeReportsDataForRange(range){
       expenses.setup+=fin.cost.setup;
       expenses.hardware+=fin.cost.hardware;
     }
+    // Only expenses added by hand count here — the pricer's categorized
+    // ones were already counted just above, by the job's save date.
     getExpenses(p.id).forEach(exp=>{
-      if(dateInRange(exp.date,range))expenses.extra+=exp.amount;
+      if(!exp.category&&dateInRange(exp.date,range))expenses.extra+=exp.amount;
     });
     const taxRatio=fin.revenue>0?fin.tax/fin.revenue:0;
     getPayments(p.id).forEach(pmt=>{
@@ -2744,43 +2754,21 @@ function computePreviousPeriodData(period,offset){
 // "This Quarter" shows quarter-over-quarter, and so on. "All Time" falls
 // back to yearly buckets, since that's the most legible resolution for
 // a full history.
-function getTrendBuckets(period,count){
-  const now=new Date();
+function getTrendBuckets(period,count,offset){
+  // Uses the exact same ranges as the numbers above the chart, ending at the
+  // period being viewed (◀ ▶). All Time shows the last 6 years.
+  const type=period==='all'?'year':period;
+  const base=period==='all'?0:(offset||0);
   const out=[];
-
-  if(period==='week'){
-    for(let i=count-1;i>=0;i--){
-      const end=new Date(now); end.setDate(now.getDate()-i*7);
-      const start=new Date(end); start.setDate(end.getDate()-7);
-      const data=computeReportsDataForRange({start,end});
-      out.push({label:start.toLocaleDateString('en-US',{month:'short',day:'numeric'}),revenue:data.revenueCollected,expenses:data.expenses.total});
-    }
-  }else if(period==='quarter'){
-    const curQ=Math.floor(now.getMonth()/3);
-    for(let i=count-1;i>=0;i--){
-      const totalQ=now.getFullYear()*4+curQ-i;
-      const y=Math.floor(totalQ/4),q=totalQ%4;
-      const start=new Date(y,q*3,1);
-      const end=new Date(y,q*3+3,0,23,59,59);
-      const data=computeReportsDataForRange({start,end});
-      out.push({label:'Q'+(q+1)+" '"+String(y).slice(2),revenue:data.revenueCollected,expenses:data.expenses.total});
-    }
-  }else if(period==='year'||period==='all'){
-    for(let i=count-1;i>=0;i--){
-      const y=now.getFullYear()-i;
-      const start=new Date(y,0,1);
-      const end=new Date(y,11,31,23,59,59);
-      const data=computeReportsDataForRange({start,end});
-      out.push({label:String(y),revenue:data.revenueCollected,expenses:data.expenses.total});
-    }
-  }else{ // month (default)
-    for(let i=count-1;i>=0;i--){
-      const d=new Date(now.getFullYear(),now.getMonth()-i,1);
-      const start=new Date(d.getFullYear(),d.getMonth(),1);
-      const end=new Date(d.getFullYear(),d.getMonth()+1,0,23,59,59);
-      const data=computeReportsDataForRange({start,end});
-      out.push({label:d.toLocaleDateString('en-US',{month:'short'}),revenue:data.revenueCollected,expenses:data.expenses.total});
-    }
+  for(let i=count-1;i>=0;i--){
+    const range=getPeriodRange(type,base+i);
+    const data=computeReportsDataForRange(range);
+    let label;
+    if(type==='week')label=range.start.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+    else if(type==='month')label=range.start.toLocaleDateString('en-US',{month:'short'});
+    else if(type==='quarter')label='Q'+(Math.floor(range.start.getMonth()/3)+1)+" '"+String(range.start.getFullYear()).slice(2);
+    else label=String(range.start.getFullYear());
+    out.push({label,revenue:data.revenueCollected,expenses:data.expenses.total});
   }
   return out;
 }
@@ -5614,6 +5602,21 @@ const WM_B64="iVBORw0KGgoAAAANSUhEUgAABa0AAAWXCAYAAABEIVhtAACL8ElEQVR4nOzd25LbOJ
 const QR_B64="iVBORw0KGgoAAAANSUhEUgAAASIAAAEiCAIAAADS3EjhAAAFYklEQVR4nO3dS47DNhBAwTjw/a88uQEHSOOBLU3V1rAtfx64UIP8/PM6Pz8/h0c/n8//fu7Z+ZVvmXwbk1ee2PlNTvx7+wLg/WQGOZlBTmaQkxnkZAY5mUFOZpCTGeS+54e7O/0TT5wS6KYxOjsnSJ74n7SaQU5mkJMZ5GQGOZlBTmaQkxnkZAY5mUHulymQs2524Yl3+m9d886Jilvfxs7/pNUMcjKDnMwgJzPIyQxyMoOczCAnM8jJDHKjKZAn6va3mMyITK5q8r63rnnnlE/HagY5mUFOZpCTGeRkBjmZQU5mkJMZ5GQGuT83BdKdY3JrguTWJ5rMiPw1VjPIyQxyMoOczCAnM8jJDHIyg5zMICczyI2mQJ54p//WrhsT3fs+8ZXPdv4nrWaQkxnkZAY5mUFOZpCTGeRkBjmZQU5mkPtlCmSyz8ROt3bdeN/73pq3eOJ/0moGOZlBTmaQkxnkZAY5mUFOZpCTGeRkBrnPzr0TbulOV5nYOY1x9sRr7ljNICczyMkMcjKDnMwgJzPIyQxyMoOczCD3y9BDdyYI+3U7lEze9+zWnitnVjPIyQxyMoOczCAnM8jJDHIyg5zMICczyI32Atk5B3DW7fZx65Wf+F1NPPFfZzWDnMwgJzPIyQxyMoOczCAnM8jJDHIyg9x38uRuguTWPiI7pzE675vzuLWPyJnVDHIyg5zMICczyMkMcjKDnMwgJzPIyQxyoymQzs57+Tuv6tbn/WsTJJNXtppBTmaQkxnkZAY5mUFOZpCTGeRkBjmZQe6XKZDJhEG3n8cTT0jpXvnWXMutX//s1o4s5/e1mkFOZpCTGeRkBjmZQU5mkJMZ5GQGOZlB7pdb9bfuqe+cPtm5Y8fE+/bzOOtO/Dk/12oGOZlBTmaQkxnkZAY5mUFOZpCTGeRkBrlrUyC39oq4pZsg2fm+Z+/bR8QUCFwmM8jJDHIyg5zMICczyMkMcjKDnMwgF95u37m/xc6rmuj2t5jY+XlvsZpBTmaQkxnkZAY5mUFOZpCTGeRkBjmZQe77xHvq3VXd2nXjiWfN7Nyh5NbnPb+v1QxyMoOczCAnM8jJDHIyg5zMICczyMkMct/Jve3JHEA3Q7BzcqWzc85j8srnT3Tr1598z1YzyMkMcjKDnMwgJzPIyQxyMoOczCAnM8iNbpl3OzpMvO/Ml7NuKmLntM2t3/fs/G1YzSAnM8jJDHIyg5zMICczyMkMcjKDnMwgF97Iv3XqxxPnS2593ve98tmt/4bVDHIyg5zMICczyMkMcjKDnMwgJzPIyQxyS/cCmcwQPPG5ZzvnHp6o+33PrGaQkxnkZAY5mUFOZpCTGeRkBjmZQU5mkPvsPF+j093pn+iu6tbuF7e+552/r9UMcjKDnMwgJzPIyQxyMoOczCAnM8jJDHLf9+0V8b5Jjsn7nu2cL9k5yTFhNYOczCAnM8jJDHIyg5zMICczyMkMcjKD3Pf88M477rcmV26dCHO2c5JjYudOIZPnWs0gJzPIyQxyMoOczCAnM8jJDHIyg5zMIPfLFMjZzsmGTjcl8MR9NSbXvHP65GzyXVnNICczyMkMcjKDnMwgJzPIyQxyMoOczCA3mgJ5n+50lZ0zIme3rnnn6Tn2AoHVZAY5mUFOZpCTGeRkBjmZQU5mkJMZ5P7cFMjO00Y6Tzyn5uyJ8yVWM8jJDHIyg5zMICczyMkMcjKDnMwgJzPIjaZAdp7bMnFrkuPWbh/diTA7dwq5tdeL1QxyMoOczCAnM8jJDHIyg5zMICczyMkMcneGD1I7T1fZORUx8cR9RG6xmkFOZpCTGeRkBjmZQU5mkJMZ5GQGOZlB7j/lIvRS0MUhewAAAABJRU5ErkJggg==";
 function fmt(n){ n=isNaN(n)?0:n; return (n<0?'-$':'$')+Math.abs(n).toFixed(2); }
 
+// Payment/expense dates are stored as "Oct 16, 2026" (what everything
+// else reads); the form uses a real date picker ("2026-10-16"). A free-text
+// box let typos through, and an unreadable date silently dropped that
+// payment from every Reports period.
+function storedDateToInput(str){
+  const d=str?new Date(str):new Date();
+  const ok=!isNaN(d)?d:new Date();
+  return ok.getFullYear()+'-'+String(ok.getMonth()+1).padStart(2,'0')+'-'+String(ok.getDate()).padStart(2,'0');
+}
+function inputDateToStored(v){
+  const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(v||'');
+  const d=m?new Date(+m[1],+m[2]-1,+m[3]):new Date(); // local date, not UTC
+  return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+}
+
 // Store the actual exported PDF bytes against the project — so "View
 // Estimate/Invoice" later shows exactly what was generated/sent, not a
 // fresh regeneration that could differ if rates changed since. Purely
@@ -5773,7 +5776,8 @@ function printSalesList(){
     const paid=getAmountPaid(p.id);
     const balance=Math.max(0,total-paid);
     const fin=getJobFinancials(p);
-    totalAll+=total;paidAll+=paid;balAll+=balance;marginAll+=fin.profit;expensesAll+=fin.cost.total;
+    const excluded=getJobMeta(p.id).excluded;
+    if(!excluded){totalAll+=total;paidAll+=paid;balAll+=balance;marginAll+=fin.profit;expensesAll+=fin.cost.total;}
     const status=getPaymentStatus(p.id,total);
     const statusLabel=status==='paid'?'Paid':status==='partial'?'Partial':'Unpaid';
     return `<tr>
@@ -5784,7 +5788,7 @@ function printSalesList(){
       <td class="num">$${balance.toFixed(2)}</td>
       <td class="num">$${fin.cost.total.toFixed(2)}</td>
       <td class="num">$${fin.profit.toFixed(2)}</td>
-      <td>${statusLabel}</td>
+      <td>${statusLabel}${excluded?' (excluded)':''}</td>
     </tr>`;
   }).join('');
   const body=`<table><thead><tr>
@@ -5801,8 +5805,10 @@ function printSalesList(){
 }
 
 function printReportsSummary(){
-  const rep=computeReportsData(currentReportsPeriod);
-  const periodLabels={week:'This Week',month:'This Month',quarter:'This Quarter',year:'This Year',all:'All Time'};
+  const rep=computeReportsData(currentReportsPeriod,reportsPeriodOffset);
+  const range=getPeriodRange(currentReportsPeriod,reportsPeriodOffset);
+  const label=getReportsPeriodLabel(currentReportsPeriod,reportsPeriodOffset);
+  const covers=currentReportsPeriod==='all'?'All time':fmtLongDate(range.start)+' – '+fmtLongDate(range.end>new Date()?new Date():range.end);
   const preTax=rep.revenueCollected-rep.taxCollected;
   const marginPct=preTax>0?(rep.netProfit/preTax*100):0;
   const body=`
@@ -5830,7 +5836,7 @@ function printReportsSummary(){
       <tr><td>Partially paid jobs</td><td class="num">${rep.partialCount}</td></tr>
       <tr><td>Fully paid jobs</td><td class="num">${rep.paidCount}</td></tr>
     </tbody></table>`;
-  openPrintWindow('Reports — Inkable Studios',periodLabels[currentReportsPeriod]||'This Week',body);
+  openPrintWindow('Reports — Inkable Studios',label+' · '+covers,body);
 }
 
 // Texas sales tax returns are due the 20th of the month following the
@@ -5838,19 +5844,9 @@ function printReportsSummary(){
 // or annual filing — only the PERIOD length changes, the 20th-of-next-month
 // rule stays the same. This computes the actual calendar due date for
 // whichever period is currently selected in Reports.
-function getTaxFilingDueDate(period){
-  const now=new Date();
-  let periodEnd;
-  if(period==='month'){
-    periodEnd=new Date(now.getFullYear(),now.getMonth()+1,0);
-  }else if(period==='quarter'){
-    const q=Math.floor(now.getMonth()/3);
-    periodEnd=new Date(now.getFullYear(),q*3+3,0);
-  }else if(period==='year'){
-    periodEnd=new Date(now.getFullYear(),11,31);
-  }else{
-    return null; // Week/All Time don't correspond to a real filing period.
-  }
+function getTaxFilingDueDate(period,offset){
+  if(!['month','quarter','year'].includes(period))return null; // Week/All Time aren't filing periods
+  const periodEnd=getPeriodRange(period,offset||0).end;
   return new Date(periodEnd.getFullYear(),periodEnd.getMonth()+1,20);
 }
 
@@ -5880,29 +5876,29 @@ function renderTaxDueReminder(){
   el.innerHTML=`📅 Next Texas sales tax filing due: <span style="color:${urgent?'var(--red)':'var(--text)'};font-weight:600">${dueStr}</span> <span style="color:var(--muted2)">(${daysLeft} day${daysLeft===1?'':'s'} — assumes quarterly filing)</span>`;
 }
 
-function toggleTaxReportMenu(){
-  const m=document.getElementById('menu-tax-report');
-  if(!m)return;
-  const opening=m.style.display==='none'||!m.style.display;
-  document.querySelectorAll('[id^="menu-"]').forEach(el=>{if(el!==m)el.style.display='none';});
-  m.style.display=opening?'block':'none';
-}
+// Prints the sales tax summary for whichever period is on screen in
+// Reports — pick Month / Quarter / Year, then ◀ ▶ to any past one.
+function printTaxReport(){
+  const period=currentReportsPeriod, offset=reportsPeriodOffset;
+  if(!['month','quarter','year'].includes(period)){
+    showToast('🧾','Pick a filing period first','Choose Month, Quarter or Year, then use ◀ ▶ to the one you need.',{color:'var(--amber)',duration:7000});
+    return;
+  }
+  const label=getReportsPeriodLabel(period,offset);
+  const dueDateStr=fmtLongDate(getTaxFilingDueDate(period,offset));
+  const range=getPeriodRange(period,offset);
+  const now=new Date();
+  const inProgress=range.end>now;
+  const coversStr=fmtLongDate(range.start)+' – '+(inProgress?'today (period not finished)':fmtLongDate(range.end));
 
-function printTaxReport(period){
-  const periodLabels={month:'This Month',quarter:'This Quarter',year:'This Year'};
-  const dueDate=getTaxFilingDueDate(period);
-
-  const rep=computeReportsData(period);
+  const rep=computeReportsData(period,offset);
   const grossSales=rep.revenueCollected;
   const taxableSales=grossSales-rep.taxCollected;
-  const dueDateStr=dueDate.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
-  const range=getPeriodRange(period);
-  const periodStartStr=range.start.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
 
   const body=`
     <table><thead><tr><th>Filing Period</th><th class="num"></th></tr></thead><tbody>
-      <tr><td>Period</td><td class="num">${periodLabels[period]}</td></tr>
-      <tr><td>Covers</td><td class="num">${periodStartStr} — today</td></tr>
+      <tr><td>Period</td><td class="num">${label}</td></tr>
+      <tr><td>Covers</td><td class="num">${coversStr}</td></tr>
       <tr><td><b>Return due (20th of next month)</b></td><td class="num"><b>${dueDateStr}</b></td></tr>
     </tbody></table>
     <br/>
@@ -5914,7 +5910,7 @@ function printTaxReport(period){
     <div class="summary">
       <div class="summary-row total"><span>Estimated tax due</span><span>$${rep.taxCollected.toFixed(2)}</span></div>
     </div>`;
-  openPrintWindow('Tax Summary — Inkable Studios',periodLabels[period]+' · Due '+dueDateStr,body);
+  openPrintWindow('Tax Summary — Inkable Studios',label+' · Due '+dueDateStr,body);
 }
 
 // ── PDF generation (Estimate + Invoice) ─────────────────────────────────
