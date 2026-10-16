@@ -741,7 +741,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
       <div id="clients-empty" class="empty-state" style="display:none">
         <div class="icon">👥</div>
         <h3>No clients yet</h3>
-        <p>Clients added in the Inkable Tool will appear here.</p>
+        <p>No clients yet. Add one with + New Client, or when you start a new estimate.</p>
       </div>
     </div>
 
@@ -2404,8 +2404,11 @@ function renderReports(){
   const needAction=meta.filter(p=>['send','proof','revision'].includes(p.meta.status)).length;
   const inProd=meta.filter(p=>p.meta.status==='prod').length;
   const rush=meta.filter(p=>p.meta.tags?.includes('rush')).length;
-  const estimates=projects.filter(p=>p.docType==='estimate'||!p.docType).length;
-  const invoices=projects.filter(p=>p.docType==='invoice').length;
+  // Every job is saved as an estimate; an invoice exists once one has been
+  // generated for it (nothing ever set docType to 'invoice', so this
+  // always showed 0 invoices before).
+  const invoices=projects.filter(p=>p.exportedPdfs&&p.exportedPdfs.invoice).length;
+  const estimates=projects.length-invoices;
 
   const rep=computeReportsData(currentReportsPeriod,reportsPeriodOffset);
   const prevRep=computePreviousPeriodData(currentReportsPeriod,reportsPeriodOffset);
@@ -3058,7 +3061,36 @@ function updateSyncIndicator(ok,isFullSync){
   else{ el.textContent='☁ Offline'; el.style.color='var(--amber)'; el.title='Could not reach the server — changes are saved on THIS DEVICE ONLY until sync recovers. Do not assume other devices see this yet.'; }
 }
 
-async function cloudPush(path,method,body){
+// Outbox — a save that fails to reach the server (offline, server hiccup)
+// is remembered here and re-sent before the next pull. Without it, the
+// next successful sync replaced this device's copy with the server's and
+// the unsent change was silently lost. One entry per record (newest wins).
+const OUTBOX_KEY='inkable_sync_outbox';
+function readOutbox(){ try{ return JSON.parse(localStorage.getItem(OUTBOX_KEY)||'{}'); }catch(e){ return {}; } }
+function writeOutbox(box){
+  try{ localStorage.setItem(OUTBOX_KEY,JSON.stringify(box)); }
+  catch(e){ console.error('Could not store unsent change (browser storage full?):',e); }
+}
+function outboxKey(path,body){
+  const [base,query]=path.split('?');
+  const id=(body&&(body.id||body.projectId))||new URLSearchParams(query||'').get('id')||'';
+  return base+':'+id;
+}
+function queueUnsent(path,method,body,stamp){
+  // PDF bytes are too big to park in browser storage; they're rebuilt on
+  // demand if missing, so keep just the metadata.
+  if(body&&body.exportedPdfs){
+    const slim={};
+    Object.entries(body.exportedPdfs).forEach(([k,v])=>{ slim[k]={savedAt:v&&v.savedAt,storedInCloud:true}; });
+    body={...body,exportedPdfs:slim};
+  }
+  const box=readOutbox();
+  const key=outboxKey(path,body);
+  if(!box[key]||box[key].stamp<=stamp)box[key]={path,method,body,stamp};
+  writeOutbox(box);
+}
+async function cloudPush(path,method,body,opts2){
+  const stamp=(opts2&&opts2.stamp)||Date.now();
   try{
     const token=localStorage.getItem(AUTH_TOKEN_KEY);
     const headers={'Content-Type':'application/json'};
@@ -3067,13 +3099,28 @@ async function cloudPush(path,method,body){
     if(body!==undefined)opts.body=JSON.stringify(body);
     const res=await fetch(CLOUD_API_BASE+path,opts);
     if(!res.ok)throw new Error('Server returned '+res.status);
+    // Delivered — drop a queued copy of this record unless a newer change
+    // for it was queued after this one started.
+    const box=readOutbox(), key=outboxKey(path,body);
+    if(box[key]&&box[key].stamp<=stamp){ delete box[key]; writeOutbox(box); }
     updateSyncIndicator(true);
     return await res.json();
   }catch(err){
     console.warn('Cloud sync failed for',path,err);
+    queueUnsent(path,method,body,stamp);
     updateSyncIndicator(false);
     return null;
   }
+}
+// Re-sends everything waiting in the outbox, oldest first. True only if
+// nothing is left unsent.
+async function flushOutbox(){
+  const entries=Object.values(readOutbox()).sort((a,b)=>a.stamp-b.stamp);
+  for(const e of entries){
+    const result=await cloudPush(e.path,e.method,e.body,{stamp:e.stamp});
+    if(result===null)return false;
+  }
+  return Object.keys(readOutbox()).length===0;
 }
 function syncClientToServer(client){ cloudPush('/clients','POST',client); }
 function syncClientDeleteToServer(id){ cloudPush('/clients?id='+encodeURIComponent(id),'DELETE'); }
@@ -3102,6 +3149,14 @@ function syncPricingToServer(data){ cloudPush('/pricing','POST',data); }
 // If the server can't be reached, the app just keeps using whatever was
 // already in localStorage — never blocks on this.
 async function pullFromServerOnLoad(){
+  // Never overwrite this device's copy while it still holds changes the
+  // server hasn't received — send those first, and if that fails, keep
+  // working from the local copy and try again on the next sync.
+  if(!(await flushOutbox())){
+    console.warn('Unsent changes could not be delivered yet — keeping this device\'s copy.');
+    updateSyncIndicator(false);
+    return;
+  }
   try{
     const token=localStorage.getItem(AUTH_TOKEN_KEY);
     const headers=token?{'Authorization':'Bearer '+token}:{};
@@ -3352,6 +3407,9 @@ function periodicBackgroundSync(){
   if(localStorage.getItem(AUTH_TOKEN_KEY))pullFromServerOnLoad();
 }
 setInterval(periodicBackgroundSync,5*60*1000);
+// Coming back online: deliver anything queued right away instead of
+// waiting for the next 5-minute sync.
+window.addEventListener('online',()=>{ if(localStorage.getItem(AUTH_TOKEN_KEY))pullFromServerOnLoad(); });
 
 // If a Drive Client ID is already saved, get the auth client ready so
 // "Connect" works immediately — this doesn't grant access on its own,
@@ -4457,6 +4515,7 @@ function openPricer(projNum, clientId){
   const cl=clientId?clients.find(c=>c.id===clientId):null;
 
   pricerState={
+    editingId:null, // set after the first save, so later saves update the same job
     projectNum:String(projNum),
     clientId:clientId||'',
     clientName:cl?cl.name:'',
@@ -4521,6 +4580,7 @@ function loadPricerFromSaved(project){
   const cl=f.clientId?clients.find(c=>c.id===f.clientId):null;
 
   pricerState={
+    editingId:project.id,
     projectNum:String(project.projectNum),
     clientId:f.clientId||'',
     clientName:cl?cl.name:(f.billingName||''),
@@ -5451,11 +5511,22 @@ function savePricerProject(){
   const estNo=document.getElementById('pricerEstNo').value||('EST-'+projNum);
   const jobName=document.getElementById('pricerJobName').value||'Unnamed Job';
   const list=getProjects();
-  const existing=list.findIndex(p=>p.estNo===estNo&&(p.docType==='estimate'||!p.docType));
+  // Which job is this? The one that was opened (or already saved once in
+  // this session) — tracked by id, not by Est #. Matching by Est # meant
+  // renaming the Est # created a duplicate job, and typing an Est # that
+  // another job already uses silently overwrote THAT job.
+  let existing=pricerState.editingId?list.findIndex(p=>p.id===pricerState.editingId):-1;
+  const clash=list.find(p=>p.estNo===estNo&&p.id!==pricerState.editingId);
+  if(clash){
+    const who=getClients().find(c=>c.id===clash.clientId)?.name||clash.state?.form?.billingName||'another job';
+    alert(`${estNo} is already used by ${who}. Change the Est # before saving, so the two jobs don't get mixed up.`);
+    return false;
+  }
   // Reuse the existing project's id when updating in place — a fresh id
   // every save would silently orphan its status/tags/notes/payments/PDF
   // snapshots, since those are all keyed by this id.
   const id=existing>=0?list[existing].id:'proj_'+Date.now()+'_'+Math.floor(Math.random()*100000);
+  pricerState.editingId=id;
 
   // Build minimal state object compatible with old tool format
   const state={form:{
@@ -5518,8 +5589,16 @@ function savePricerProject(){
     }),
   }};
 
+  // The job's date comes from the pricer's Date field (which shows the
+  // original date when a job is reopened). Re-saving used to reset it to
+  // today, which moved an old job's costs into the current Reports period
+  // and reset its "sitting for X days" reminder.
+  const dateField=(document.getElementById('pricerDate')?.value||'').trim();
+  const savedAt=!isNaN(new Date(dateField))&&dateField
+    ?new Date(dateField).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})
+    :(existing>=0&&list[existing].savedAt)||new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
   const entry={id,name:jobName,estNo,projectNum:projNum,clientId:pricerState.clientId,
-    savedAt:new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}),
+    savedAt,
     docType:'estimate',state,
     // Preserve any PDFs already exported for this job across re-saves —
     // editing the pricing shouldn't silently wipe out what was already sent.
@@ -5609,6 +5688,7 @@ function savePricerProject(){
   const btn=document.getElementById('pricerSaveBtn');
   if(btn){btn.textContent='✅ Saved!';setTimeout(()=>{btn.textContent='💾 Save';},1500);}
   renderProjects();
+  return true;
 }
 
 // ── PDF asset constants (Inkable Studios branding) ─────────────────────
@@ -6138,12 +6218,9 @@ function generatePricerPDF(type){
     // Save the project first so this snapshot has somewhere to attach —
     // then store the actual PDF bytes, then hand the same file to the
     // browser to download.
-    savePricerProject();
-    const savedProjects=getProjects();
-    const estNo=document.getElementById('pricerEstNo').value;
-    const match=savedProjects.find(p=>p.estNo===estNo&&(p.docType==='estimate'||!p.docType));
+    if(savePricerProject()===false)return; // save was blocked (e.g. Est # already in use)
     const base64=doc.output('datauristring');
-    if(match)savePdfSnapshot(match.id,type,base64);
+    if(pricerState.editingId)savePdfSnapshot(pricerState.editingId,type,base64);
 
     doc.save(fname);
   }catch(err){

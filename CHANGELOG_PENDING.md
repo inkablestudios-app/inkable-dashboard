@@ -42,3 +42,14 @@
   arrives: the exact fee from Stripe, or 2.9% + 30c marked "(estimated)" if the lookup fails.
 - Expenses are now merged on the server like payments (so a Dashboard save can't wipe the Stripe fee);
   deleting an expense sends an explicit removedExpenseIds.
+- Pricer ↔ Projects/Sales review fixes:
+  - Unsent changes are no longer lost. A save that failed to reach the server (offline/hiccup) was
+    overwritten by the next sync. Failed saves now wait in an outbox, are re-sent first, and the
+    Dashboard won't replace its copy until they're delivered. Also re-sends as soon as the device is
+    back online.
+  - The pricer tracks the job it's editing by id. Before: changing the Est # created a duplicate job,
+    and typing an Est # another job already used overwrote that other job. Now: rename updates the same
+    job; a clashing Est # is blocked with a message. Exported PDFs attach to the right job.
+  - Re-saving a job keeps its date (from the pricer's Date field) instead of resetting it to today,
+    which moved old jobs' costs into the current Reports period and reset reminders.
+  - Reports "Est. / Invoices" counts jobs with a generated invoice (was always 0).
