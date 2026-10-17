@@ -6,6 +6,10 @@ Written after a read-through of v2.38 on 2026-10-16. Keep this updated when the 
 - **Dashboard** (`netlify-deploy/index.html`, one big file): login, Projects, Sales, Clients, Reports tabs,
   the pricer (estimates), PDF estimates/invoices/receipts, Settings, Google Drive proof uploads,
   Google Calendar sync (parked).
+  Phones and tablets (up to 820px wide) get their own layout from one `@media (max-width:820px)` block
+  in the first `<style>`: bottom tab bar, cards, windows that slide up, pricer with a fixed Total + Save
+  bar. Change the computer layout outside that block; check both sizes after a layout change.
+  A job's "name" is always the client's name (filled in automatically); jobs have no description field.
 - **Client page** (`netlify-deploy/proof.html`): opened by a client from a private link. Shows the proof,
   approve / request changes, estimate details, and the Stripe pay buttons.
 - **Server** (`netlify-deploy/netlify/functions/`): small functions that read/write the Postgres database.
