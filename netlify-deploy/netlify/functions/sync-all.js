@@ -38,7 +38,8 @@ export default async (req) => {
       // Only rows with an actual response — this powers the "client
       // responded while you were away" notification, so jobs no one's
       // replied to yet don't need to come along for the ride.
-      db.sql`SELECT project_id, response, response_note, response_at FROM proof_shares WHERE response IS NOT NULL`,
+      db.sql`SELECT project_id, response, response_note, response_at, estimate_accepted_at, estimate_accepted_name, estimate_accepted_total
+             FROM proof_shares WHERE response IS NOT NULL OR estimate_accepted_at IS NOT NULL`,
     ]);
 
     const clients = clientRows.map(r => ({
@@ -63,7 +64,14 @@ export default async (req) => {
     });
 
     const proofResponses = {};
+    const estimateAcceptances = {};
     proofRows.forEach(r => {
+      if (r.estimate_accepted_at) {
+        estimateAcceptances[r.project_id] = {
+          name: r.estimate_accepted_name, at: r.estimate_accepted_at, total: Number(r.estimate_accepted_total),
+        };
+      }
+      if (!r.response) return;
       proofResponses[r.project_id] = {
         response: r.response, responseNote: r.response_note, responseAt: r.response_at,
       };
@@ -75,6 +83,7 @@ export default async (req) => {
       jobMeta,
       pricing: pricingRows[0]?.data || {},
       proofResponses,
+      estimateAcceptances,
     });
   } catch (err) {
     console.error("sync-all function error:", err);

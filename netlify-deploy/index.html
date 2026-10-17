@@ -1372,7 +1372,17 @@ function getJobDepositPct(p){
   return getRates().depositPct;
 }
 function isJobCommitted(id){
-  return getAmountPaid(id)>0.005||COMMITTED_STATUSES.includes(getJobMeta(id).status);
+  return getAmountPaid(id)>0.005||COMMITTED_STATUSES.includes(getJobMeta(id).status)||!!getEstimateAcceptance(id);
+}
+// Client accepted the estimate on their page — and still for the current
+// total (if you re-priced the job since, it no longer counts).
+const ACCEPT_KEY='inkable_estimate_acceptances';
+function getEstimateAcceptance(id){
+  let all={}; try{ all=JSON.parse(localStorage.getItem(ACCEPT_KEY)||'{}'); }catch(e){}
+  const a=all[id]; if(!a)return null;
+  const p=getProjects().find(x=>x.id===id);
+  const total=parseFloat(p?.state?.form?.estimateSummary?.total);
+  return (total>0&&Math.abs(total-Number(a.total))<0.005)?a:null;
 }
 function getPaymentStatus(id,total){
   const paid=getAmountPaid(id);
@@ -1586,6 +1596,13 @@ function changeClientInPricer(){
 // ── Projects ──────────────────────────────────────────────────────────
 // Shared by renderProjects() and the print view — guarantees what prints
 // is exactly what's on screen: same search, same status filter, same sort.
+// Item descriptions, vehicle info and notes, for search ("F-150",
+// "door decals"...) — so an old job is easy to find and copy.
+function jobSearchText(p){
+  let txt=(p.state?.form?.notes||'')+' '+(p.state?.form?.jobName||'');
+  try{ (JSON.parse(p.state?.form?.pricerData||'{}').lines||[]).forEach(l=>{ txt+=' '+(l.desc||'')+' '+(l.vehicleInfo||''); }); }catch(e){}
+  return txt.toLowerCase();
+}
 // A job's date as a number for sorting (oldest = smallest); unreadable dates sort last.
 function jobDateValue(p){
   const t=new Date(p.savedAt).getTime();
@@ -1601,7 +1618,8 @@ function getFilteredSortedProjects(){
     if(meta.status==='done'&&currentFilter!=='done') return false;
     const matchQ=!q||p.name?.toLowerCase().includes(q)||(p.estNo||'').toLowerCase().includes(q)||
       clients.find(c=>c.id===p.clientId)?.name.toLowerCase().includes(q)||
-      (p.state?.form?.billingName||'').toLowerCase().includes(q);
+      (p.state?.form?.billingName||'').toLowerCase().includes(q)||
+      jobSearchText(p).includes(q);
     const matchStatus=currentFilter==='all'||meta.status===currentFilter;
     return matchQ&&matchStatus;
   });
@@ -1663,6 +1681,7 @@ function renderProjects(){
       <div class="job-tags">
         ${isRush?'<span class="tag tag-rush">RUSH</span>':''}
         ${isHold?'<span class="tag tag-hold">HOLD</span>':''}
+        ${getEstimateAcceptance(p.id)?'<span class="tag" style="background:#10b98122;color:var(--green)" title="Client accepted the estimate">ACCEPTED</span>':''}
       </div>
       <div class="job-date">${p.savedAt||'—'}</div>
       <div class="job-date" style="color:${meta.installDate?'var(--text)':'var(--muted2)'}">${meta.installDate?new Date(meta.installDate+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}):'—'}</div>
@@ -1677,6 +1696,8 @@ function renderProjects(){
           ${meta.proofLink?`<div onclick="openDocViewer('Proof — ${(p.estNo||p.name||'').replace(/'/g,"\\'")}',getDriveEmbedUrl('${meta.proofLink}'),false)" class="menu-item">📎 View Proof</div>`:''}
           <div style="height:1px;background:var(--border);margin:4px 0"></div>
           <div onclick="editInPricer('${p.id}')" class="menu-item">✏️ Edit</div>
+          <div onclick="copyJobToNewEstimate('${p.id}')" class="menu-item">📄 Copy as New Estimate</div>
+          <div onclick="generateWorkOrderPDF('${p.id}')" class="menu-item">🛠 Work Order</div>
           <div style="height:1px;background:var(--border);margin:4px 0"></div>
           <div onclick="deleteProjectConfirm('${p.id}')" class="menu-item" style="color:var(--red)">🗑 Delete</div>
         </div>
@@ -3085,6 +3106,93 @@ function editInPricer(id){
   loadPricerFromSaved(p);
 }
 
+// Copy a job: opens the pricer with everything from the old job, as a NEW
+// estimate (new number, today's date, today's tax rate). Saving creates a
+// separate job; the original is untouched. Change the client with the
+// client button in the pricer if it's for someone else.
+function copyJobToNewEstimate(id){
+  const p=getProjects().find(x=>x.id===id);
+  if(!p)return;
+  loadPricerFromSaved(p);
+  const nums=getProjects().map(x=>parseInt(x.projectNum)||0).filter(n=>n>0);
+  const projNum=nums.length?Math.max(...nums)+1:1000;
+  pricerState.editingId=null;
+  pricerState.projectNum=String(projNum);
+  pricerState.estNo='EST-'+projNum;
+  pricerState.invNo='INV-'+projNum;
+  pricerState.taxRate=getRates().taxRate;
+  pricerState.date=new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  document.getElementById('pricerProjNum').textContent='Project '+projNum+' (copy of '+(p.estNo||'')+')';
+  document.getElementById('pricerEstNo').value=pricerState.estNo;
+  document.getElementById('pricerDate').value=pricerState.date;
+  setTimeout(recalc,0);
+  showToast('📄','Copied as a new estimate',`From ${p.estNo||'the old job'}. Nothing is saved until you press Save.`,{color:'var(--blue)',duration:6000});
+}
+
+// Work order / job ticket — a one-page production sheet with NO prices:
+// what to make (sizes, materials, quantities) and where to install it.
+function generateWorkOrderPDF(id){
+  try{
+    const p=getProjects().find(x=>x.id===id); if(!p)return;
+    const f=p.state?.form||{}, meta=getJobMeta(id);
+    const cl=getClients().find(c=>c.id===p.clientId);
+    let pd={}; try{ pd=JSON.parse(f.pricerData||'{}'); }catch(e){}
+    const rates=getRates(), vinyl=getVinyl(), laminate=getLaminate(), substrate=getSubstrate();
+    const {jsPDF}=window.jspdf; const doc=new jsPDF({unit:'pt',format:'letter'});
+    const W=612,H=792,M=40; let y=M;
+    const line=(x1,y1,x2,y2)=>{doc.setDrawColor(180);doc.setLineWidth(0.5);doc.line(x1,y1,x2,y2);};
+    const ensure=h=>{ if(y+h>H-M){ doc.addPage(); y=M; } };
+    doc.setFont('helvetica','bold');doc.setFontSize(20);doc.setTextColor(0);doc.text('WORK ORDER',M,y+14);
+    doc.setFontSize(11);doc.text(p.estNo||'',W-M,y+6,{align:'right'});
+    doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(90);
+    doc.text('Status: '+(STATUS_LABELS[meta.status]||meta.status||''),W-M,y+19,{align:'right'});
+    y+=34; line(M,y,W-M,y); y+=16;
+    doc.setTextColor(0);doc.setFont('helvetica','bold');doc.setFontSize(12);doc.text(f.jobName||p.name||'Job',M,y); y+=16;
+    doc.setFont('helvetica','normal');doc.setFontSize(10);
+    const who=cl?cl.name:(f.billingName||'');
+    const addr=cl?[cl.addr,[cl.city,cl.state].filter(Boolean).join(', '),cl.zip].filter(Boolean).join(', '):'';
+    [['Client',who],['Phone',cl?.phone||''],['Email',cl?.email||''],['Install address',addr],
+     ['Install',meta.installDate?new Date(meta.installDate+'T00:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})+(meta.installTime?' at '+fmtInstallTime(meta.installTime):''):'Not scheduled']
+    ].forEach(([k,v])=>{ if(!v)return; doc.setFont('helvetica','bold');doc.text(k+':',M,y); doc.setFont('helvetica','normal'); doc.text(doc.splitTextToSize(String(v),W-2*M-100),M+100,y); y+=14; });
+    y+=6; line(M,y,W-M,y); y+=18;
+    doc.setFont('helvetica','bold');doc.setFontSize(11);doc.text('Items',M,y); y+=14;
+    const dim=(v,ft)=>{ const n=parseFloat(v)||0; return ft?(n+' ft'):(n+'"'); };
+    (pd.lines||[]).forEach((l,i)=>{
+      const c=calcSavedLine(l,pd.jobType,rates,vinyl,laminate,substrate);
+      const specs=[];
+      if(l.pricingMode==='flat'){ specs.push('Qty '+(l.qty||1)+' (vendor / flat item)'); }
+      else{
+        specs.push('Size: '+dim(l.w,l.wFt)+' W × '+dim(l.h,l.hFt)+' H   ·   Qty '+(l.qty||1)+'   ·   '+c.sqft.toFixed(2)+' sqft total');
+        specs.push('Media: '+(l.vinyl||'—')+(l.printed===false?' (not printed)':' (printed)'));
+        if(l.lam&&l.lam!=='No Laminate')specs.push('Laminate: '+l.lam);
+        if(l.sub&&l.sub!=='None')specs.push('Substrate: '+l.sub+(l.subThickness?' — '+l.subThickness:'')+(l.subSameSize===false?' ('+dim(l.subW,l.subWFt)+' × '+dim(l.subH,l.subHFt)+')':''));
+      }
+      const tasks=[l.designChk?'Design':'',l.installChk?'Install':''].filter(Boolean);
+      if(tasks.length)specs.push('Includes: '+tasks.join(' + '));
+      const title=(i+1)+'.  '+((l.desc||'Item').trim())+(l.vehicleInfo?' — '+l.vehicleInfo:'');
+      const titleLines=doc.splitTextToSize(title,W-2*M-20);
+      ensure(16+titleLines.length*13+specs.length*13);
+      doc.setFont('helvetica','bold');doc.setFontSize(10.5);doc.text(titleLines,M,y); y+=titleLines.length*13;
+      doc.setFont('helvetica','normal');doc.setFontSize(9.5);doc.setTextColor(60);
+      specs.forEach(sp=>{ doc.text(doc.splitTextToSize(sp,W-2*M-20),M+16,y); y+=13; });
+      doc.setTextColor(0); y+=6;
+      // checkbox for the shop floor
+      doc.setDrawColor(120);doc.rect(W-M-12,y-30,10,10);
+    });
+    if((pd.lines||[]).length===0){ doc.text('No items on this job.',M,y); y+=14; }
+    const notes=[f.notes,meta.notes].filter(Boolean).join('\n');
+    if(notes){ ensure(40); y+=4; line(M,y,W-M,y); y+=16; doc.setFont('helvetica','bold');doc.setFontSize(11);doc.text('Notes',M,y); y+=14;
+      doc.setFont('helvetica','normal');doc.setFontSize(9.5); const nl=doc.splitTextToSize(notes,W-2*M); ensure(nl.length*12); doc.text(nl,M,y); y+=nl.length*12; }
+    if(meta.proofLink){ ensure(30); y+=10; doc.setFontSize(9);doc.setTextColor(40,90,200); doc.textWithLink('Open the approved proof (Google Drive)',M,y,{url:meta.proofLink}); doc.setTextColor(0); }
+    doc.setFontSize(8);doc.setTextColor(140);
+    doc.text('Printed '+new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+' · Inkable Studios',M,H-24);
+    viewBlob(doc.output('blob'),'Work Order — '+(p.estNo||''));
+  }catch(err){
+    console.error('Work order error:',err);
+    alert('Could not create the work order: '+err.message);
+  }
+}
+
 function viewDoc(id,type){
   if(type==='receipt'){
     alert('Receipts aren\'t tracked yet — payment/deposit tracking is coming in a future update.');
@@ -3356,6 +3464,8 @@ async function pullFromServerOnLoad(){
     if(typeof renderReports==='function')renderReports();
     checkForNewClientResponses(data.proofResponses||{});
     checkForNewCardPayments(oldMeta,data.jobMeta||{});
+    try{ localStorage.setItem(ACCEPT_KEY,JSON.stringify(data.estimateAcceptances||{})); }catch(e){}
+    checkForNewAcceptances(data.estimateAcceptances||{});
     refreshReminders();
   }catch(err){
     console.warn('Initial cloud sync failed — using whatever is already on this device:',err);
@@ -3447,6 +3557,36 @@ function checkForNewCardPayments(oldMeta,newMeta){
   renderNotificationBell();
   if(typeof renderSales==='function')renderSales();
 }
+// New estimate acceptances → toast + bell (once per device, like payments).
+const ACCEPT_SEEN_KEY='inkable_acceptances_seen';
+let newAcceptances=readJSONKey('inkable_acceptances_unread',[]);
+function checkForNewAcceptances(all){
+  const firstRun=localStorage.getItem(ACCEPT_SEEN_KEY)===null;
+  const seen=new Set(readJSONKey(ACCEPT_SEEN_KEY,[]));
+  const projects=getProjects(), clients=getClients();
+  Object.entries(all).forEach(([pid,a])=>{
+    const key=pid+'|'+a.at;
+    if(seen.has(key))return;
+    seen.add(key);
+    if(firstRun)return;
+    const proj=projects.find(p=>p.id===pid);
+    const cl=proj?clients.find(c=>c.id===proj.clientId):null;
+    const who=cl?cl.name:(a.name||'A client');
+    newAcceptances.unshift({projectId:pid,key,who,name:a.name,estNo:proj?.estNo||'',at:a.at,total:a.total});
+    showToast('✍️','Estimate accepted',`${who}${proj?.estNo?' ('+proj.estNo+')':''} accepted ${fmt(Number(a.total))}, signed "${a.name}".`,
+      {color:'var(--green)',duration:10000,onClick:()=>openNotifAcceptance(key)});
+  });
+  try{ localStorage.setItem(ACCEPT_SEEN_KEY,JSON.stringify([...seen])); localStorage.setItem('inkable_acceptances_unread',JSON.stringify(newAcceptances)); }catch(e){}
+  renderNotificationBell();
+}
+function openNotifAcceptance(key){
+  const item=newAcceptances.find(n=>n.key===key);
+  newAcceptances=newAcceptances.filter(n=>n.key!==key);
+  try{ localStorage.setItem('inkable_acceptances_unread',JSON.stringify(newAcceptances)); }catch(e){}
+  renderNotificationBell();
+  const dd=document.getElementById('notifDropdown'); if(dd)dd.style.display='none';
+  if(item&&getProjects().find(p=>p.id===item.projectId)){ switchTab('projects'); openJobModal(item.projectId); }
+}
 function openNotifCardPayment(sessionId){
   const item=newCardPayments.find(n=>n.stripeSessionId===sessionId);
   newCardPayments=newCardPayments.filter(n=>n.stripeSessionId!==sessionId);
@@ -3519,7 +3659,7 @@ function renderNotificationBell(){
   const badge=document.getElementById('notifBadge');
   const btn=document.getElementById('notifBellBtn');
   if(!badge||!btn)return;
-  const total=newCardPayments.length+newClientResponses.length+activeReminders.length;
+  const total=newAcceptances.length+newCardPayments.length+newClientResponses.length+activeReminders.length;
   if(total>0){
     badge.textContent=total;
     badge.style.display='flex';
@@ -3547,6 +3687,10 @@ function toggleNotifDropdown(){
         <div style="font-size:12px;color:var(--text)">💳 <b>${n.who}</b> paid ${fmt(n.amount)} by card</div>
         <div style="font-size:10.5px;color:var(--muted)">${n.estNo||''} · ${n.date||''}</div>
       </div>`).join('');
+    const acceptItems=newAcceptances.map(n=>`<div class="menu-item" style="white-space:normal;line-height:1.4;padding:10px 12px" onclick="openNotifAcceptance('${n.key}')">
+        <div style="font-size:12px;color:var(--text)">✍️ <b>${escapeHtml(n.who)}</b> accepted the estimate (${fmt(Number(n.total))})</div>
+        <div style="font-size:10.5px;color:var(--muted)">${n.estNo||''} · signed "${escapeHtml(n.name)}"</div>
+      </div>`).join('');
     const reminderItems=activeReminders.map(r=>{
       const icon=r.type==='stale'?'⏳':r.type==='backup'?'💾':'💵';
       return`<div class="menu-item" style="white-space:normal;line-height:1.4;padding:10px 12px" onclick="openNotifReminder('${r.projectId}')">
@@ -3554,7 +3698,7 @@ function toggleNotifDropdown(){
         <div style="font-size:10.5px;color:var(--muted)">${r.estNo||''}</div>
       </div>`;
     }).join('');
-    dd.innerHTML=(cardItems+responseItems+reminderItems)||'<div style="padding:16px;font-size:12px;color:var(--muted2);text-align:center">Nothing new</div>';
+    dd.innerHTML=(acceptItems+cardItems+responseItems+reminderItems)||'<div style="padding:16px;font-size:12px;color:var(--muted2);text-align:center">Nothing new</div>';
   }
   document.querySelectorAll('[id^="menu-"],#notifDropdown').forEach(el=>{if(el!==dd)el.style.display='none';});
   dd.style.display=opening?'block':'none';
@@ -4352,6 +4496,8 @@ function renderClientLinkSection(jobId,data){
   }else{
     statusHtml=`<div style="font-size:10.5px;color:var(--muted2);margin-top:6px">Not viewed yet</div>`;
   }
+  const acc=getEstimateAcceptance(jobId);
+  if(acc)statusHtml=`<div style="font-size:11px;color:var(--green);margin-top:6px">✍️ Estimate accepted by ${escapeHtml(acc.name)} on ${fmtShareDate(acc.at)}</div>`+statusHtml;
   container.innerHTML=`
     <div style="font-size:10.5px;color:var(--muted);margin-bottom:4px">Client review link</div>
     <div style="display:flex;gap:6px">

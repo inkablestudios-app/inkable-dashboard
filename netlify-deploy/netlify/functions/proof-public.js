@@ -76,6 +76,13 @@ export default async (req) => {
         response: r.response,
         responseNote: r.response_note,
         estimateSummary,
+        terms: state?.form?.terms || "",
+        // Accepted only counts for the total that was actually accepted.
+        estimateAccepted: (r.estimate_accepted_at && estimateSummary &&
+          Math.abs(Number(r.estimate_accepted_total) - Number(estimateSummary.total)) < 0.005)
+          ? { name: r.estimate_accepted_name, at: r.estimate_accepted_at } : null,
+        estimateChangedSinceAccepted: !!(r.estimate_accepted_at && estimateSummary &&
+          Math.abs(Number(r.estimate_accepted_total) - Number(estimateSummary.total)) >= 0.005),
         paid,
         balance,
         // This job's own deposit % if it has one, else the shop default.
@@ -91,6 +98,28 @@ export default async (req) => {
 
     if (req.method === "POST") {
       const body = await req.json();
+
+      // Client accepts the estimate: typed name as signature + the exact
+      // total they saw. Doesn't change the job status (that stays yours);
+      // it marks the job as committed and alerts you on the Dashboard.
+      if (body.action === "accept-estimate") {
+        const name = String(body.name || "").trim().slice(0, 120);
+        if (name.length < 2) return Response.json({ error: "Please type your full name." }, { status: 400 });
+        const rows = await db.sql`
+          SELECT ps.project_id, p.state FROM proof_shares ps JOIN projects p ON p.id = ps.project_id
+          WHERE ps.token = ${token}`;
+        if (!rows.length) return Response.json({ error: "This link isn't valid." }, { status: 404 });
+        let st = rows[0].state;
+        if (typeof st === "string") { try { st = JSON.parse(st); } catch { st = {}; } }
+        const total = Number(st?.form?.estimateSummary?.total);
+        if (!(total > 0)) return Response.json({ error: "There's no estimate to accept yet." }, { status: 400 });
+        await db.sql`
+          UPDATE proof_shares SET estimate_accepted_at = NOW(), estimate_accepted_name = ${name},
+            estimate_accepted_total = ${total}
+          WHERE token = ${token}`;
+        return Response.json({ ok: true });
+      }
+
       const response = body.response;
       const note = (body.note || "").slice(0, 2000); // sane cap, this is unauthenticated input
       if (!["approved", "changes"].includes(response)) {

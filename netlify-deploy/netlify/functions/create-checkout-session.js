@@ -38,10 +38,11 @@ export default async (req) => {
     }
 
     const rows = await db.sql`
-      SELECT ps.token, ps.project_id, ps.checkout_session_id, p.name AS job_name, p.est_no, p.state, jm.payments
+      SELECT ps.token, ps.project_id, ps.checkout_session_id, c.email AS client_email, p.name AS job_name, p.est_no, p.state, jm.payments
       FROM proof_shares ps
       JOIN projects p ON p.id = ps.project_id
       LEFT JOIN job_meta jm ON jm.project_id = ps.project_id
+      LEFT JOIN clients c ON c.id = p.client_id
       WHERE ps.token = ${token}
     `;
     if (!rows.length) return Response.json({ error: "This link isn't valid." }, { status: 404 });
@@ -117,6 +118,13 @@ export default async (req) => {
       "metadata[project_id]": r.project_id,
       "metadata[token]": token,
       "metadata[description]": description,
+      // Client's email from their record: pre-fills Stripe's form and
+      // gets them Stripe's emailed receipt (live mode only; Stripe never
+      // emails in test mode).
+      ...(r.client_email && /@/.test(r.client_email) ? {
+        "customer_email": r.client_email,
+        "payment_intent_data[receipt_email]": r.client_email,
+      } : {}),
     });
 
     await db.sql`UPDATE proof_shares SET checkout_session_id = ${session.id} WHERE token = ${token}`;

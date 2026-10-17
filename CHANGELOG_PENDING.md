@@ -116,3 +116,17 @@
   payment alerts only appeared after a refresh.)
 - TESTED on the test address (Oct 16-17): declined card, 50% deposit, remaining balance, paid in full,
   Dashboard payment + Stripe fee, Email link — all worked as expected.
+- CoreBridge-style additions:
+  - Clients accept the ESTIMATE online: client page shows your terms, a typed-name signature and an
+    "I agree" box. Accepting records name, date and the exact total; if you re-price the job, the client
+    is asked to accept again. Accepted jobs count as committed (money owed), get an ACCEPTED tag in
+    Projects, show "Estimate accepted by…" in the job window, and alert you (toast + bell). The job
+    status is NOT changed automatically. Needs migration 011.
+  - Stripe receipts: checkout pre-fills the client's email and asks Stripe to email them a receipt
+    (live mode only — Stripe never emails in test mode).
+  - Work Order (⋯ menu): a one-page production sheet with NO prices — items, sizes, qty, sqft, media,
+    laminate, substrate, design/install, client contact, install address/date, notes, proof link, and
+    a checkbox per item.
+  - Copy as New Estimate (⋯ menu): opens the pricer with the old job's items as a new estimate (new
+    Est #, today's date and tax rate). The original is untouched.
+  - Search also looks at item descriptions, vehicle info and notes.

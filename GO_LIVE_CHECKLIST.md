@@ -14,7 +14,7 @@ Do NOT skip these. Tick each one off before taking real payments.
 - [ ] One real small payment (e.g. $1), check it lands in the Dashboard, then refund it in Stripe.
 - [ ] Everything under "Before going live" in the handoff is done (payment overwrite fix: done;
       localStorage storage error; owner notification; cash/check "remove fee" option decided).
-- [ ] Database migrations 008, 009 and 010 (estimate visual, checkout, status time, client email columns) applied: on the test address, saving a
+- [ ] Database migrations 008, 009, 010 and 011 (estimate visual, checkout, status time, client email, estimate acceptance columns) applied: on the test address, saving a
       job and opening a client link both work. If job saves fail with a server error, the migration
       didn't run.
 - [ ] Turn on Stripe email for successful payments (Settings > Notifications).
