@@ -3327,7 +3327,9 @@ function syncPricingToServer(data){ cloudPush('/pricing','POST',data); }
 // Pulls the server's current data on load and makes it the local cache.
 // If the server can't be reached, the app just keeps using whatever was
 // already in localStorage — never blocks on this.
+let lastPullAt=0;
 async function pullFromServerOnLoad(){
+  lastPullAt=Date.now();
   // Never overwrite this device's copy while it still holds changes the
   // server hasn't received — send those first, and if that fails, keep
   // working from the local copy and try again on the next sync.
@@ -3603,6 +3605,18 @@ function periodicBackgroundSync(){
   if(localStorage.getItem(AUTH_TOKEN_KEY))pullFromServerOnLoad();
 }
 setInterval(periodicBackgroundSync,5*60*1000);
+// Coming back to the Dashboard (switching back to its tab or window) checks
+// for news right away — a client's payment or approval shows up the moment
+// you look, instead of waiting for the 5-minute timer. At most once every
+// 30 seconds, so flipping between tabs doesn't hammer the server.
+function syncIfStale(){
+  if(document.visibilityState!=='visible')return;
+  if(!localStorage.getItem(AUTH_TOKEN_KEY))return;
+  if(Date.now()-lastPullAt<30000)return;
+  pullFromServerOnLoad();
+}
+document.addEventListener('visibilitychange',syncIfStale);
+window.addEventListener('focus',syncIfStale);
 // Coming back online: deliver anything queued right away instead of
 // waiting for the next 5-minute sync.
 window.addEventListener('online',()=>{ if(localStorage.getItem(AUTH_TOKEN_KEY))pullFromServerOnLoad(); });

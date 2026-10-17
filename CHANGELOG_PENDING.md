@@ -111,3 +111,8 @@
 - "✉ Email link" button in the job window's client-link section: opens your email app with a ready
   message to the client (first name, job, the link; says "proof ready" or "estimate + deposit"
   depending on whether a proof is uploaded). Nothing is sent until you press Send.
+- Notifications without refreshing: switching back to the Dashboard tab/window checks for news right
+  away (max once per 30 seconds), on top of the 5-minute timer. (Found in the first real test: card
+  payment alerts only appeared after a refresh.)
+- TESTED on the test address (Oct 16-17): declined card, 50% deposit, remaining balance, paid in full,
+  Dashboard payment + Stripe fee, Email link — all worked as expected.
