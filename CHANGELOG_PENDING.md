@@ -137,3 +137,7 @@
   estimate PDF say "valid for 30 days, until <date> — material prices change often". After that date,
   an un-accepted, unpaid estimate shows "expired — contact us for an updated quote" and can't be
   accepted or paid (enforced on the server). Once accepted, the price holds. Older jobs don't expire.
+- Validity wording made more formal ("valid for 30 days, through <date>. Due to fluctuating material
+  costs, pricing is subject to change after this date.") on the client page and estimate PDF. On the
+  client page it now sits WITH the estimate ("Valid through" next to the Total + a notice under the
+  estimate details), not in the Accept & Pay box; hidden once the client has accepted or paid.

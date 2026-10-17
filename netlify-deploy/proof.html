@@ -146,6 +146,7 @@
           ${data.requestedDate ? `<div><div class="lbl">Requested</div><div class="val">${fmtDate(data.requestedDate)}</div></div>` : ''}
           ${data.installDate ? `<div><div class="lbl">Est. install</div><div class="val">${fmtDate(data.installDate)}</div></div>` : ''}
           ${data.estimateSummary ? `<div><div class="lbl">Total</div><div class="val">${fmtMoney(data.estimateSummary.total)}</div></div>` : ''}
+          ${data.validUntil && !data.estimateAccepted && !((data.paid||0) > 0.005) ? `<div><div class="lbl">${data.expired ? 'Expired' : 'Valid through'}</div><div class="val" style="${data.expired ? 'color:#e8a33d' : ''}">${fmtDate(data.validUntil)}</div></div>` : ''}
         </div>
       </div>`;
   }
@@ -303,7 +304,16 @@
   // valid, then straight to Stripe. "Accept now, pay later" for cash/check.
   function validityText(data){
     if(!data.validUntil) return '';
-    return `This estimate is valid for ${data.validDays} days, until ${fmtDate(data.validUntil)}. Material prices change often, so after that date we'll need to send you an updated quote.`;
+    return `This estimate is valid for ${data.validDays} days, through ${fmtDate(data.validUntil)}. Due to fluctuating material costs, pricing is subject to change after this date.`;
+  }
+  // Shown with the estimate itself, while the client is reviewing the price
+  // (not at the payment step). Not shown once accepted or paid: the price is locked.
+  function validityNoticeHtml(data){
+    if(!data.validUntil || data.estimateAccepted || (data.paid||0) > 0.005) return '';
+    const text = data.expired
+      ? `This estimate expired on ${fmtDate(data.validUntil)}. Due to fluctuating material costs, please contact us for an updated quote.`
+      : validityText(data);
+    return `<section><div style="font-size:12px;line-height:1.5;color:${data.expired ? '#e8a33d' : 'var(--muted)'};border-left:3px solid ${data.expired ? '#e8a33d' : 'var(--border)'};padding:4px 0 4px 12px">${text}</div></section>`;
   }
   function acceptSectionHtml(data){
     const summary = data.estimateSummary;
@@ -323,25 +333,22 @@
       return `
         <section>
           <div class="estimate">
-            <div style="padding:13px 16px 6px;font-size:13px;font-weight:700;color:#e8a33d">This estimate has expired</div>
-            <div style="padding:0 16px 14px;font-size:12px;color:var(--muted)">It was valid until ${fmtDate(data.validUntil)}. Material prices change often, so please contact us for an updated quote.</div>
+            <div style="padding:13px 16px;font-size:13px;font-weight:700;color:#e8a33d">This estimate has expired — please contact us for an updated quote.</div>
           </div>
         </section>`;
     }
     const dep = data.depositPct || 50;
-    const vText = validityText(data);
     return `
       <section>
         <div class="estimate">
           <div style="padding:13px 16px 6px;font-size:13px;font-weight:600">Accept &amp; pay</div>
           ${data.estimateChangedSinceAccepted ? `<div style="padding:0 16px 8px;font-size:12px;color:#e8a33d">This estimate was updated after you accepted it. Please review the new total and accept again.</div>` : ''}
-          ${vText ? `<div style="padding:0 16px 10px;font-size:12px;color:var(--text);font-weight:600">${vText}</div>` : ''}
           ${termsHtml}
           <div style="padding:0 16px 14px">
             <input id="acceptName" type="text" autocomplete="name" placeholder="Type your full name" style="width:100%;box-sizing:border-box;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-family:inherit;font-size:13px;margin-bottom:10px"/>
             <label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;color:var(--muted);margin-bottom:12px;cursor:pointer">
               <input id="acceptAgree" type="checkbox" style="margin-top:2px"/>
-              <span>I accept this estimate (${fmtMoney(summary.total)})${data.terms ? ', agree to the terms above' : ''}${vText ? ', and understand the price is valid until ' + fmtDate(data.validUntil) : ''}.</span>
+              <span>I accept this estimate (${fmtMoney(summary.total)})${data.terms ? ' and agree to the terms above' : ''}.</span>
             </label>
             <div class="actions" style="margin-top:0">
               <button class="btn-primary" style="flex:1" id="acceptPayDepositBtn">Accept &amp; Pay ${dep}% Deposit — ${fmtMoney(summary.total*dep/100)}</button>
@@ -486,7 +493,7 @@
   }
 
   function render(data){
-    card.innerHTML = jobHeadHtml(data) + proofSectionHtml(data) + estimateVisualHtml(data) + estimateHtml(data.estimateSummary) + acceptSectionHtml(data) + paymentSectionHtml(data) + contactSectionHtml(data.business);
+    card.innerHTML = jobHeadHtml(data) + proofSectionHtml(data) + estimateVisualHtml(data) + estimateHtml(data.estimateSummary) + validityNoticeHtml(data) + acceptSectionHtml(data) + paymentSectionHtml(data) + contactSectionHtml(data.business);
     wireProofActions(data);
     wireAccept();
     const toggle = document.getElementById('estimateToggle');

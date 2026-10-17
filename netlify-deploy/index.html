@@ -6774,7 +6774,7 @@ function drawEstimatePDF(doc,W,H,M,d){
   if(vUntil){
     if(y+30>footTop-20){ doc.addPage(); y=drawEstimateChrome(doc,W,H,M,d); }
     doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(0);
-    const vLines=doc.splitTextToSize(`This estimate is valid for ${vDays} days, until ${vUntil}. Material prices change often; after that date we'll send an updated quote.`,W-2*M);
+    const vLines=doc.splitTextToSize(`This estimate is valid for ${vDays} days, through ${vUntil}. Due to fluctuating material costs, pricing is subject to change after this date.`,W-2*M);
     doc.text(vLines,M,y,{lineHeightFactor:1.4});
     y+=vLines.length*12+8;
   }
