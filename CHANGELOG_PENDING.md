@@ -141,3 +141,21 @@
   costs, pricing is subject to change after this date.") on the client page and estimate PDF. On the
   client page it now sits WITH the estimate ("Valid through" next to the Total + a notice under the
   estimate details), not in the Accept & Pay box; hidden once the client has accepted or paid.
+- Phone and tablet layout (screens up to 820px wide; the computer layout is unchanged, checked
+  screen by screen against before-pictures):
+  - The left menu becomes a tab bar at the bottom (Projects, Sales, Installs, Clients, Reports, with
+    their badges). The top bar is compact: ⚙️ for Settings, "＋ New" for a new estimate.
+  - Projects, Sales and Installs rows become cards with labels (Total, Paid, Balance…). Reports go to
+    one column. Job, payment, client and expense windows slide up from the bottom.
+  - Pricer: one column, with a bar fixed at the bottom showing the Total and a Save button.
+  - Settings: tabs scroll sideways; rate rows wrap to fit.
+  - Text boxes use a larger font so iPhone doesn't zoom in when you tap one.
+  - Tested at iPhone size (390 wide) and iPad portrait (768 wide): nothing runs off the side.
+  - iPhone: PDFs inside the viewer can be limited; "↗ Open in new tab" always works.
+- Installs: the address opens Google Maps and the phone number is tap-to-call (computer too). The
+  client details phone is tap-to-call.
+- The job ⋯ menu opens upward when there is no room below it (rows near the bottom of the screen).
+- Fix: the pricer's Total box left out the card processing fee when the box was checked. The saved
+  total, PDFs, client page and Stripe already included it; now the box on screen matches.
+- Fix: Sales showed a red "$0.00" balance on a fully paid job when a Stripe payment differed by a
+  fraction of a cent. It now shows grey like any paid job.

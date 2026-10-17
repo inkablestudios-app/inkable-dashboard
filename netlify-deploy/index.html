@@ -669,8 +669,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
   </button>
   <div id="notifDropdown" style="display:none;position:absolute;right:0;top:100%;margin-top:6px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:4px;z-index:100;width:280px;max-height:360px;overflow-y:auto;box-shadow:0 4px 16px #00000088"></div>
 </div>
-<button class="btn btn-ghost" onclick="openSettings()" title="Settings">⚙️<span class="btn-label"> Settings</span></button>
-<button class="btn btn-primary" onclick="newEstimate()">＋<span class="btn-label"> New Estimate</span><span class="btn-label-short"> New</span></button>
+<button class="btn btn-ghost" onclick="openSettings()" title="Settings"><span>⚙️<span class="btn-label"> Settings</span></span></button>
+<button class="btn btn-primary" onclick="newEstimate()"><span>＋<span class="btn-label"> New Estimate</span><span class="btn-label-short"> New</span></span></button>
   </div>
 </div>
 
@@ -7316,7 +7316,7 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
   <!-- Topbar -->
   <div class="pricer-topbar">
     <div class="pricer-topbar-left">
-      <button onclick="closePricer()" class="btn btn-ghost" style="padding:6px 12px" title="Back to Projects">←<span class="btn-label"> Projects</span></button>
+      <button onclick="closePricer()" class="btn btn-ghost" style="padding:6px 12px" title="Back to Projects"><span>←<span class="btn-label"> Projects</span></span></button>
       <div>
         <div class="pricer-proj" id="pricerProjNum">Project 1000</div>
         <div style="display:flex;align-items:center;gap:6px">
@@ -7560,7 +7560,7 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
     <span class="settings-title">Pricing Settings</span>
     <div style="display:flex;gap:8px">
       <button class="btn btn-ghost" onclick="closeSettings()">Close</button>
-      <button class="btn btn-primary" onclick="saveSettings()">💾 Save<span class="btn-label"> Settings</span></button>
+      <button class="btn btn-primary" onclick="saveSettings()"><span>💾 Save<span class="btn-label"> Settings</span></span></button>
     </div>
   </div>
   <div class="settings-tabs">
