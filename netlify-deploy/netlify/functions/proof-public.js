@@ -10,6 +10,16 @@ function getDriveEmbedUrl(url) {
   return match ? `https://drive.google.com/file/d/${match[1]}/preview` : url;
 }
 
+// When an estimate's price stops being valid: quoted date + N days (end of
+// that day). Estimates saved before this existed have no expiry.
+function estimateValidity(summary) {
+  const days = Number(summary?.validDays);
+  const q = summary?.quotedAt ? new Date(summary.quotedAt) : null;
+  if (!(days > 0) || !q || isNaN(q)) return { days: 0, expiresAt: 0 };
+  const end = new Date(q); end.setDate(end.getDate() + days); end.setHours(23, 59, 59, 999);
+  return { days, expiresAt: end.getTime() + 1 };
+}
+
 export default async (req) => {
   const url = new URL(req.url);
   const token = url.searchParams.get("token");
@@ -61,6 +71,11 @@ export default async (req) => {
 
       const paid = (payments || []).reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
       const balance = estimateSummary ? Math.max(0, estimateSummary.total - paid) : 0;
+      const accepted = !!(r.estimate_accepted_at && estimateSummary &&
+        Math.abs(Number(r.estimate_accepted_total) - Number(estimateSummary.total)) < 0.005);
+      const validity = estimateValidity(estimateSummary);
+      // Expiry only matters before the client has committed (accepted or paid).
+      const expired = !!(validity.expiresAt && Date.now() > validity.expiresAt && !accepted && paid <= 0.005);
 
       return Response.json({
         jobName: state?.form?.jobName || r.job_name || "Your job",
@@ -77,10 +92,11 @@ export default async (req) => {
         responseNote: r.response_note,
         estimateSummary,
         terms: state?.form?.terms || "",
+        validDays: validity.days || null,
+        validUntil: validity.expiresAt ? new Date(validity.expiresAt - 1).toISOString() : null,
+        expired,
         // Accepted only counts for the total that was actually accepted.
-        estimateAccepted: (r.estimate_accepted_at && estimateSummary &&
-          Math.abs(Number(r.estimate_accepted_total) - Number(estimateSummary.total)) < 0.005)
-          ? { name: r.estimate_accepted_name, at: r.estimate_accepted_at } : null,
+        estimateAccepted: accepted ? { name: r.estimate_accepted_name, at: r.estimate_accepted_at } : null,
         estimateChangedSinceAccepted: !!(r.estimate_accepted_at && estimateSummary &&
           Math.abs(Number(r.estimate_accepted_total) - Number(estimateSummary.total)) >= 0.005),
         paid,
@@ -113,6 +129,10 @@ export default async (req) => {
         if (typeof st === "string") { try { st = JSON.parse(st); } catch { st = {}; } }
         const total = Number(st?.form?.estimateSummary?.total);
         if (!(total > 0)) return Response.json({ error: "There's no estimate to accept yet." }, { status: 400 });
+        const v = estimateValidity(st?.form?.estimateSummary);
+        if (v.expiresAt && Date.now() > v.expiresAt) {
+          return Response.json({ error: "This estimate has expired. Please contact us for an updated quote." }, { status: 400 });
+        }
         await db.sql`
           UPDATE proof_shares SET estimate_accepted_at = NOW(), estimate_accepted_name = ${name},
             estimate_accepted_total = ${total}

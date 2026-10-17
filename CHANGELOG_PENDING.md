@@ -130,3 +130,10 @@
   - Copy as New Estimate (⋯ menu): opens the pricer with the old job's items as a new estimate (new
     Est #, today's date and tax rate). The original is untouched.
   - Search also looks at item descriptions, vehicle info and notes.
+- Accept & Pay in one step (client page): name + "I accept" box, then "Accept & Pay X% Deposit" or
+  "Accept & Pay in Full" goes straight to Stripe; "Accept now, pay later (cash or check)" link. The
+  server refuses a first payment without an accepted estimate for the current total.
+- Estimate validity (Settings → Business, default 30 days): every save is a (re)quote. Client page and
+  estimate PDF say "valid for 30 days, until <date> — material prices change often". After that date,
+  an un-accepted, unpaid estimate shows "expired — contact us for an updated quote" and can't be
+  accepted or paid (enforced on the server). Once accepted, the price holds. Older jobs don't expire.

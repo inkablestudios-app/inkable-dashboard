@@ -298,7 +298,13 @@
     };
   }
 
-  // Accept the estimate: typed full name as signature + agreement box.
+  // Accept the estimate — one step with paying: typed full name as a
+  // signature, agreement to the price, terms and how long the price is
+  // valid, then straight to Stripe. "Accept now, pay later" for cash/check.
+  function validityText(data){
+    if(!data.validUntil) return '';
+    return `This estimate is valid for ${data.validDays} days, until ${fmtDate(data.validUntil)}. Material prices change often, so after that date we'll need to send you an updated quote.`;
+  }
   function acceptSectionHtml(data){
     const summary = data.estimateSummary;
     if(!summary || !summary.total) return '';
@@ -309,52 +315,93 @@
           <div class="estimate">
             <div style="padding:13px 16px;font-size:13px;font-weight:700;color:var(--green)">✓ Estimate accepted</div>
             <div style="padding:0 16px 14px;font-size:12px;color:var(--muted)">Accepted by ${esc(data.estimateAccepted.name)} on ${fmtDate(data.estimateAccepted.at)} for ${fmtMoney(summary.total)}.</div>
-            ${termsHtml}
           </div>
         </section>`;
     }
+    if((data.paid||0) > 0.005) return ''; // already paying (older jobs): nothing to accept here
+    if(data.expired){
+      return `
+        <section>
+          <div class="estimate">
+            <div style="padding:13px 16px 6px;font-size:13px;font-weight:700;color:#e8a33d">This estimate has expired</div>
+            <div style="padding:0 16px 14px;font-size:12px;color:var(--muted)">It was valid until ${fmtDate(data.validUntil)}. Material prices change often, so please contact us for an updated quote.</div>
+          </div>
+        </section>`;
+    }
+    const dep = data.depositPct || 50;
+    const vText = validityText(data);
     return `
       <section>
         <div class="estimate">
-          <div style="padding:13px 16px 6px;font-size:13px;font-weight:600">Accept this estimate</div>
+          <div style="padding:13px 16px 6px;font-size:13px;font-weight:600">Accept &amp; pay</div>
           ${data.estimateChangedSinceAccepted ? `<div style="padding:0 16px 8px;font-size:12px;color:#e8a33d">This estimate was updated after you accepted it. Please review the new total and accept again.</div>` : ''}
+          ${vText ? `<div style="padding:0 16px 10px;font-size:12px;color:var(--text);font-weight:600">${vText}</div>` : ''}
           ${termsHtml}
           <div style="padding:0 16px 14px">
             <input id="acceptName" type="text" autocomplete="name" placeholder="Type your full name" style="width:100%;box-sizing:border-box;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-family:inherit;font-size:13px;margin-bottom:10px"/>
             <label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;color:var(--muted);margin-bottom:12px;cursor:pointer">
               <input id="acceptAgree" type="checkbox" style="margin-top:2px"/>
-              <span>I've reviewed this estimate (${fmtMoney(summary.total)})${data.terms ? ' and agree to the terms above' : ''}.</span>
+              <span>I accept this estimate (${fmtMoney(summary.total)})${data.terms ? ', agree to the terms above' : ''}${vText ? ', and understand the price is valid until ' + fmtDate(data.validUntil) : ''}.</span>
             </label>
-            <button class="btn-primary" id="acceptBtn" style="width:100%">Accept Estimate</button>
+            <div class="actions" style="margin-top:0">
+              <button class="btn-primary" style="flex:1" id="acceptPayDepositBtn">Accept &amp; Pay ${dep}% Deposit — ${fmtMoney(summary.total*dep/100)}</button>
+              <button class="btn-ghost" style="flex:1" id="acceptPayFullBtn">Accept &amp; Pay in Full — ${fmtMoney(summary.total)}</button>
+            </div>
+            <div style="text-align:center;margin-top:10px"><a href="#" id="acceptLaterLink" style="font-size:12px;color:var(--muted)">Accept now, pay later (cash or check)</a></div>
             <div id="acceptError" style="display:none;color:#e55;font-size:11.5px;margin-top:8px"></div>
           </div>
         </div>
       </section>`;
   }
   function wireAccept(){
-    const btn = document.getElementById('acceptBtn');
-    if(!btn) return;
-    btn.onclick = async () => {
+    const depBtn = document.getElementById('acceptPayDepositBtn');
+    if(!depBtn) return;
+    const fullBtn = document.getElementById('acceptPayFullBtn');
+    const later = document.getElementById('acceptLaterLink');
+    const err = document.getElementById('acceptError');
+    const show = m => { err.textContent = m; err.style.display = 'block'; };
+    const busy = on => [depBtn, fullBtn].forEach(b => { b.disabled = on; b.style.opacity = on ? '0.6' : '1'; });
+    async function accept(){
       const name = document.getElementById('acceptName').value.trim();
-      const err = document.getElementById('acceptError');
-      const show = m => { err.textContent = m; err.style.display = 'block'; };
-      if(name.length < 2){ show('Please type your full name.'); return; }
-      if(!document.getElementById('acceptAgree').checked){ show('Please check the box to confirm.'); return; }
-      btn.disabled = true; btn.style.opacity = '0.6';
+      if(name.length < 2){ show('Please type your full name.'); return false; }
+      if(!document.getElementById('acceptAgree').checked){ show('Please check the box to confirm.'); return false; }
+      err.style.display = 'none';
+      const res = await fetch(API_BASE + '?token=' + encodeURIComponent(token), {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({action:'accept-estimate', name}),
+      });
+      const out = await res.json();
+      if(!res.ok) throw new Error(out.error || "That didn't go through.");
+      return true;
+    }
+    async function acceptThenPay(amountType){
+      busy(true);
       try{
-        const res = await fetch(API_BASE + '?token=' + encodeURIComponent(token), {
+        if(!(await accept())){ busy(false); return; }
+        const res = await fetch(window.location.origin + '/api/create-checkout-session', {
           method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({action:'accept-estimate', name}),
+          body: JSON.stringify({token, amountType}),
         });
-        const out = await res.json();
-        if(!res.ok) throw new Error(out.error || "That didn't go through.");
-        load();
-      }catch(e){ btn.disabled = false; btn.style.opacity = '1'; show(e.message || "That didn't go through — try again."); }
+        const result = await res.json();
+        if(!res.ok || !result.url) throw new Error(result.error || "Couldn't start checkout.");
+        window.location.href = result.url;
+      }catch(e){
+        busy(false); show((e.message || "Something went wrong.") + ' Your acceptance may have been saved — reload the page to check.');
+      }
+    }
+    depBtn.onclick = () => acceptThenPay('deposit');
+    fullBtn.onclick = () => acceptThenPay('full');
+    later.onclick = async (ev) => {
+      ev.preventDefault(); busy(true);
+      try{ if(await accept()) load(); else busy(false); }
+      catch(e){ busy(false); show(e.message || "That didn't go through — try again."); }
     };
   }
 
   function paymentSectionHtml(data){
     const summary = data.estimateSummary;
+    // Before acceptance, paying happens through "Accept & Pay" above.
+    if(summary && summary.total && !data.estimateAccepted && !((data.paid||0) > 0.005)) return '';
     if(!summary || !summary.total){
       return `
         <section>

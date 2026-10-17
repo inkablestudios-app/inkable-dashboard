@@ -38,7 +38,8 @@ export default async (req) => {
     }
 
     const rows = await db.sql`
-      SELECT ps.token, ps.project_id, ps.checkout_session_id, c.email AS client_email, p.name AS job_name, p.est_no, p.state, jm.payments
+      SELECT ps.token, ps.project_id, ps.checkout_session_id, c.email AS client_email,
+             ps.estimate_accepted_at, ps.estimate_accepted_total, p.name AS job_name, p.est_no, p.state, jm.payments
       FROM proof_shares ps
       JOIN projects p ON p.id = ps.project_id
       LEFT JOIN job_meta jm ON jm.project_id = ps.project_id
@@ -66,6 +67,13 @@ export default async (req) => {
 
     if (balance <= 0.005) {
       return Response.json({ error: "This job is already paid in full." }, { status: 400 });
+    }
+    // The first payment needs an accepted estimate (name + agreement to the
+    // price, terms and validity) for the CURRENT total. Expired estimates
+    // can't be accepted, so this also blocks paying an expired quote.
+    const accepted = r.estimate_accepted_at && Math.abs(Number(r.estimate_accepted_total) - Number(summary.total)) < 0.005;
+    if (paid <= 0.005 && !accepted) {
+      return Response.json({ error: "Please accept the estimate first." }, { status: 400 });
     }
 
     // Once anything has been paid, "50% deposit" no longer means
