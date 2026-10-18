@@ -11,12 +11,12 @@ const db = getDatabase();
 // body to JSON first and re-stringifying it will not match.
 function verifyStripeSignature(rawBody, signatureHeader, secret) {
   if (!signatureHeader) return false;
-  const parts = Object.fromEntries(
-    signatureHeader.split(",").map(kv => kv.split("="))
-  );
-  const timestamp = parts.t;
-  const v1 = parts.v1;
-  if (!timestamp || !v1) return false;
+  const pairs = signatureHeader.split(",").map(kv => kv.split("="));
+  const timestamp = (pairs.find(([k]) => k === "t") || [])[1];
+  // While a signing secret is being replaced Stripe sends one v1 per
+  // active secret; any one matching is enough.
+  const signatures = pairs.filter(([k, v]) => k === "v1" && v).map(([, v]) => v);
+  if (!timestamp || !signatures.length) return false;
 
   // Reject anything older than 5 minutes — a captured/replayed webhook
   // request shouldn't still be usable long after the fact.
@@ -29,9 +29,10 @@ function verifyStripeSignature(rawBody, signatureHeader, secret) {
     .digest("hex");
 
   const expectedBuf = Buffer.from(expected, "utf8");
-  const actualBuf = Buffer.from(v1, "utf8");
-  if (expectedBuf.length !== actualBuf.length) return false;
-  return crypto.timingSafeEqual(expectedBuf, actualBuf);
+  return signatures.some(v1 => {
+    const actualBuf = Buffer.from(v1, "utf8");
+    return expectedBuf.length === actualBuf.length && crypto.timingSafeEqual(expectedBuf, actualBuf);
+  });
 }
 
 // Stripe's actual fee for this payment (in dollars). It lives on the
@@ -79,12 +80,16 @@ export default async (req) => {
     return new Response("Invalid payload", { status: 400 });
   }
 
-  // Everything past this point returns 200 even on internal errors —
-  // Stripe retries non-2xx responses, and a bug in OUR processing
-  // shouldn't turn into Stripe hammering this endpoint forever.
+  // If recording fails, answer with an error so Stripe tries again later
+  // (it retries for up to 3 days and emails the account owner if it keeps
+  // failing). Recording twice is safe: the same checkout is only added once.
   try {
-    if (event.type === "checkout.session.completed") {
-      const session = event.data.object;
+    const type = event.type;
+    const session = event.data?.object || {};
+    // Only money that has actually arrived. (Card payments are "paid" at
+    // once; a delayed method would report later through the second event.)
+    if ((type === "checkout.session.completed" || type === "checkout.session.async_payment_succeeded")
+        && session.payment_status === "paid") {
       const projectId = session.metadata?.project_id;
       const description = session.metadata?.description || "Payment";
       const amount = (session.amount_total || 0) / 100;
@@ -138,6 +143,7 @@ export default async (req) => {
     }
   } catch (err) {
     console.error("stripe-webhook processing error:", err);
+    return new Response("Could not record the payment", { status: 500 });
   }
 
   return new Response("ok", { status: 200 });

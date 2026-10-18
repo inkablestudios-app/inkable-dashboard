@@ -1,4 +1,5 @@
 import { getDatabase } from "@netlify/database";
+import { jobDepositPct, depositAmount, paidSoFar, needsAcceptance, STRIPE_MIN } from "./_shared/pay.js";
 
 const db = getDatabase();
 
@@ -91,16 +92,18 @@ export default async (req) => {
       let settings = settingsRows[0]?.data || {};
       if (typeof settings === "string") { try { settings = JSON.parse(settings); } catch { settings = {}; } }
 
-      const paid = (payments || []).reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+      const paid = paidSoFar(payments);
       const balance = estimateSummary ? Math.max(0, estimateSummary.total - paid) : 0;
       // Back from Stripe: has that checkout's payment been recorded yet?
       const session = url.searchParams.get("session");
       const paymentConfirmed = !!session && (payments || []).some(p => p.stripeSessionId === session);
       const accepted = !!(r.estimate_accepted_at && estimateSummary &&
         Math.abs(Number(r.estimate_accepted_total) - Number(estimateSummary.total)) < 0.005);
+      const mustAccept = !!estimateSummary && needsAcceptance({ accepted, acceptedAt: r.estimate_accepted_at, paid });
       const validity = estimateValidity(estimateSummary);
-      // Expiry only matters before the client has committed (accepted or paid).
-      const expired = !!(validity.expiresAt && Date.now() > validity.expiresAt && !accepted && paid <= 0.005);
+      // Expiry only matters while the client still has to accept this price.
+      const expired = !!(validity.expiresAt && Date.now() > validity.expiresAt && mustAccept);
+      const depositPct = jobDepositPct(estimateSummary, settings);
 
       return Response.json({
         jobName: state?.form?.jobName || r.job_name || "Your job",
@@ -127,9 +130,13 @@ export default async (req) => {
         paid,
         balance,
         paymentConfirmed,
-        // This job's own deposit % if it has one, else the shop default.
-        depositPct: Number(estimateSummary?.depositPct) > 0 ? Number(estimateSummary.depositPct)
-          : Number(settings.depositPct) > 0 ? Number(settings.depositPct) : 50,
+        // Accept box shown (first payment, or re-priced since accepting).
+        needsAcceptance: mustAccept,
+        // This job's own deposit % if it has one, else the shop default, and
+        // the exact amount Stripe would charge for it.
+        depositPct,
+        depositAmount: estimateSummary ? depositAmount(estimateSummary, depositPct) : 0,
+        minCardAmount: STRIPE_MIN,
         business: {
           email: settings.bizEmail ?? "inkablestudios@gmail.com",
           phone: settings.bizPhone ?? "",
@@ -177,7 +184,10 @@ export default async (req) => {
         return Response.json({ error: "Invalid response" }, { status: 400 });
       }
 
-      const rows = await db.sql`SELECT project_id FROM proof_shares WHERE token = ${token}`;
+      const rows = await db.sql`
+        SELECT ps.project_id, jm.status FROM proof_shares ps
+        LEFT JOIN job_meta jm ON jm.project_id = ps.project_id
+        WHERE ps.token = ${token}`;
       if (!rows.length) return Response.json({ error: "This link isn't valid." }, { status: 404 });
       const projectId = rows[0].project_id;
 
@@ -192,6 +202,9 @@ export default async (req) => {
       // UPDATE, since a job_meta row might not exist yet for this project
       // in the rare case a proof was uploaded before any other job_meta
       // field was ever synced.
+      // Still recorded (and shown to you) when the job is already in
+      // production or done, but a late click doesn't move it backwards.
+      if (["prod", "done"].includes(rows[0].status)) return Response.json({ ok: true });
       const newStatus = response === "approved" ? "approved" : "revision";
       await db.sql`
         INSERT INTO job_meta (project_id, status, status_at, updated_at)

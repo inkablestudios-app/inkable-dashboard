@@ -239,6 +239,14 @@
           <a class="newtab" href="${data.proofEmbedUrl.replace('/preview','/view')}" target="_blank" rel="noopener">Open in a new tab ↗</a>
         </section>`;
     }
+    if(['prod','done'].includes(data.status)){
+      return `
+        <section>
+          <div class="sectiontitle">Proof</div>
+          <iframe class="proofbox" src="${data.proofEmbedUrl}"></iframe>
+          <a class="newtab" href="${data.proofEmbedUrl.replace('/preview','/view')}" target="_blank" rel="noopener">Open in a new tab ↗</a>
+        </section>`;
+    }
     return `
       <section>
         <div class="sectiontitle">Review your proof</div>
@@ -316,8 +324,13 @@
   }
   // Shown with the estimate itself, while the client is reviewing the price
   // (not at the payment step). Not shown once accepted or paid: the price is locked.
+  // The client still has to accept this price: before the first payment, or
+  // again after the job was re-priced (the server says which).
+  function mustAccept(data){
+    return data.needsAcceptance != null ? !!data.needsAcceptance : !data.estimateAccepted && !((data.paid||0) > 0.005);
+  }
   function validityNoticeHtml(data){
-    if(!data.validUntil || data.estimateAccepted || (data.paid||0) > 0.005) return '';
+    if(!data.validUntil || !mustAccept(data)) return '';
     const text = data.expired
       ? `This estimate expired on ${fmtDate(data.validUntil)}. Due to fluctuating material costs, please contact us for an updated quote.`
       : validityText(data);
@@ -336,20 +349,25 @@
           </div>
         </section>`;
     }
-    if((data.paid||0) > 0.005) return ''; // already paying (older jobs): nothing to accept here
-    if(data.expired){
-      return `
-        <section>
-          <div class="estimate">
-            <div style="padding:13px 16px;font-size:13px;font-weight:700;color:#e8a33d">This estimate has expired — please contact us for an updated quote.</div>
-          </div>
-        </section>`;
-    }
+    // Older jobs already being paid have nothing to accept; an expired one is
+    // explained by the notice under the estimate.
+    if(!mustAccept(data) || data.expired) return '';
+    const paid = data.paid || 0;
     const dep = data.depositPct || 50;
+    const depAmt = data.depositAmount != null ? data.depositAmount : summary.total*dep/100;
+    const balance = data.balance != null ? data.balance : Math.max(0, summary.total - paid);
+    const min = data.minCardAmount || 0.5;
+    // Re-priced after a payment: accept the new total, then pay what's left.
+    const buttons = paid > 0.005
+      ? (balance >= min
+        ? `<button class="btn-primary" style="flex:1" id="acceptPayRestBtn">Accept &amp; Pay Remaining Balance — ${fmtMoney(balance)}</button>`
+        : `<button class="btn-primary" style="flex:1" id="acceptOnlyBtn">Accept the Updated Estimate</button>`)
+      : `<button class="btn-primary" style="flex:1" id="acceptPayDepositBtn">Accept &amp; Pay ${dep}% Deposit — ${fmtMoney(depAmt)}</button>
+              <button class="btn-ghost" style="flex:1" id="acceptPayFullBtn">Accept &amp; Pay in Full — ${fmtMoney(summary.total)}</button>`;
     return `
       <section>
         <div class="estimate">
-          <div style="padding:13px 16px 6px;font-size:13px;font-weight:600">Accept &amp; pay</div>
+          <div style="padding:13px 16px 6px;font-size:13px;font-weight:600">${paid > 0.005 ? 'Accept the updated estimate' : 'Accept &amp; pay'}</div>
           ${data.estimateChangedSinceAccepted ? `<div style="padding:0 16px 8px;font-size:12px;color:#e8a33d">This estimate was updated after you accepted it. Please review the new total and accept again.</div>` : ''}
           ${termsHtml}
           <div style="padding:0 16px 14px">
@@ -359,23 +377,24 @@
               <span>I accept this estimate (${fmtMoney(summary.total)})${data.terms ? ' and agree to the terms above' : ''}.</span>
             </label>
             <div class="actions" style="margin-top:0">
-              <button class="btn-primary" style="flex:1" id="acceptPayDepositBtn">Accept &amp; Pay ${dep}% Deposit — ${fmtMoney(summary.total*dep/100)}</button>
-              <button class="btn-ghost" style="flex:1" id="acceptPayFullBtn">Accept &amp; Pay in Full — ${fmtMoney(summary.total)}</button>
+              ${buttons}
             </div>
-            <div style="text-align:center;margin-top:10px"><a href="#" id="acceptLaterLink" style="font-size:12px;color:var(--muted)">Accept now, pay later (cash or check)</a></div>
+            ${paid > 0.005 && balance < min ? '' : `<div style="text-align:center;margin-top:10px"><a href="#" id="acceptLaterLink" style="font-size:12px;color:var(--muted)">Accept now, pay later (cash or check)</a></div>`}
             <div id="acceptError" style="display:none;color:#e55;font-size:11.5px;margin-top:8px"></div>
           </div>
         </div>
       </section>`;
   }
   function wireAccept(data){
-    const depBtn = document.getElementById('acceptPayDepositBtn');
-    if(!depBtn) return;
-    const fullBtn = document.getElementById('acceptPayFullBtn');
-    const later = document.getElementById('acceptLaterLink');
     const err = document.getElementById('acceptError');
+    if(!err) return;
+    const depBtn = document.getElementById('acceptPayDepositBtn');
+    const fullBtn = document.getElementById('acceptPayFullBtn');
+    const restBtn = document.getElementById('acceptPayRestBtn');
+    const onlyBtn = document.getElementById('acceptOnlyBtn');
+    const later = document.getElementById('acceptLaterLink');
     const show = m => { err.textContent = m; err.style.display = 'block'; };
-    const busy = on => [depBtn, fullBtn].forEach(b => { b.disabled = on; b.style.opacity = on ? '0.6' : '1'; });
+    const busy = on => [depBtn, fullBtn, restBtn, onlyBtn].filter(Boolean).forEach(b => { b.disabled = on; b.style.opacity = on ? '0.6' : '1'; });
     async function accept(){
       const name = document.getElementById('acceptName').value.trim();
       if(name.length < 2){ show('Please type your full name.'); return false; }
@@ -419,16 +438,20 @@
           : (e.message || "That didn't go through — check your connection and try again."));
       }
     }
-    depBtn.onclick = () => acceptThenPay('deposit');
-    fullBtn.onclick = () => acceptThenPay('full');
-    later.onclick = async (ev) => {
-      ev.preventDefault(); busy(true);
+    async function acceptOnly(ev){
+      if(ev) ev.preventDefault();
+      busy(true);
       try{ if(await accept()) load(); else busy(false); }
       catch(e){
         if(e.changed) return reloadChanged(e.message);
         busy(false); show(e.message || "That didn't go through — try again.");
       }
-    };
+    }
+    if(depBtn) depBtn.onclick = () => acceptThenPay('deposit');
+    if(fullBtn) fullBtn.onclick = () => acceptThenPay('full');
+    if(restBtn) restBtn.onclick = () => acceptThenPay('full');
+    if(onlyBtn) onlyBtn.onclick = acceptOnly;
+    if(later) later.onclick = acceptOnly;
   }
 
   function paymentSectionHtml(data){
@@ -442,8 +465,8 @@
           </div>
         </section>`;
     }
-    // Before acceptance, paying happens through "Accept & Pay" above.
-    if(summary && summary.total && !data.estimateAccepted && !((data.paid||0) > 0.005)) return '';
+    // Until the client accepts this price, paying happens through "Accept & Pay" above.
+    if(summary && summary.total && mustAccept(data)) return '';
     if(!summary || !summary.total){
       return `
         <section>
@@ -457,11 +480,16 @@
     }
     const paid = data.paid || 0;
     const dep = data.depositPct || 50;
+    const depAmt = data.depositAmount != null ? data.depositAmount : summary.total*dep/100;
     const balance = data.balance != null ? data.balance : Math.max(0, summary.total - paid);
+    const min = data.minCardAmount || 0.5;
 
     let body;
     if(balance <= 0.005){
       body = `<div style="padding:16px;font-size:13px;font-weight:700;color:var(--green)">✓ Paid in full</div>`;
+    }else if(balance < min){
+      // Stripe can't take a card payment this small.
+      body = `<div style="padding:0 16px 14px;font-size:12px;color:var(--muted)">Paid so far: ${fmtMoney(paid)} of ${fmtMoney(summary.total)}. The remaining ${fmtMoney(balance)} is too small to pay by card — please contact us to settle it.</div>`;
     }else if(paid > 0.005){
       body = `
         <div style="padding:0 16px 14px">
@@ -473,7 +501,7 @@
       body = `
         <div style="padding:0 16px 14px">
           <div class="actions" style="margin-top:0">
-            <button class="btn-primary" style="flex:1" id="payDepositBtn">Pay ${dep}% Deposit — ${fmtMoney(summary.total*dep/100)}</button>
+            <button class="btn-primary" style="flex:1" id="payDepositBtn">Pay ${dep}% Deposit — ${fmtMoney(depAmt)}</button>
             <button class="btn-ghost" style="flex:1" id="payFullBtn">Pay in Full — ${fmtMoney(summary.total)}</button>
           </div>
           <div id="paymentError" style="display:none;color:#e55;font-size:11.5px;margin-top:8px"></div>

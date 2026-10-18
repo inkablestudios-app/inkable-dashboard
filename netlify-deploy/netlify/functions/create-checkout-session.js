@@ -1,4 +1,5 @@
 import { getDatabase } from "@netlify/database";
+import { jobDepositPct, depositAmount, paidSoFar, needsAcceptance, STRIPE_MIN, toCents } from "./_shared/pay.js";
 
 const db = getDatabase();
 
@@ -23,6 +24,21 @@ async function stripeRequest(path, params) {
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error?.message || `Stripe returned ${res.status}`);
   return data;
+}
+
+// Was this earlier checkout already paid? (Its payment may not be recorded
+// yet if Stripe's notice is slow.) Unknown or unreachable counts as no.
+async function checkoutWasPaid(sessionId) {
+  try {
+    const res = await fetch(`${STRIPE_API}/checkout/sessions/${encodeURIComponent(sessionId)}`, {
+      headers: { "Authorization": "Basic " + Buffer.from(process.env.STRIPE_SECRET_KEY + ":").toString("base64") },
+    });
+    if (!res.ok) return false;
+    const s = await res.json();
+    return s?.payment_status === "paid";
+  } catch {
+    return false;
+  }
 }
 
 export default async (req) => {
@@ -62,18 +78,25 @@ export default async (req) => {
     if (typeof payments === "string") {
       try { payments = JSON.parse(payments); } catch { payments = []; }
     }
-    const paid = (payments || []).reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+    const paid = paidSoFar(payments);
     const balance = Math.max(0, summary.total - paid);
 
     if (balance <= 0.005) {
       return Response.json({ error: "This job is already paid in full." }, { status: 400 });
     }
-    // The first payment needs an accepted estimate (name + agreement to the
-    // price, terms and validity) for the CURRENT total. Expired estimates
-    // can't be accepted, so this also blocks paying an expired quote.
-    const accepted = r.estimate_accepted_at && Math.abs(Number(r.estimate_accepted_total) - Number(summary.total)) < 0.005;
-    if (paid <= 0.005 && !accepted) {
-      return Response.json({ error: "Please accept the estimate first." }, { status: 400 });
+    // Paying needs an accepted estimate (name + agreement to the price,
+    // terms and validity) for the CURRENT total: before the first payment,
+    // and again if the job was re-priced after the client accepted.
+    // Expired estimates can't be accepted, so this also blocks paying one.
+    const accepted = !!(r.estimate_accepted_at && Math.abs(Number(r.estimate_accepted_total) - Number(summary.total)) < 0.005);
+    if (needsAcceptance({ accepted, acceptedAt: r.estimate_accepted_at, paid })) {
+      return Response.json({ error: paid > 0.005 ? "This estimate was updated. Please review and accept the new total first." : "Please accept the estimate first." }, { status: 400 });
+    }
+    // The client's last checkout may already be paid while Stripe's notice
+    // is still on its way; a new checkout now could charge them twice.
+    if (r.checkout_session_id && !(payments || []).some(p => p.stripeSessionId === r.checkout_session_id)
+        && await checkoutWasPaid(r.checkout_session_id)) {
+      return Response.json({ error: "We've received your payment and are still recording it. Please refresh this page in a minute." }, { status: 409 });
     }
 
     // Once anything has been paid, "50% deposit" no longer means
@@ -82,21 +105,22 @@ export default async (req) => {
     const settingsRows = await db.sql`SELECT data FROM pricing_settings WHERE id = 1`;
     let settings = settingsRows[0]?.data || {};
     if (typeof settings === "string") { try { settings = JSON.parse(settings); } catch { settings = {}; } }
-    const depositPct = Math.min(100, Number(summary.depositPct) > 0 ? Number(summary.depositPct)
-      : Number(settings.depositPct) > 0 ? Number(settings.depositPct) : 50);
+    const depositPct = jobDepositPct(summary, settings);
 
     let amount, description;
     if (paid > 0.005) {
-      amount = balance;
+      amount = toCents(balance);
       description = "Remaining balance";
     } else if (amountType === "deposit") {
-      amount = summary.total * depositPct / 100;
+      amount = depositAmount(summary, depositPct);
       description = depositPct + "% deposit";
     } else {
-      amount = summary.total;
+      amount = toCents(summary.total);
       description = "Full payment";
     }
-    amount = Math.round(amount * 100) / 100;
+    if (amount < STRIPE_MIN) {
+      return Response.json({ error: `The amount left ($${amount.toFixed(2)}) is too small to pay by card. Please contact us to settle it.` }, { status: 400 });
+    }
 
     const origin = new URL(req.url).origin;
     // Stripe fills in {CHECKOUT_SESSION_ID}, so the page can tell when THIS
@@ -119,6 +143,12 @@ export default async (req) => {
 
     const session = await stripeRequest("/checkout/sessions", {
       "mode": "payment",
+      // Cards only (Apple Pay / Google Pay included): they're confirmed on
+      // the spot, unlike bank debits that can still fail days later.
+      "payment_method_types[0]": "card",
+      // A checkout left open can't be paid later, after the balance changed
+      // (30 minutes is Stripe's minimum).
+      "expires_at": String(Math.floor(Date.now() / 1000) + 31 * 60),
       "success_url": successUrl,
       "cancel_url": cancelUrl,
       "line_items[0][price_data][currency]": "usd",
