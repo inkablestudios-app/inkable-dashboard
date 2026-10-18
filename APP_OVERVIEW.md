@@ -18,8 +18,13 @@ Written after a read-through of v2.38 on 2026-10-16. Keep this updated when the 
 ## Where data lives
 - The **database** is the real copy: clients, projects (estimates), job_meta (status, notes, payments,
   expenses, install date), pricing settings, proof links and client responses.
-- The **browser** keeps a fast local copy. On load, and every 5 minutes, the Dashboard pulls everything
-  from `/api/sync-all` and replaces its local copy. Each edit is saved locally AND sent to the server.
+- The **browser** keeps a fast local copy. On load, every 5 minutes, and when you come back to the tab,
+  the Dashboard pulls everything from `/api/sync-all`. Each edit is saved locally AND sent to the
+  server as a "patch" (only the fields that changed; payments, expenses and call-log entries by id),
+  so two devices can't undo each other. Edits that couldn't be sent wait in an outbox (combined per
+  record) and are re-applied on top of every pull until the server has them.
+- Logins last 30 days and carry a fingerprint of the password: changing the password signs out
+  every other device.
 - Local copies are per browser AND per web address (the test address has its own; that's why
   Google Drive settings are blank there).
 - PDF files (estimate/invoice) are stored only in the database; the browser just remembers they exist.

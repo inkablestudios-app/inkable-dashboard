@@ -18,4 +18,8 @@ Do NOT skip these. Tick each one off before taking real payments.
       job and opening a client link both work. If job saves fail with a server error, the migration
       didn't run.
 - [ ] Turn on Stripe email for successful payments (Settings > Notifications).
-- [ ] Settings → Business: check email, phone, Instagram, deposit %, tax rate, default terms.
+- [ ] Settings → Business: check email, phone, Instagram, deposit %, estimate valid days, tax rate,
+      default terms.
+- [ ] After this update goes live, every device (computer, phone) has to log in again once.
+- Note: checkouts are card-only (Apple Pay / Google Pay included) — this is set in the app, so
+  Stripe's payment-method settings don't change it.

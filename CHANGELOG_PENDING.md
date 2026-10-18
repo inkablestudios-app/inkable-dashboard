@@ -182,3 +182,32 @@
   - Printed Sales list: same order as the Sales tab (newest first), and its totals add up to the
     rows above them (they could be a cent off).
   - A $0 job (comped, warranty redo) counts as paid instead of "Unpaid".
+- Safety review fixes (client page, payments, syncing, login):
+  - Security: text a client types on their page (their signature name, a change-request note) is
+    shown in the Dashboard as plain text. Before, it was treated as page code, so someone could
+    have run their own code inside your logged-in Dashboard.
+  - Login: changing the password signs out every other device (e.g. a lost phone), and a
+    logged-in device alone can't set a new password. An expired login now shows the login screen
+    instead of "Offline". After this update, every device logs in again once.
+  - No double charges: if a client pays and Stripe's notice is slow, the page shows "Confirming
+    your payment…" with no Pay buttons until the payment is recorded, and the server refuses a new
+    checkout while the last one is paid but not yet recorded. Checkouts close after ~31 minutes
+    and are card-only (Apple Pay / Google Pay included). If a payment can't be recorded, Stripe is
+    told to try again (it retries for 3 days and emails you if it keeps failing).
+  - Re-pricing: if you change a job's price after the client accepted (even after a deposit),
+    they accept the new total before paying anything more. Accepting records only the total the
+    client was looking at.
+  - Dates use Houston time everywhere: install dates on the client page were a day early; evening
+    card payments were dated the next day (and could land in the next month or tax quarter); the
+    last valid day of an estimate ended at 6-7 PM instead of midnight.
+  - The deposit shown on the client page is exactly what Stripe charges (could be 1¢ off); a
+    balance under 50¢ gets a "contact us" note (Stripe can't charge less).
+  - A late Approve / Request Changes click on an old link no longer moves a job that's in
+    production or done backwards, and those jobs show no buttons.
+  - Phone + computer: each device now sends only what it changed (job details, clients, Settings),
+    so a device with an older copy can't bring back a deleted payment or wipe an install date,
+    note, tag, call-log entry or setting changed on the other device. Edits made during a sync stay
+    on screen, unsent edits are kept through server outages, and opening a job window (or getting
+    a client link) no longer moves its status back to "Proof Approved".
+  - Client answers (approved / changes requested) pop up once per device; a new phone doesn't list
+    every old answer. Restoring a backup puts statuses back and keeps the latest backup date.
