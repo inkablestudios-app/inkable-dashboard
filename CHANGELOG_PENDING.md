@@ -211,3 +211,40 @@
     a client link) no longer moves its status back to "Proof Approved".
   - Client answers (approved / changes requested) pop up once per device; a new phone doesn't list
     every old answer. Restoring a backup puts statuses back and keeps the latest backup date.
+- Pricer, saving and PDF review fixes:
+  - Editing or copying a job whose client was deleted no longer fails to save (the edit used to be
+    lost after a few tries). The job keeps the name on file, with no client link.
+  - A save that lands while a sync is running no longer creates a second copy of the job.
+  - Re-pricing a job the client accepted online or has paid on now asks first, in plain words: old
+    total, new total, that the client will be asked to accept again, and what they will then owe (or
+    that a refund would be due).
+  - "View Estimate" / "View Invoice" now show the saved numbers (the same as Sales, the client page
+    and Stripe). Before, an invoice made after a rate change showed a different total, and a
+    re-priced job still showed its old estimate PDF. Stored PDFs are now rebuilt after a job changes,
+    and a PDF save never re-creates a job that was deleted on another device.
+  - A material, laminate or substrate removed from Settings shows as "removed — pick one" when an old
+    job is reopened, and Save waits until one is picked. It used to quietly become another material,
+    so the price on screen and the saved price were different.
+  - Names with an inch mark or quote (e.g. 1/8" Acrylic) now work in Settings and the pricer (they
+    were priced at $0 and their cost couldn't be set).
+  - Estimate numbers: a new estimate takes the next number after the highest one anywhere (also
+    typed-in Est #s and deleted jobs on this device), so numbers aren't handed out twice. If another
+    device already used the number, the server gives the next free one and the Dashboard says so.
+    The invoice # follows the Est #.
+  - Leaving the pricer with unsaved changes (Escape, "← Projects", closing the tab) asks first.
+    Escape while typing in a box only leaves the box.
+  - Switching a size between in and ft no longer changes the price by a few cents.
+  - PDFs: the Subtotal includes the minimum-charge adjustment (rows add up), the header shows the real
+    "Valid through" date (it always said 30 days), and long notes/terms continue on a new page instead
+    of running off the page (estimate, invoice, work order).
+  - Work order: sizes rounded (20.833 ft, not 20.833333333333332 ft) and the real quantity.
+  - The estimate Date is a date picker. A mistyped year (like 0026) is refused, and a date no longer
+    shifts a day back (2026-10-01 was saved as Sep 30).
+  - Install-time suggestion: 1.9 hours now suggests 2h (it said "1h 60min" and applied 1h 45min).
+  - No negative prices or sizes, quantity at least 1, % discount at most 100 and a $ discount at most
+    the job. A total below $0 can't be saved ($0 is fine).
+  - Copy as New: a job with no client shows the new job number, and a copy of an old job made before
+    the Processing Fee box existed starts with the fee ON (same as any new estimate).
+  - Search also finds words in the job window's notes.
+  - Labels: Terms are printed on the estimate and invoice and accepted by the client (it said
+    "invoice only"); the Notes box says it prints on the client's estimate and invoice.
