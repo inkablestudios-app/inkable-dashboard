@@ -1471,6 +1471,7 @@ function jobMetaPatch(before,after){
     patch.status=after.status||'send'; patch.statusAt=Number(after.statusAt)||0;
   }
   META_LISTS.forEach(([k,up,rm])=>{
+    if(!(k in after))return; // a list this edit didn't touch is never treated as emptied
     const old=new Map((before[k]||[]).filter(x=>x&&x.id).map(x=>[x.id,JSON.stringify(x)]));
     const now=(after[k]||[]).filter(x=>x&&x.id);
     const changed=now.filter(x=>old.get(x.id)!==JSON.stringify(x));
@@ -3743,8 +3744,10 @@ async function cloudPush(path,method,body,opts2){
     if(res.status===401)onAuthExpired();
     if(!res.ok){ const e=new Error('Server returned '+res.status); e.httpStatus=res.status; throw e; }
     // Delivered — drop the queued copy it carried (not one queued meanwhile).
+    // A delete also cancels any older unsent save of that record, which
+    // would otherwise bring it back.
     const box=readOutbox();
-    if(carried!==null&&box[key]&&box[key].stamp===carried){ delete box[key]; writeOutbox(box); }
+    if(box[key]&&(method==='DELETE'?box[key].stamp<=stamp:carried!==null&&box[key].stamp===carried)){ delete box[key]; writeOutbox(box); }
     recentPushes.push({path,method,body,stamp,doneAt:Date.now()});
     updateSyncIndicator(true);
     return await res.json();
