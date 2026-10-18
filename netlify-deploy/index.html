@@ -1420,6 +1420,7 @@ function sortBy(col){
   renderProjects();
 }
 let currentJobId = null;
+let jobModalShown = null; // what the job window showed when it opened
 let activeTags = {rush: false, hold: false};
 
 // ── Data helpers ──────────────────────────────────────────────────────
@@ -1534,6 +1535,7 @@ function addClientLogEntry(clientId,type,note,jobId){
   const clients=getClients();
   const idx=clients.findIndex(c=>c.id===clientId);
   if(idx<0)return;
+  const before={...clients[idx],log:[...(clients[idx].log||[])]};
   if(!clients[idx].log)clients[idx].log=[];
   clients[idx].log.unshift({
     id:'log_'+Date.now()+'_'+Math.floor(Math.random()*100000),
@@ -1543,15 +1545,16 @@ function addClientLogEntry(clientId,type,note,jobId){
     jobId:jobId||'',
   });
   localStorage.setItem(CLIENTS_KEY,JSON.stringify(clients));
-  syncClientToServer(clients[idx]);
+  syncClientToServer(clients[idx],before);
 }
 function deleteClientLogEntry(clientId,entryId){
   const clients=getClients();
   const idx=clients.findIndex(c=>c.id===clientId);
   if(idx<0)return;
+  const before={...clients[idx]};
   clients[idx].log=(clients[idx].log||[]).filter(e=>e.id!==entryId);
   localStorage.setItem(CLIENTS_KEY,JSON.stringify(clients));
-  syncClientToServer(clients[idx]);
+  syncClientToServer(clients[idx],before);
 }
 function getLastContactDate(clientId){
   const log=getClientLog(clientId);
@@ -2474,12 +2477,13 @@ function saveClientForm(){
     const clients=getClients();
     const idx=clients.findIndex(c=>c.id===clientFormEditingId);
     if(idx>=0){
+      const before={...clients[idx]};
       clients[idx]={...clients[idx],
         name:data.name.trim(),phone:data.phone.trim(),email:(data.email||'').trim(),addr:data.addr.trim(),
         city:data.city.trim(),state:data.state.trim(),zip:data.zip.trim(),
         leadSource:data.leadSource.trim(),notes:data.notes.trim()};
       localStorage.setItem(CLIENTS_KEY,JSON.stringify(clients));
-      syncClientToServer(clients[idx]);
+      syncClientToServer(clients[idx],before);
     }
   }else{
     addClient(data);
@@ -3263,6 +3267,8 @@ function openJobModal(id){
   document.getElementById('modal-notes').value=meta.notes||'';
 
   activeTags={rush:meta.tags?.includes('rush'),hold:meta.tags?.includes('hold')};
+  jobModalShown={status:meta.status||'send',installDate:meta.installDate||'',installTime:meta.installTime||'',
+    notes:meta.notes||'',tags:['rush','hold'].filter(t=>activeTags[t])};
   updateTagButtons();
   renderJobLogList(id);
   renderExpensesList(id);
@@ -3300,13 +3306,18 @@ function saveJobMeta(){
   const newStatus=document.getElementById('modal-status').value;
   const newInstallDate=document.getElementById('modal-install-date').value;
   const newInstallTime=document.getElementById('modal-install-time').value;
+  // Only what was changed in this window is saved; anything a sync brought
+  // in while it was open (a client's approval, a note typed on the phone)
+  // stays as it is.
+  const shown=jobModalShown||{};
+  const pick=(k,val)=>JSON.stringify(val)===JSON.stringify(shown[k])?existing[k]:val;
   const updatedMeta={
     ...existing,
-    status:newStatus,
-    installDate:newInstallDate,
-    installTime:newInstallTime,
-    tags,
-    notes:document.getElementById('modal-notes').value.trim()
+    status:pick('status',newStatus),
+    installDate:pick('installDate',newInstallDate),
+    installTime:pick('installTime',newInstallTime),
+    tags:pick('tags',tags),
+    notes:pick('notes',document.getElementById('modal-notes').value.trim())
   };
   setJobMeta(currentJobId,updatedMeta);
 
@@ -3314,14 +3325,14 @@ function saveJobMeta(){
   // same server-side reset as replacing the proof file — otherwise the
   // client's page still shows their old response instead of fresh
   // Approve/Request Changes options.
-  if(existing.status!==newStatus&&newStatus==='awaiting'){
+  if(newStatus!==shown.status&&newStatus==='awaiting'){
     resetClientResponseAndMarkAwaiting(currentJobId);
   }
 
   // Only touch the calendar if the install date or time actually changed —
   // saving the rest of this form (status, notes, tags) shouldn't fire an
   // API call and rewrite an event that hasn't moved.
-  if(existing.installDate!==newInstallDate||existing.installTime!==newInstallTime){
+  if(existing.installDate!==updatedMeta.installDate||existing.installTime!==updatedMeta.installTime){
     syncInstallToCalendar(currentJobId,updatedMeta);
   }
 
@@ -3517,6 +3528,7 @@ function showAuthError(msg){
   el.style.display='block';
 }
 function showApp(){
+  authExpiredShown=false;
   document.getElementById('authGate').style.display='none';
   document.getElementById('appShell').style.display='flex';
   pullFromServerOnLoad();
@@ -3579,6 +3591,17 @@ async function submitAuthGate(){
 function logout(){
   localStorage.removeItem(AUTH_TOKEN_KEY);
   location.reload();
+}
+// The server stopped accepting this device's login (it expired, or the
+// password was changed on another device): show the login screen instead of
+// a misleading "Offline". Unsent changes stay on this device and go out
+// right after logging in again.
+let authExpiredShown=false;
+function onAuthExpired(){
+  if(authExpiredShown)return;
+  authExpiredShown=true;
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+  showAuthGate().then(()=>showAuthError('Please log in again — your login expired or the password was changed. Changes made on this device are kept and will be saved after you log in.'));
 }
 
 // ── Cloud sync — Netlify DB backend. localStorage stays the fast, always-
@@ -3901,7 +3924,7 @@ async function pullFromServerOnLoad(){
       storageFullWarned=true;
       showToast('⚠️','This device\'s storage is full','Some of the latest data couldn\'t be saved on this device, so parts of the Dashboard may be out of date here. Your changes still go to the server. Clearing old site data in this browser fixes it.',{color:'var(--red)',duration:20000});
     }
-    updateSyncIndicator(Object.keys(readOutbox()).length===0,true);
+    updateSyncIndicator(Object.keys(readOutbox()).length===0&&!failed.length,true);
     renderProjects();
     if(typeof renderSales==='function')renderSales();
     if(typeof renderClients==='function')renderClients();
@@ -3934,8 +3957,20 @@ function acknowledgeResponse(projectId,responseAt){
 }
 let newClientResponses=[];
 let activeReminders=[];
+// Which answers this device has already announced with a pop-up.
+const PROOF_ALERTED_KEY='inkable_proof_response_alerted';
 function checkForNewClientResponses(proofResponses){
-  const ack=getAcknowledgedResponses();
+  let ack=getAcknowledgedResponses();
+  let alerted=readJSONKey(PROOF_ALERTED_KEY,null);
+  if(!alerted){
+    // First sync on this device (new phone, cleared browser): answers that
+    // already exist count as seen, so old ones don't flood the bell. A device
+    // that already had a bell keeps its unread ones, just without pop-ups.
+    const freshDevice=localStorage.getItem(PROOF_ACK_KEY)===null;
+    alerted={};
+    Object.entries(proofResponses).forEach(([pid,r])=>{ if(r.responseAt){ alerted[pid]=r.responseAt; if(freshDevice)ack[pid]=r.responseAt; } });
+    try{ if(freshDevice)localStorage.setItem(PROOF_ACK_KEY,JSON.stringify(ack)); }catch(e){}
+  }
   const projects=getProjects();
   const clients=getClients();
   newClientResponses=Object.entries(proofResponses)
@@ -3949,6 +3984,18 @@ function checkForNewClientResponses(proofResponses){
       };
     })
     .sort((a,b)=>new Date(b.responseAt)-new Date(a.responseAt));
+  // A pop-up for each answer this device hasn't announced yet (once each).
+  newClientResponses.forEach(n=>{
+    if(alerted[n.projectId]===n.responseAt)return;
+    alerted[n.projectId]=n.responseAt;
+    const approved=n.response==='approved';
+    const who=n.clientName||n.jobName||'A client';
+    const note=n.responseNote?`: "${n.responseNote.length>140?n.responseNote.slice(0,140)+'…':n.responseNote}"`:'';
+    showToast(approved?'✅':'✎',approved?'Proof approved':'Changes requested',
+      escapeHtml(`${who}${n.estNo?' ('+n.estNo+')':''}${note}`),
+      {color:approved?'var(--green)':'var(--amber)',duration:10000,onClick:()=>openNotifResponse(n.projectId,n.responseAt)});
+  });
+  try{ localStorage.setItem(PROOF_ALERTED_KEY,JSON.stringify(alerted)); }catch(e){}
   renderNotificationBell();
 }
 
@@ -4392,6 +4439,7 @@ function getReminderSettings(){
 // versa — this is the Dashboard <-> Inkatool pricing link.
 // ══════════════════════════════════════════════════════════════════════
 let settingsDraft=null;
+let settingsOpened=null; // the values the window opened with
 
 function openSettings(){
   const pd=getPricingData();
@@ -4422,6 +4470,7 @@ function openSettings(){
     laminate:{...(pd.laminate||DEFAULT_LAMINATE)},
     substrate:{...(pd.substrate||DEFAULT_SUBSTRATE)},
   };
+  settingsOpened=JSON.parse(JSON.stringify(settingsDraft));
   renderSettingsPanel();
   renderBackupSummary();
   document.getElementById('driveClientId').value=getDriveClientId();
@@ -4465,7 +4514,7 @@ function exportAllData(){
   downloadBlob(blob,'inkable-backup-'+dateSlug+'.json');
   const pd={...getPricingData(),lastBackupAt:Date.now()};
   localStorage.setItem(PRICING_KEY,JSON.stringify(pd));
-  syncPricingToServer(pd);
+  syncPricingToServer({patch:{lastBackupAt:pd.lastBackupAt}});
   refreshReminders();
 }
 function handleRestoreFile(event){
@@ -4488,6 +4537,7 @@ function handleRestoreFile(event){
     const madeOn=backup.exportedAt||'an unknown date';
     const warn=`Restore this backup?\n\nBackup made: ${madeOn}\nContains: ${projCount} project(s), ${clientCount} client(s)\n\nEvery job and client in this backup will be put back the way it was when the backup was made, on this device and in the cloud. Jobs, clients and payments added AFTER the backup are kept. This can't be undone.`;
     if(!confirm(warn)){ event.target.value=''; return; }
+    const keepBackupAt=Number(getPricingData().lastBackupAt)||0;
 
     Object.keys(BACKUP_KEYS).forEach(key=>{
       if(backup.data[key]!==undefined){
@@ -4509,10 +4559,14 @@ function handleRestoreFile(event){
       const projects=JSON.parse(localStorage.getItem(SAVED_KEY)||'[]');
       const jobMeta=JSON.parse(localStorage.getItem(META_KEY)||'{}');
       const pricing=JSON.parse(localStorage.getItem(PRICING_KEY)||'{}');
+      // Restoring an old file isn't a new backup: keep the latest backup date.
+      if(keepBackupAt>(Number(pricing.lastBackupAt)||0)){ pricing.lastBackupAt=keepBackupAt; localStorage.setItem(PRICING_KEY,JSON.stringify(pricing)); }
+      // Stamped now, so each job's status from the backup wins over a later one.
+      const restoredAt=Date.now();
       await Promise.all([
         ...clients.map(c=>cloudPush('/clients','POST',c)),
         ...projects.map(p=>cloudPush('/projects','POST',p)),
-        ...Object.keys(jobMeta).map(pid=>cloudPush('/job-meta','POST',{projectId:pid,...jobMeta[pid]})),
+        ...Object.keys(jobMeta).map(pid=>cloudPush('/job-meta','POST',{projectId:pid,...jobMeta[pid],statusAt:restoredAt})),
         Object.keys(pricing).length?cloudPush('/pricing','POST',pricing):Promise.resolve(),
       ]);
     }catch(err){
@@ -4909,9 +4963,14 @@ async function loadClientLinkStatus(jobId){
     // this job's status while we were waiting on the network.
     if(data.exists&&data.response){
       const expectedStatus=data.response==='approved'?'approved':'revision';
+      const respondedAt=new Date(data.responseAt).getTime()||0;
       const meta=getJobMeta(jobId);
-      if(meta.status!==expectedStatus&&meta.status===statusBeforeCheck){
-        setJobMeta(jobId,{...meta,status:expectedStatus});
+      // Only an answer newer than the job's last status change counts, and a
+      // job already in production or done stays where it is. The server
+      // already holds this status, so it's only updated on this device.
+      if(meta.status!==expectedStatus&&meta.status===statusBeforeCheck&&respondedAt>(Number(meta.statusAt)||0)
+         &&!['prod','done'].includes(meta.status)){
+        const m=getMeta(); m[jobId]={...meta,status:expectedStatus,statusAt:respondedAt}; saveMeta(m);
         const statusSelect=document.getElementById('modal-status');
         if(statusSelect&&currentJobId===jobId)statusSelect.value=expectedStatus;
         renderProjects();
@@ -4998,11 +5057,12 @@ async function getOrCreateClientLink(jobId){
 // Shared by both "just generated a link for the first time" and "just
 // replaced the proof after changes were requested" — either way, once the
 // client's copy is current, the job is waiting on THEM, not on you. Never
-// downgrades an already-approved job just because the link got touched
-// again for some other reason (like re-copying it).
+// moves back a job that's already approved, in production or done just
+// because the link got touched again (like re-copying it to collect a
+// balance by card).
 function markJobAwaitingApproval(jobId){
   const meta=getJobMeta(jobId);
-  if(meta.status==='approved')return;
+  if(['approved','prod','done'].includes(meta.status))return;
   setJobMeta(jobId,{...meta,status:'awaiting'});
   renderProjects();
   renderSales();
@@ -5248,12 +5308,15 @@ function saveSettings(){
   s.defaultNotes=txt('settingDefaultNotes');
   s.defaultTerms=txt('settingDefaultTerms');
 
-  // Merge into whatever else already lives under PRICING_KEY (e.g. QQ presets
-  // saved by the legacy tool) rather than clobbering the whole object.
-  const existing=getPricingData();
-  const merged={...existing,...s};
+  // Only the fields changed in this window are saved, on top of the latest
+  // settings (a sync may have brought in another device's changes while it
+  // was open) — never the whole set as it was when the window opened.
+  const changed={};
+  Object.keys(s).forEach(k=>{ if(JSON.stringify(s[k])!==JSON.stringify(settingsOpened?.[k]))changed[k]=s[k]; });
+  const merged={...getPricingData(),...changed};
   localStorage.setItem(PRICING_KEY,JSON.stringify(merged));
-  syncPricingToServer(merged);
+  if(Object.keys(changed).length)syncPricingToServer({patch:changed});
+  settingsOpened=JSON.parse(JSON.stringify(s));
 
   // If the pricer is open, refresh its material dropdowns + totals so the
   // new prices apply immediately without needing to reopen the job.
@@ -7953,7 +8016,7 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
           <button class="btn btn-primary" onclick="changePassword()">Change Password</button>
           <span id="pwStatus" style="font-size:11px"></span>
         </div>
-        <div style="font-size:10.5px;color:var(--muted2);margin-top:8px">Other devices stay logged in until they log out.</div>
+        <div style="font-size:10.5px;color:var(--muted2);margin-top:8px">Changing it signs out every other device; they log in again with the new password.</div>
       </div>
 
       <div class="settings-section-title">Backup &amp; restore</div>
