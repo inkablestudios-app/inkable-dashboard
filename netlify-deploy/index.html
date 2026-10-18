@@ -1610,6 +1610,7 @@ function setStatusFilter(status, btn){
 
 // ── New Estimate ──────────────────────────────────────────────────────
 function newEstimate(projNum, clientId){
+  if(!pricerCanLeave())return; // unsaved estimate open: ask first
   // Fresh "+ New Estimate" click (no args) — ask which customer first,
   // instead of silently landing on "No Client" with no way to fix it.
   if(!projNum && !clientId){
@@ -1622,11 +1623,7 @@ function newEstimate(projNum, clientId){
 }
 
 function proceedNewEstimate(projNum, clientId){
-  if(!projNum){
-    const all=getProjects();
-    const nums=all.map(p=>parseInt(p.projectNum)||0).filter(n=>n>0);
-    projNum=nums.length?Math.max(...nums)+1:1000;
-  }
+  if(!projNum)projNum=nextProjectNum();
   openPricer(projNum, clientId||'');
 }
 
@@ -1761,10 +1758,11 @@ function changeClientInPricer(){
 // ── Projects ──────────────────────────────────────────────────────────
 // Shared by renderProjects() and the print view — guarantees what prints
 // is exactly what's on screen: same search, same status filter, same sort.
-// Item descriptions, vehicle info and notes, for search ("F-150",
-// "door decals"...) — so an old job is easy to find and copy.
-function jobSearchText(p){
-  let txt=(p.state?.form?.notes||'')+' '+(p.state?.form?.jobName||'');
+// Item descriptions, vehicle info and notes (the estimate's and the job
+// window's), for search ("F-150", "door decals", "gate code"...) — so an old
+// job is easy to find and copy.
+function jobSearchText(p,meta){
+  let txt=(p.state?.form?.notes||'')+' '+(p.state?.form?.jobName||'')+' '+((meta||getJobMeta(p.id)).notes||'');
   try{ (JSON.parse(p.state?.form?.pricerData||'{}').lines||[]).forEach(l=>{ txt+=' '+(l.desc||'')+' '+(l.vehicleInfo||''); }); }catch(e){}
   return txt.toLowerCase();
 }
@@ -1784,7 +1782,7 @@ function getFilteredSortedProjects(){
     const matchQ=!q||p.name?.toLowerCase().includes(q)||(p.estNo||'').toLowerCase().includes(q)||
       clients.find(c=>c.id===p.clientId)?.name.toLowerCase().includes(q)||
       (p.state?.form?.billingName||'').toLowerCase().includes(q)||
-      jobSearchText(p).includes(q);
+      jobSearchText(p,meta).includes(q);
     const matchStatus=currentFilter==='all'||meta.status===currentFilter;
     return matchQ&&matchStatus;
   });
@@ -3278,6 +3276,7 @@ function editInPricer(id){
   const projects=getProjects();
   const p=projects.find(pr=>pr.id===id);
   if(!p)return;
+  if(!pricerCanLeave())return;
   loadPricerFromSaved(p);
 }
 
@@ -3288,9 +3287,9 @@ function editInPricer(id){
 function copyJobToNewEstimate(id){
   const p=getProjects().find(x=>x.id===id);
   if(!p)return;
+  if(!pricerCanLeave())return;
   loadPricerFromSaved(p);
-  const nums=getProjects().map(x=>parseInt(x.projectNum)||0).filter(n=>n>0);
-  const projNum=nums.length?Math.max(...nums)+1:1000;
+  const projNum=nextProjectNum();
   pricerState.editingId=null;
   pricerState.projectNum=String(projNum);
   pricerState.estNo='EST-'+projNum;
@@ -3299,7 +3298,12 @@ function copyJobToNewEstimate(id){
   pricerState.date=new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
   document.getElementById('pricerProjNum').textContent='Project '+projNum+' (copy of '+(p.estNo||'')+')';
   document.getElementById('pricerEstNo').value=pricerState.estNo;
-  document.getElementById('pricerDate').value=pricerState.date;
+  document.getElementById('pricerDate').value=storedDateToInput();
+  syncJobIdentity(); // "Job #…" for a job with no client must show the NEW number
+  // Jobs saved before the Processing Fee box existed have it off; a new
+  // estimate follows the shop rule instead: fee box on.
+  try{ if(JSON.parse(p.state?.form?.pricerData||'{}').processingFeeOn===undefined)document.getElementById('processingFeeChk').checked=true; }catch(e){}
+  pricerCleanState=null; // not saved anywhere yet: closing asks first
   setTimeout(recalc,0);
   showToast('📄','Copied as a new estimate',`From ${p.estNo||'the old job'}. Nothing is saved until you press Save.`,{color:'var(--blue)',duration:6000});
 }
@@ -3331,13 +3335,14 @@ function generateWorkOrderPDF(id){
     ].forEach(([k,v])=>{ if(!v)return; doc.setFont('helvetica','bold');doc.text(k+':',M,y); doc.setFont('helvetica','normal'); doc.text(doc.splitTextToSize(String(v),W-2*M-100),M+100,y); y+=14; });
     y+=6; line(M,y,W-M,y); y+=18;
     doc.setFont('helvetica','bold');doc.setFontSize(11);doc.text('Items',M,y); y+=14;
-    const dim=(v,ft)=>{ const n=parseFloat(v)||0; return ft?(n+' ft'):(n+'"'); };
+    // Sizes are saved at full precision (e.g. 20.833333333333332 ft): show at most 3 decimals.
+    const dim=(v,ft)=>{ const n=+(parseFloat(v)||0).toFixed(3); return ft?(n+' ft'):(n+'"'); };
     (pd.lines||[]).forEach((l,i)=>{
       const c=calcSavedLine(l,pd.jobType,rates,vinyl,laminate,substrate);
       const specs=[];
-      if(l.pricingMode==='flat'){ specs.push('Qty '+(l.qty||1)+' (vendor / flat item)'); }
+      if(l.pricingMode==='flat'){ specs.push('Qty '+lineQty(l.qty)+' (vendor / flat item)'); }
       else{
-        specs.push('Size: '+dim(l.w,l.wFt)+' W × '+dim(l.h,l.hFt)+' H   ·   Qty '+(l.qty||1)+'   ·   '+c.sqft.toFixed(2)+' sqft total');
+        specs.push('Size: '+dim(l.w,l.wFt)+' W × '+dim(l.h,l.hFt)+' H   ·   Qty '+lineQty(l.qty)+'   ·   '+c.sqft.toFixed(2)+' sqft total');
         specs.push('Media: '+(l.vinyl||'—')+(l.printed===false?' (not printed)':' (printed)'));
         if(l.lam&&l.lam!=='No Laminate')specs.push('Laminate: '+l.lam);
         if(l.sub&&l.sub!=='None')specs.push('Substrate: '+l.sub+(l.subThickness?' — '+l.subThickness:'')+(l.subSameSize===false?' ('+dim(l.subW,l.subWFt)+' × '+dim(l.subH,l.subHFt)+')':''));
@@ -3349,7 +3354,7 @@ function generateWorkOrderPDF(id){
       ensure(16+titleLines.length*13+specs.length*13);
       doc.setFont('helvetica','bold');doc.setFontSize(10.5);doc.text(titleLines,M,y); y+=titleLines.length*13;
       doc.setFont('helvetica','normal');doc.setFontSize(9.5);doc.setTextColor(60);
-      specs.forEach(sp=>{ doc.text(doc.splitTextToSize(sp,W-2*M-20),M+16,y); y+=13; });
+      specs.forEach(sp=>{ const sl=doc.splitTextToSize(sp,W-2*M-20); doc.text(sl,M+16,y); y+=13*sl.length; });
       doc.setTextColor(0); y+=6;
       // checkbox for the shop floor
       doc.setDrawColor(120);doc.rect(W-M-12,y-30,10,10);
@@ -3357,7 +3362,8 @@ function generateWorkOrderPDF(id){
     if((pd.lines||[]).length===0){ doc.text('No items on this job.',M,y); y+=14; }
     const notes=[f.notes,meta.notes].filter(Boolean).join('\n');
     if(notes){ ensure(40); y+=4; line(M,y,W-M,y); y+=16; doc.setFont('helvetica','bold');doc.setFontSize(11);doc.text('Notes',M,y); y+=14;
-      doc.setFont('helvetica','normal');doc.setFontSize(9.5); const nl=doc.splitTextToSize(notes,W-2*M); ensure(nl.length*12); doc.text(nl,M,y); y+=nl.length*12; }
+      // One line at a time, so long notes continue on the next page instead of running off this one.
+      doc.setFont('helvetica','normal');doc.setFontSize(9.5); doc.splitTextToSize(notes,W-2*M).forEach(t=>{ ensure(12); doc.text(t,M,y); y+=12; }); }
     if(meta.proofLink){ ensure(30); y+=10; doc.setFontSize(9);doc.setTextColor(40,90,200); doc.textWithLink('Open the approved proof (Google Drive)',M,y,{url:meta.proofLink}); doc.setTextColor(0); }
     doc.setFontSize(8);doc.setTextColor(140);
     doc.text('Printed '+new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+' · Inkable Studios',M,H-24);
@@ -3974,6 +3980,10 @@ document.addEventListener('keydown',e=>{
   for(const [id,closeFn] of ESCAPE_CLOSE_ORDER){
     const el=document.getElementById(id);
     if(el&&el.classList.contains('open')){
+      // In the pricer, Escape while typing in a box only leaves the box (it
+      // used to close the whole estimate, losing anything not yet saved).
+      const f=document.activeElement;
+      if(id==='pricerOverlay'&&f&&el.contains(f)&&(f.tagName==='TEXTAREA'||f.tagName==='SELECT'||(f.tagName==='INPUT'&&!['checkbox','radio','button'].includes(f.type)))){ f.blur(); return; }
       closeFn();
       return;
     }
@@ -4891,16 +4901,17 @@ function renderSettingsPanel(){
 function renderMatCostRows(containerId,category){
   const el=document.getElementById(containerId);
   if(!el||!settingsDraft)return;
+  // Names are escaped and the handlers attached below (not written into the
+  // HTML), so a name like 1/8" Acrylic or Joe's Vinyl works.
   const rows=Object.entries(settingsDraft[category]).map(([name,cost])=>`
-    <div class="mat-row">
-      <label title="${name}">${name}</label>
+    <div class="mat-row" data-name="${escapeAttr(name)}">
+      <label title="${escapeAttr(name)}">${escapeHtml(name)}</label>
       <div style="display:flex;align-items:center;gap:6px">
         <div class="pi" style="flex:1">
           <span>$</span>
-          <input type="number" step="0.01" min="0" value="${(cost||0).toFixed(2)}"
-            onchange="updateMatCost('${category}','${name.replace(/'/g,"\\'")}',this.value)"/>
+          <input type="number" step="0.01" min="0" value="${(cost||0).toFixed(2)}"/>
         </div>
-        <button onclick="removeMaterial('${category}','${name.replace(/'/g,"\\'")}')"
+        <button
           style="background:none;border:1px solid var(--border);color:var(--muted);border-radius:5px;padding:5px 9px;cursor:pointer;font-size:12px;flex-shrink:0">🗑</button>
       </div>
     </div>`).join('');
@@ -4911,6 +4922,11 @@ function renderMatCostRows(containerId,category){
         onkeydown="if(event.key==='Enter')addMaterial('${category}')"/>
       <button onclick="addMaterial('${category}')" class="btn btn-primary" style="flex-shrink:0">+ Add</button>
     </div>`;
+  el.querySelectorAll('.mat-row').forEach(row=>{
+    const name=row.dataset.name;
+    row.querySelector('input').addEventListener('change',e=>updateMatCost(category,name,e.target.value));
+    row.querySelector('button').addEventListener('click',()=>removeMaterial(category,name));
+  });
 }
 
 function updateMatCost(category,name,value){
@@ -4999,12 +5015,13 @@ function refreshOpenPricerAfterSettingsSave(){
   const overlay=document.getElementById('pricerOverlay');
   if(!overlay||!overlay.classList.contains('open'))return;
   const vinyl=getVinyl(),laminate=getLaminate(),substrate=getSubstrate();
-  const optHtml=(obj,selected)=>Object.keys(obj).map(k=>`<option value="${k}" ${k===selected?'selected':''}>${k}</option>`).join('');
+  // A choice that was just removed from Settings stays flagged as removed
+  // (it used to quietly switch to another material and change the price).
   document.querySelectorAll('.line-item').forEach(el=>{
-    const vSel=el.querySelector('.li-vinyl'), lSel=el.querySelector('.li-lam'), sSel=el.querySelector('.li-sub');
-    if(vSel){const cur=vSel.value;vSel.innerHTML=optHtml(vinyl,cur);if(!vinyl[cur])vSel.value=Object.keys(vinyl)[0]||'';}
-    if(lSel){const cur=lSel.value;lSel.innerHTML=optHtml(laminate,cur);if(!laminate[cur])lSel.value='No Laminate';}
-    if(sSel){const cur=sSel.value;sSel.innerHTML=optHtml(substrate,cur);if(!substrate[cur])sSel.value='None';}
+    [['.li-vinyl',vinyl],['.li-lam',laminate],['.li-sub',substrate]].forEach(([cls,obj])=>{
+      const sel=el.querySelector(cls);
+      if(sel)setMaterialSelect(sel,obj,sel.value||sel.dataset.missing||'');
+    });
   });
   recalc();
 }
@@ -5015,28 +5032,29 @@ function refreshOpenPricerAfterSettingsSave(){
 // Reports so revenue numbers are correct regardless of which pricer saved
 // the job.
 function calcSavedLine(line, fallbackJobType, rates, vinyl, laminate, substrate){
-  const qty=parseFloat(line.qty)||1;
+  // Same guards as the live pricer (calcLine): qty at least 1, nothing negative.
+  const qty=lineQty(line.qty);
 
   let sqft=0,rawMatCost=0,matTotal=0;
 
   if(line.pricingMode==='flat'){
     if(line.flatSubMode==='unit'){
-      const unitPrice=parseFloat(line.unitPrice)||0;
-      const unitCost=parseFloat(line.unitCost)||0;
+      const unitPrice=nonNeg(line.unitPrice);
+      const unitCost=nonNeg(line.unitCost);
       matTotal=unitPrice*qty;
       rawMatCost=unitCost*qty;
     }else{
-      matTotal=parseFloat(line.totalPrice)||0;
-      rawMatCost=parseFloat(line.totalCost)||0;
+      matTotal=nonNeg(line.totalPrice);
+      rawMatCost=nonNeg(line.totalCost);
     }
   }else{
-    const wIn=parseFloat(line.w)||0, hIn=parseFloat(line.h)||0;
+    const wIn=nonNeg(line.w), hIn=nonNeg(line.h);
     const wFinal=line.wFt?wIn*12:wIn, hFinal=line.hFt?hIn*12:hIn;
     sqft=(wFinal*hFinal/144)*qty;
 
     let subSqft=sqft;
     if(line.subSameSize===false){
-      const swIn=parseFloat(line.subW)||0, shIn=parseFloat(line.subH)||0;
+      const swIn=nonNeg(line.subW), shIn=nonNeg(line.subH);
       const swFinal=line.subWFt?swIn*12:swIn, shFinal=line.subHFt?shIn*12:shIn;
       subSqft=(swFinal*shFinal/144)*qty;
     }
@@ -5056,7 +5074,7 @@ function calcSavedLine(line, fallbackJobType, rates, vinyl, laminate, substrate)
 
   let designCost=0, designHrsTotal=0;
   if(line.designChk){
-    const dHrs=parseFloat(line.designHrs)||0, dMins=parseFloat(line.designMins)||0;
+    const dHrs=nonNeg(line.designHrs), dMins=nonNeg(line.designMins);
     designHrsTotal=dHrs+dMins/60;
     const designLevel=line.designLevel||'standard';
     const dr=rates.designLevels[designLevel]||rates.designLevels.standard;
@@ -5066,10 +5084,10 @@ function calcSavedLine(line, fallbackJobType, rates, vinyl, laminate, substrate)
   let installCost=0, installHrsTotal=0, installCostBasis=0;
   if(line.installChk){
     if(line.installMode==='flat'){
-      installCost=parseFloat(line.installFlatPrice)||0;
-      installCostBasis=parseFloat(line.installFlatCost)||0;
+      installCost=nonNeg(line.installFlatPrice);
+      installCostBasis=nonNeg(line.installFlatCost);
     }else{
-      const iHrs=parseFloat(line.installHrs)||0, iMins=parseFloat(line.installMins)||0;
+      const iHrs=nonNeg(line.installHrs), iMins=nonNeg(line.installMins);
       installHrsTotal=iHrs+iMins/60;
       const installLevel=line.installLevel||'standard';
       const ir=rates.installLevels[installLevel]||rates.installLevels.standard;
@@ -5134,6 +5152,123 @@ function getLaminate(){const pd=getPricingData();return pd.laminate||DEFAULT_LAM
 function getSubstrate(){const pd=getPricingData();return pd.substrate||DEFAULT_SUBSTRATE;}
 function getQQPresets(){const pd=getPricingData();return pd.qqPresets||DEFAULT_QQ_PRESETS;}
 
+// ── Input guards (live pricer and saved jobs use the same rules) ────────
+// No negative prices, sizes or hours; qty below 1 counts as 1.
+function nonNeg(v){ return Math.max(0,parseFloat(v)||0); }
+function lineQty(v){ const q=parseFloat(v); return q>=1?q:1; }
+// A discount can't be negative or more than the job: a typo like "-40" used
+// to quietly ADD $40, and "150%" made the total negative.
+function discountAmount(dtype,dval,sub){
+  const v=nonNeg(dval), base=Math.max(0,sub);
+  if(dtype==='pct')return base*Math.min(100,v)/100;
+  if(dtype==='flat')return Math.min(v,base);
+  return 0;
+}
+function shownDiscountVal(dtype,dval){ const v=nonNeg(dval); return dtype==='pct'?Math.min(100,v):v; }
+// Leaving a number box in the pricer: negatives become 0, qty below 1
+// becomes 1 and a % discount over 100 becomes 100, so the box shows what is
+// actually charged.
+document.addEventListener('change',e=>{
+  const t=e.target;
+  if(!t||t.tagName!=='INPUT'||t.type!=='number'||!t.closest('#pricerOverlay'))return;
+  const v=parseFloat(t.value);
+  let fixed=null;
+  if(t.classList.contains('li-qty')){ if(!(v>=1))fixed='1'; }
+  else if(v<0)fixed='0';
+  else if(t.id==='discVal'&&document.getElementById('discType').value==='pct'&&v>100)fixed='100';
+  if(fixed===null)return;
+  t.value=fixed; syncTrueInches(t); recalc();
+});
+
+// ── Estimate numbers ──────────────────────────────────────────────────
+// The next number is one above the highest number anywhere: every job's
+// project number, the digits at the end of every Est # (typed-in ones too),
+// and the highest this device ever issued, so deleting the newest job
+// doesn't hand its number to the next client.
+const LAST_NUM_KEY='inkable_highest_est_num';
+function estDigits(s){ const m=/(\d+)\s*$/.exec(String(s||'')); return m?parseInt(m[1],10):0; }
+function nextProjectNum(){
+  let hi=0; try{ hi=parseInt(localStorage.getItem(LAST_NUM_KEY))||0; }catch(e){}
+  getProjects().forEach(p=>{ hi=Math.max(hi,parseInt(p.projectNum)||0,estDigits(p.estNo)); });
+  return hi?hi+1:1000;
+}
+function noteIssuedNum(...nums){
+  try{ const cur=parseInt(localStorage.getItem(LAST_NUM_KEY))||0, hi=Math.max(cur,...nums.map(n=>parseInt(n)||0)); if(hi>cur)localStorage.setItem(LAST_NUM_KEY,String(hi)); }catch(e){}
+}
+// Invoice # follows the Est # (EST-1006 → INV-1006), also when the Est # was typed in.
+function invNoForEst(estNo,projNum){ const m=/(\d+)\s*$/.exec(String(estNo||'')); return 'INV-'+(m?m[1]:projNum); }
+// The server took the next free Est # because this one was already used by a
+// job saved on another device (both made the same number before syncing), or
+// kept the job's own number when it was renamed into one that's taken.
+function applyServerRenumber(id,r){
+  if(!r||!r.estNo)return;
+  try{
+    const list=JSON.parse(localStorage.getItem(SAVED_KEY)||'[]'), p=list.find(x=>x.id===id);
+    if(p){ p.estNo=r.estNo; p.projectNum=r.projectNum; if(p.state?.form){ p.state.form.estNo=r.estNo; p.state.form.projectNum=r.projectNum; p.state.form.invNo=r.invNo; } localStorage.setItem(SAVED_KEY,JSON.stringify(list)); }
+  }catch(e){}
+  noteIssuedNum(r.projectNum,estDigits(r.estNo));
+  if(pricerIsOpen()&&pricerState.editingId===id){
+    const wasClean=!pricerHasUnsavedChanges();
+    pricerState.projectNum=String(r.projectNum); pricerState.estNo=r.estNo; pricerState.invNo=r.invNo;
+    document.getElementById('pricerEstNo').value=r.estNo;
+    document.getElementById('pricerProjNum').textContent='Project '+r.projectNum;
+    syncJobIdentity();
+    if(wasClean)pricerCleanState=pricerSnapshot();
+  }
+  showToast('⚠️','Estimate number changed',`${r.from} was already used by a job saved on another device, so this estimate ${r.kept?'keeps':'is now'} ${r.estNo}. If you already sent its PDF, send the new one.`,{color:'var(--amber)',duration:15000});
+  renderProjects();
+}
+
+// ── Material dropdowns ────────────────────────────────────────────────
+function escapeAttr(s){ return escapeHtml(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+// Fills a material / laminate / substrate dropdown with a saved choice. A
+// choice that's no longer in Settings stays on screen as removed and must be
+// picked again before saving: it used to quietly become another material, so
+// the price on screen and the saved price were different.
+function setMaterialSelect(sel,obj,name){
+  if(!sel)return;
+  const missing=!Object.prototype.hasOwnProperty.call(obj,name);
+  sel.innerHTML=(missing?`<option value="" disabled selected>⚠ ${name?escapeHtml(name)+' was removed from Settings':'Nothing picked'} — pick one</option>`:'')+
+    Object.keys(obj).map(k=>`<option value="${escapeAttr(k)}"${!missing&&k===name?' selected':''}>${escapeHtml(k)}</option>`).join('');
+  if(missing)sel.selectedIndex=0;
+  sel.dataset.missing=missing?(name||''):'';
+  sel.style.borderColor=missing?'var(--red)':'';
+  if(missing)sel.addEventListener('change',()=>{ sel.style.borderColor=''; },{once:true});
+}
+// Save is blocked while a by-material item has no valid material, laminate
+// or substrate (the price would leave it out).
+function missingMaterialMessage(){
+  const lists=[['.li-vinyl',getVinyl(),'a material'],['.li-lam',getLaminate(),'a laminate'],['.li-sub',getSubstrate(),'a substrate']];
+  for(const el of document.querySelectorAll('.line-item')){
+    if((el.dataset.pricingMode||'material')==='flat')continue;
+    for(const [cls,obj,what] of lists){
+      const sel=el.querySelector(cls);
+      if(!sel||Object.prototype.hasOwnProperty.call(obj,sel.value))continue;
+      const item=(el.querySelector('.line-num')?.textContent||'this item').replace(/^Item/,'item');
+      return `Pick ${what} for ${item}`+(sel.dataset.missing?` — ${sel.dataset.missing} was removed from Settings.`:'.');
+    }
+  }
+  return '';
+}
+
+// ── Unsaved changes in the pricer ─────────────────────────────────────
+// What the pricer would save, as text: compared with the copy taken when the
+// estimate was opened or last saved, so leaving with unsaved work asks first.
+let pricerCleanState='';
+function pricerSnapshot(){
+  try{
+    return JSON.stringify([collectPricerData(),document.getElementById('pricerEstNo').value,document.getElementById('pricerDate').value,
+      document.getElementById('pricerNotes').value,document.getElementById('pricerTerms').value,pricerState.clientId]);
+  }catch(e){ return ''; }
+}
+function pricerIsOpen(){ return !!document.getElementById('pricerOverlay')?.classList.contains('open'); }
+function pricerHasUnsavedChanges(){ return pricerIsOpen()&&(pricerCleanState===null||pricerSnapshot()!==pricerCleanState); }
+function pricerCanLeave(){
+  if(!pricerHasUnsavedChanges())return true;
+  return !!confirm('This estimate has changes that are not saved. Leave without saving them?');
+}
+window.addEventListener('beforeunload',e=>{ if(pricerHasUnsavedChanges()){ e.preventDefault(); e.returnValue=''; } });
+
 // ── Open / Close pricer ───────────────────────────────────────────────
 function openPricer(projNum, clientId){
   const clients=getClients();
@@ -5160,7 +5295,7 @@ function openPricer(projNum, clientId){
   document.getElementById('pricerProjNum').textContent='Project '+projNum;
   document.getElementById('pricerClientName').textContent=cl?cl.name:'No Client';
   document.getElementById('pricerEstNo').value=pricerState.estNo;
-  document.getElementById('pricerDate').value=pricerState.date;
+  document.getElementById('pricerDate').value=storedDateToInput(); // date picker: today
   syncJobIdentity();
   // New estimates start with your saved default notes/terms (Settings → Business).
   const biz=getBusinessInfo();
@@ -5193,6 +5328,7 @@ function openPricer(projNum, clientId){
   lineCounter=0;
   // Add first line item and build dropdowns
   addLineItem();
+  pricerCleanState=pricerSnapshot(); // a blank estimate: nothing to lose yet
   // Defer recalc to ensure DOM is fully rendered
   setTimeout(recalc, 0);
 }
@@ -5212,7 +5348,10 @@ function loadPricerFromSaved(project){
     editingId:project.id,
     taxRate:(()=>{ try{ const r=JSON.parse(f.pricerData||'{}').taxRate; return r!=null?r:8.25; }catch(e){ return 8.25; } })(),
     projectNum:String(project.projectNum),
-    clientId:f.clientId||'',
+    // Keep the client link only if that client still exists. A deleted
+    // client's id made every later save fail on the server (lost edits);
+    // the job keeps the name on file instead.
+    clientId:cl?(f.clientId||''):'',
     clientName:cl?cl.name:(f.billingName||''),
     jobType:'digital',
     lineItems:[],
@@ -5228,7 +5367,8 @@ function loadPricerFromSaved(project){
   document.getElementById('pricerProjNum').textContent='Project '+project.projectNum;
   document.getElementById('pricerClientName').textContent=cl?cl.name:(f.billingName||'No Client');
   document.getElementById('pricerEstNo').value=pricerState.estNo;
-  document.getElementById('pricerDate').value=pricerState.date;
+  // Date picker shows the job's own date (left empty if it can't be read, so Save asks for one).
+  document.getElementById('pricerDate').value=project.savedAt&&!isNaN(new Date(project.savedAt))?storedDateToInput(project.savedAt):'';
   syncJobIdentity();
   document.getElementById('pricerNotes').value=f.notes||'';
   document.getElementById('pricerTerms').value=f.terms||'';
@@ -5261,6 +5401,7 @@ function loadPricerFromSaved(project){
   (pd.lines||[]).forEach(line=>addLineItemFromSaved(line));
   if(!(pd.lines||[]).length) addLineItem(); // never leave the pricer with zero items
 
+  pricerCleanState=pricerSnapshot(); // as saved: nothing to lose yet
   setTimeout(recalc,0);
 }
 
@@ -5282,9 +5423,15 @@ function addLineItemFromSaved(line){
     toggleVehicleInfo(el.id);
   }
 
-  // Material fields (populated regardless of mode — harmless if hidden)
-  if(line.vinyl)el.querySelector('.li-vinyl').value=line.vinyl;
-  if(line.lam)el.querySelector('.li-lam').value=line.lam;
+  // Material fields (populated regardless of mode — harmless if hidden). On a
+  // by-material item, a choice that's no longer in Settings shows as removed
+  // and has to be picked again before saving.
+  const byMaterial=line.pricingMode!=='flat';
+  [['.li-vinyl',getVinyl(),line.vinyl],['.li-lam',getLaminate(),line.lam||'No Laminate'],['.li-sub',getSubstrate(),line.sub||'None']].forEach(([cls,obj,name])=>{
+    const sel=el.querySelector(cls);
+    if(byMaterial)setMaterialSelect(sel,obj,name);
+    else if(Object.prototype.hasOwnProperty.call(obj,name))sel.value=name;
+  });
   el.querySelector('.li-w').value=line.w||'';
   el.querySelector('.li-h').value=line.h||'';
   applyDimUnit(el.querySelector('.li-w')?.closest('.line-field'),'li-w-unit',line.wFt);
@@ -5298,12 +5445,9 @@ function addLineItemFromSaved(line){
   [el.querySelector('.li-w'),el.querySelector('.li-h')].forEach(inp=>{
     if(inp&&inp.value!=='')inp.value=Math.round(parseFloat(inp.value)*1000)/1000;
   });
-  el.querySelector('.li-qty').value=line.qty||'1';
+  el.querySelector('.li-qty').value=String(lineQty(line.qty)); // what is charged (below 1 counts as 1)
 
-  if(line.sub){
-    el.querySelector('.li-sub').value=line.sub;
-    onSubstrateChange(el.id);
-  }
+  if(el.querySelector('.li-sub').value!=='None')onSubstrateChange(el.id); // show its size options
   if(line.subSameSize===false){
     el.querySelector('.li-sub-samesize').checked=false;
     toggleSubSize(el.id);
@@ -5362,7 +5506,9 @@ function addLineItemFromSaved(line){
 }
 
 function closePricer(){
+  if(!pricerCanLeave())return false; // unsaved changes: ask first ("← Projects" and Escape)
   document.getElementById('pricerOverlay').classList.remove('open');
+  return true;
 }
 
 // ── Job type ──────────────────────────────────────────────────────────
@@ -5373,9 +5519,10 @@ function addLineItem(){
   const vinyl=getVinyl();
   const laminate=getLaminate();
   const substrate=getSubstrate();
-  const vinylOpts=Object.keys(vinyl).map(k=>`<option value="${k}">${k}</option>`).join('');
-  const lamOpts=Object.keys(laminate).map(k=>`<option value="${k}" ${k==='No Laminate'?'selected':''}>${k}</option>`).join('');
-  const subOpts=Object.keys(substrate).map(k=>`<option value="${k}" ${k==='None'?'selected':''}>${k}</option>`).join('');
+  // Names escaped: a material like 1/8" Acrylic used to become "1/8" here and be priced at $0.
+  const vinylOpts=Object.keys(vinyl).map(k=>`<option value="${escapeAttr(k)}">${escapeHtml(k)}</option>`).join('');
+  const lamOpts=Object.keys(laminate).map(k=>`<option value="${escapeAttr(k)}" ${k==='No Laminate'?'selected':''}>${escapeHtml(k)}</option>`).join('');
+  const subOpts=Object.keys(substrate).map(k=>`<option value="${escapeAttr(k)}" ${k==='None'?'selected':''}>${escapeHtml(k)}</option>`).join('');
 
   const el=document.createElement('div');
   el.className='line-item';
@@ -5656,12 +5803,21 @@ function syncTrueInches(input){
 // would still drift the next time the job was reopened.
 function getPreciseSaveValue(input){
   if(!input)return '';
-  const trueInches=parseFloat(input.dataset.trueInches);
-  if(isNaN(trueInches))return input.value||'';
   const field=input.closest('.line-field');
   const groupClass=Object.keys(DIM_UNIT_GROUPS).find(g=>DIM_UNIT_GROUPS[g]==='.'+input.className);
   const isFt=groupClass?fieldIsFt(field,groupClass):false;
+  const trueInches=exactInches(input,isFt);
+  if(trueInches===null)return input.value||'';
   return isFt?(trueInches/12):trueInches;
+}
+// The exact inches behind a size box, as long as it still matches the number
+// the box shows (feet are shown rounded to 3 decimals). Null when there's no
+// exact value, or the box was changed some other way than typing. The live
+// price (getDimIn) and the save both use this, so they always agree.
+function exactInches(input,isFt){
+  const exact=parseFloat(input.dataset.trueInches), shown=parseFloat(input.value);
+  if(isNaN(exact)||isNaN(shown))return null;
+  return Math.abs((isFt?shown*12:shown)-exact)<0.01?exact:null;
 }
 
 function setDimUnit(btn){
@@ -5812,10 +5968,16 @@ function applyInstallSuggestion(lineId){
 
 // ── Calculations ──────────────────────────────────────────────────────
 function getDimIn(input, lineEl, dim){
-  const v=parseFloat(input.value)||0;
   const groupClass=dim==='w'?'li-w-unit':dim==='h'?'li-h-unit':dim==='sub-w'?'li-subw-unit':'li-subh-unit';
   const ftBtn=lineEl.querySelector('.'+groupClass+'[data-unit="ft"]');
-  return ftBtn&&ftBtn.classList.contains('active')?v*12:v;
+  const isFt=!!(ftBtn&&ftBtn.classList.contains('active'));
+  // The exact inches typed (kept when switching in/ft), not the number shown
+  // in ft, which is rounded to 3 decimals: switching units used to change the
+  // price by a few cents, so the downloaded PDF and the saved total differed.
+  const exact=exactInches(input,isFt);
+  if(exact!==null)return Math.max(0,exact);
+  const v=nonNeg(input.value);
+  return isFt?v*12:v;
 }
 
 function calcLine(el){
@@ -5824,7 +5986,7 @@ function calcLine(el){
   const substrate=getSubstrate();
   const rates=getRates();
 
-  const qty=parseFloat(el.querySelector('.li-qty')?.value)||1;
+  const qty=lineQty(el.querySelector('.li-qty')?.value); // below 1 counts as 1, same as saved jobs
   const pricingMode=el.dataset.pricingMode||'material';
 
   let sqft=0,subSqft=0,subSameSize=true,subThickness='',vinylName='',lamName='',subName='',rawMatCost=0,matTotal=0;
@@ -5835,19 +5997,21 @@ function calcLine(el){
     // being marked up.
     const flatSubMode=el.dataset.flatSubMode||'total';
     if(flatSubMode==='unit'){
-      const unitPrice=parseFloat(el.querySelector('.li-unit-price')?.value)||0;
-      const unitCost=parseFloat(el.querySelector('.li-unit-cost')?.value)||0;
+      const unitPrice=nonNeg(el.querySelector('.li-unit-price')?.value);
+      const unitCost=nonNeg(el.querySelector('.li-unit-cost')?.value);
       matTotal=unitPrice*qty;
       rawMatCost=unitCost*qty;
     }else{
       // One lump sum for the whole batch — e.g. "50 brochures from the
       // vendor for $30 total." Qty is just descriptive here, not multiplied.
-      matTotal=parseFloat(el.querySelector('.li-total-price')?.value)||0;
-      rawMatCost=parseFloat(el.querySelector('.li-total-cost')?.value)||0;
+      matTotal=nonNeg(el.querySelector('.li-total-price')?.value);
+      rawMatCost=nonNeg(el.querySelector('.li-total-cost')?.value);
     }
   }else{
-    vinylName=el.querySelector('.li-vinyl')?.value||Object.keys(vinyl)[0]||'';
-    lamName=el.querySelector('.li-lam')?.value||'No Laminate';
+    // A removed material (empty pick) costs nothing here AND in the saved
+    // total — same rule both places; Save asks for a pick first.
+    vinylName=el.querySelector('.li-vinyl')?.value||'';
+    lamName=el.querySelector('.li-lam')?.value||'';
     subName=el.querySelector('.li-sub')?.value||'None';
     const wEl=el.querySelector('.li-w');
     const hEl=el.querySelector('.li-h');
@@ -5886,8 +6050,8 @@ function calcLine(el){
   const designLevel=el.dataset.designLevel||'standard';
   let designCost=0, designHrsTotal=0;
   if(designChk&&designChk.checked){
-    const dHrs=parseFloat(el.querySelector('.li-design-hrs')?.value)||0;
-    const dMins=parseFloat(el.querySelector('.li-design-mins')?.value)||0;
+    const dHrs=nonNeg(el.querySelector('.li-design-hrs')?.value);
+    const dMins=nonNeg(el.querySelector('.li-design-mins')?.value);
     designHrsTotal=dHrs+(dMins/60);
     const dr=rates.designLevels[designLevel]||rates.designLevels.standard;
     designCost=designHrsTotal*dr.rate;
@@ -5902,11 +6066,11 @@ function calcLine(el){
   let installCost=0, installHrsTotal=0, installCostBasis=0;
   if(chk&&chk.checked){
     if(installMode==='flat'){
-      installCost=parseFloat(el.querySelector('.li-install-flat-price')?.value)||0;
-      installCostBasis=parseFloat(el.querySelector('.li-install-flat-cost')?.value)||0;
+      installCost=nonNeg(el.querySelector('.li-install-flat-price')?.value);
+      installCostBasis=nonNeg(el.querySelector('.li-install-flat-cost')?.value);
     }else{
-      const iHrs=parseFloat(el.querySelector('.li-install-hrs')?.value)||0;
-      const iMins=parseFloat(el.querySelector('.li-install-mins')?.value)||0;
+      const iHrs=nonNeg(el.querySelector('.li-install-hrs')?.value);
+      const iMins=nonNeg(el.querySelector('.li-install-mins')?.value);
       installHrsTotal=iHrs+(iMins/60);
       const ir=rates.installLevels[installLevel]||rates.installLevels.standard;
       installCost=installHrsTotal*ir.rate;
@@ -5961,8 +6125,11 @@ function recalc(){
     const isHourlyInstall=(el.dataset.installMode||'hourly')!=='flat';
     if(chk&&chk.checked&&isHourlyInstall&&sqft>0&&suggestBox&&suggestText){
       const suggestedHrs=sqft/(ir.sqftPerHr||100);
-      const sH=Math.floor(suggestedHrs);
-      const sM=Math.round((suggestedHrs-sH)*60/15)*15;
+      // Round the whole time to 15 minutes first, then split it (1.9 h used
+      // to show "1h 60min" and Apply set 1h 45min).
+      const totalMins=Math.round(suggestedHrs*60/15)*15;
+      const sH=Math.floor(totalMins/60);
+      const sM=totalMins%60;
       const label=sH>0?(sH+'h'+(sM>0?' '+sM+'min':'')):(sM+'min');
       suggestText.textContent='~'+label+' for '+sqft.toFixed(1)+' sqft';
       suggestBox.style.display='block';
@@ -5975,33 +6142,31 @@ function recalc(){
 
   // Setup Time — always included (trimming, file prep, printer setup).
   // One per job, not optional, not per item.
-  const setupHrsField=parseFloat(document.getElementById('setupHrs')?.value)||0;
-  const setupMinsField=parseFloat(document.getElementById('setupMins')?.value)||0;
+  const setupHrsField=nonNeg(document.getElementById('setupHrs')?.value);
+  const setupMinsField=nonNeg(document.getElementById('setupMins')?.value);
   const setupHrsTotal=setupHrsField+setupMinsField/60;
   const setupTotal=setupHrsTotal*rates.setupRate;
 
   // Hardware & Misc — flat pass-through, no markup. Charge and "my cost" are
   // tracked separately now so margin doesn't assume you sell these at cost.
-  const hardware=parseFloat(document.getElementById('pricerHardware')?.value)||0;
-  const subs=parseFloat(document.getElementById('pricerSubs')?.value)||0;
+  const hardware=nonNeg(document.getElementById('pricerHardware')?.value);
+  const subs=nonNeg(document.getElementById('pricerSubs')?.value);
   const hardwareTotal=hardware+subs;
-  const hardwareCost=parseFloat(document.getElementById('pricerHardwareCost')?.value)||0;
-  const subsCost=parseFloat(document.getElementById('pricerSubsCost')?.value)||0;
+  const hardwareCost=nonNeg(document.getElementById('pricerHardwareCost')?.value);
+  const subsCost=nonNeg(document.getElementById('pricerSubsCost')?.value);
   const hardwareCostBasis=hardwareCost+subsCost;
 
   // Totals
   const sub=totalMat+totalDesign+totalInstall+setupTotal+hardwareTotal;
   const dtype=document.getElementById('discType')?.value||'none';
-  const dval=parseFloat(document.getElementById('discVal')?.value)||0;
-  let disc=0;
-  if(dtype==='pct')disc=sub*dval/100;
-  if(dtype==='flat')disc=Math.min(dval,sub);
+  const dval=document.getElementById('discVal')?.value;
+  const disc=discountAmount(dtype,dval,sub);
   let taxable=sub-disc;
 
   // Minimum charge — floor applied to the pre-tax subtotal, after
   // discount. Simple on/off toggle, one number for the whole job.
   const minChargeOn=document.getElementById('minChargeChk')?.checked;
-  const minChargeVal=parseFloat(document.getElementById('minChargeVal')?.value)||0;
+  const minChargeVal=nonNeg(document.getElementById('minChargeVal')?.value);
   if(minChargeOn&&taxable<minChargeVal)taxable=minChargeVal;
 
   // Tax exempt — zeroes tax entirely for this job
@@ -6145,38 +6310,10 @@ function escapeHtml(s){
 function updatePricerPreview(){ /* future: update PDF preview */ }
 
 // ── Save project ──────────────────────────────────────────────────────
-function savePricerProject(){
-  const projNum=pricerState.projectNum;
-  const estNo=document.getElementById('pricerEstNo').value||('EST-'+projNum);
-  const jobName=document.getElementById('pricerJobName').value||'Unnamed Job';
-  const list=getProjects();
-  // Which job is this? The one that was opened (or already saved once in
-  // this session) — tracked by id, not by Est #. Matching by Est # meant
-  // renaming the Est # created a duplicate job, and typing an Est # that
-  // another job already uses silently overwrote THAT job.
-  let existing=pricerState.editingId?list.findIndex(p=>p.id===pricerState.editingId):-1;
-  const clash=list.find(p=>p.estNo===estNo&&p.id!==pricerState.editingId);
-  if(clash){
-    const who=getClients().find(c=>c.id===clash.clientId)?.name||clash.state?.form?.billingName||'another job';
-    alert(`${estNo} is already used by ${who}. Change the Est # before saving, so the two jobs don't get mixed up.`);
-    return false;
-  }
-  // Reuse the existing project's id when updating in place — a fresh id
-  // every save would silently orphan its status/tags/notes/payments/PDF
-  // snapshots, since those are all keyed by this id.
-  const id=existing>=0?list[existing].id:'proj_'+Date.now()+'_'+Math.floor(Math.random()*100000);
-  pricerState.editingId=id;
-
-  // Build minimal state object compatible with old tool format
-  const state={form:{
-    jobName,estNo,
-    invNo:'INV-'+projNum,
-    projectNum:projNum,
-    clientId:pricerState.clientId,
-    billingName:pricerState.clientName,
-    notes:document.getElementById('pricerNotes').value,
-    terms:document.getElementById('pricerTerms').value,
-    pricerData:JSON.stringify({
+// Everything the pricer saves about a job's pricing (also used to tell
+// whether the open estimate has unsaved changes).
+function collectPricerData(){
+  return{
       lines:Array.from(document.querySelectorAll('.line-item')).map(el=>({
         desc:el.querySelector('.line-desc')?.value||'',
         vehicleInfo:el.querySelector('.li-vehicle-info')?.value||'',
@@ -6227,26 +6364,96 @@ function savePricerProject(){
       processingFeeOn:document.getElementById('processingFeeChk')?.checked!==false,
       taxRate:pricerState.taxRate??getRates().taxRate,
       depositPct:(()=>{ const v=parseFloat(document.getElementById('depositPctInput')?.value); return v>0?Math.min(100,v):getRates().depositPct; })(),
+  };
+}
+
+// What the estimate/invoice PDFs print, minus the quote date every save renews.
+function pdfFingerprint(p){
+  const f=p?.state?.form||{}, s={...(f.estimateSummary||{})};
+  delete s.quotedAt;
+  return JSON.stringify([s,f.notes||'',f.terms||'',p?.estNo||'',p?.savedAt||'',f.billingName||'',f.clientId||'']);
+}
+// Re-pricing a job the client accepted online or has paid on: they will be
+// asked to accept the new total, so check with the owner first.
+function confirmRepriceOfCommittedJob(old,newTotal){
+  const fs=old.state?.form?.estimateSummary;
+  const oldTotal=fs&&!isNaN(parseFloat(fs.total))?parseFloat(fs.total):getProjectAmount(old);
+  if(Math.abs(newTotal-oldTotal)<0.01)return true;
+  const paid=getAmountPaid(old.id), acc=getEstimateAcceptance(old.id);
+  if(!(paid>0.005)&&!acc)return true;
+  const who=acc?.name||getClients().find(c=>c.id===old.clientId)?.name||old.state?.form?.billingName||'The client';
+  const owe=newTotal-paid;
+  const msg=`${old.estNo||'This job'}: the total changes from ${fmt(oldTotal)} to ${fmt(newTotal)}.\n\n`+
+    (acc?`${who} accepted ${fmt(oldTotal)} online`+(paid>0.005?` and has paid ${fmt(paid)}.`:'.'):`${who} has paid ${fmt(paid)} so far.`)+
+    `\nIf you save, they will be asked to accept the new total of ${fmt(newTotal)}`+
+    (owe>0.005?`, and will then owe ${fmt(owe)}.`:owe<-0.005?`. They have already paid ${fmt(-owe)} more than that (a refund would be due).`:', and will then owe nothing more.')+
+    '\n\nSave the new price?';
+  return !!confirm(msg);
+}
+// The latest save of each job to the server, so a PDF for that job is only
+// sent after the job itself is there.
+const lastProjectPush={};
+
+function savePricerProject(){
+  const projNum=pricerState.projectNum;
+  const estNo=document.getElementById('pricerEstNo').value||('EST-'+projNum);
+  const jobName=document.getElementById('pricerJobName').value||'Unnamed Job';
+  const list=getProjects();
+  // A by-material item whose material was removed from Settings: pick one first.
+  const missingMat=missingMaterialMessage();
+  if(missingMat){ alert(missingMat); return false; }
+  // The job's date comes from the pricer's Date picker (which shows the
+  // original date when a job is reopened). Re-saving used to reset it to
+  // today, which moved an old job's costs into the current Reports period
+  // and reset its "sitting for X days" reminder. Read as a local date
+  // ("2026-10-01" used to be saved as Sep 30) and a mistyped year is refused.
+  const dateVal=(document.getElementById('pricerDate')?.value||'').trim();
+  const dm=/^(\d{4})-(\d{2})-(\d{2})$/.exec(dateVal);
+  if(!dm){ alert('Pick the estimate date: the Date box is empty or not a full date.'); return false; }
+  const thisYear=new Date().getFullYear(); // typing "26" as the year gives 0026; old typos gave 2001
+  if(+dm[1]<thisYear-10||+dm[1]>thisYear+2){ alert(`Check the estimate date: the year ${dm[1]} doesn't look right.`); return false; }
+  const savedAt=inputDateToStored(dateVal);
+  // Which job is this? The one that was opened (or already saved once in
+  // this session) — tracked by id, not by Est #. Matching by Est # meant
+  // renaming the Est # created a duplicate job, and typing an Est # that
+  // another job already uses silently overwrote THAT job.
+  let existing=pricerState.editingId?list.findIndex(p=>p.id===pricerState.editingId):-1;
+  const clash=list.find(p=>p.estNo===estNo&&p.id!==pricerState.editingId);
+  if(clash){
+    const who=getClients().find(c=>c.id===clash.clientId)?.name||clash.state?.form?.billingName||'another job';
+    alert(`${estNo} is already used by ${who}. Change the Est # before saving, so the two jobs don't get mixed up.`);
+    return false;
+  }
+  // Reuse the existing project's id when updating in place — a fresh id
+  // every save would silently orphan its status/tags/notes/payments/PDF
+  // snapshots, since those are all keyed by this id. That includes a job
+  // that is briefly missing from this device's list (a sync landing during
+  // the save): a new id there made a second copy of the job.
+  const id=existing>=0?list[existing].id:(pricerState.editingId||'proj_'+Date.now()+'_'+Math.floor(Math.random()*100000));
+  const old=existing>=0?list[existing]:null;
+
+  // Build minimal state object compatible with old tool format
+  const state={form:{
+    jobName,estNo,
+    invNo:invNoForEst(estNo,projNum),
+    projectNum:projNum,
+    clientId:pricerState.clientId,
+    billingName:pricerState.clientName,
+    notes:document.getElementById('pricerNotes').value,
+    terms:document.getElementById('pricerTerms').value,
+    pricerData:JSON.stringify({...collectPricerData(),
       // Every save is a (re-)quote: the validity period starts now.
       quotedAt:new Date().toISOString(),
       validDays:getRates().estimateValidDays,
     }),
   }};
 
-  // The job's date comes from the pricer's Date field (which shows the
-  // original date when a job is reopened). Re-saving used to reset it to
-  // today, which moved an old job's costs into the current Reports period
-  // and reset its "sitting for X days" reminder.
-  const dateField=(document.getElementById('pricerDate')?.value||'').trim();
-  const savedAt=!isNaN(new Date(dateField))&&dateField
-    ?new Date(dateField).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})
-    :(existing>=0&&list[existing].savedAt)||new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
   const entry={id,name:jobName,estNo,projectNum:projNum,clientId:pricerState.clientId,
     savedAt,
     docType:'estimate',state,
     // Preserve any PDFs already exported for this job across re-saves —
-    // editing the pricing shouldn't silently wipe out what was already sent.
-    exportedPdfs:existing>=0?(list[existing].exportedPdfs||{}):{}};
+    // unless what they print changed (see below).
+    exportedPdfs:old?(old.exportedPdfs||{}):{}};
 
   // A compact, display-ready snapshot of the estimate — used by the public
   // client review page, which has no access to the rates/materials tables
@@ -6270,13 +6477,32 @@ function savePricerProject(){
     console.warn('Could not build the client-facing estimate summary for this job:',err);
   }
 
+  const newTotal=parseFloat(entry.state.form.estimateSummary?.total);
+  // The guards above keep the total at $0 or more ($0 is fine, e.g. a
+  // warranty redo); refuse anything below, just in case.
+  if(newTotal<0){ alert('The total is below $0.00. Check the discount and the prices before saving.'); return false; }
+  // Re-pricing a job the client accepted online or has paid on: say what
+  // changes for them before saving.
+  if(old&&!isNaN(newTotal)&&!confirmRepriceOfCommittedJob(old,newTotal))return false;
+  // The stored estimate/invoice PDFs show the old version: drop them when
+  // anything they print changed, so "View Estimate / View Invoice" rebuilds
+  // them from this save instead of showing an old price.
+  const dropPdfs=old&&pdfFingerprint(old)!==pdfFingerprint(entry)?['estimate','invoice']:[];
+  if(dropPdfs.length){ entry.exportedPdfs={...entry.exportedPdfs}; dropPdfs.forEach(t=>delete entry.exportedPdfs[t]); }
+
+  pricerState.editingId=id;
+  noteIssuedNum(projNum,estDigits(estNo));
   const rawList=JSON.parse(localStorage.getItem(SAVED_KEY)||'[]');
   if(existing>=0){rawList[existing]=entry;}
   else{rawList.unshift(entry);}
   // Server first: if this device's storage is full, the save must still
   // reach the cloud, and the owner must hear about it instead of the error
-  // silently stopping everything below.
-  syncProjectToServer(entry);
+  // silently stopping everything below. If another device already saved a
+  // job with this Est #, the server takes the next free number and says so
+  // (also for a save that had to wait offline) instead of making a duplicate.
+  const body={...entry,onEstClash:'renumber',minNextNum:nextProjectNum()};
+  if(dropPdfs.length)body.dropPdfs=dropPdfs;
+  lastProjectPush[id]=cloudPush('/projects','POST',body).then(saved=>{ if(saved&&saved.renumbered)applyServerRenumber(id,saved.renumbered); });
   try{
     localStorage.setItem(SAVED_KEY,JSON.stringify(rawList));
   }catch(err){
@@ -6302,10 +6528,10 @@ function savePricerProject(){
         designHrs+=calc.designHrsTotal;
         installCostBasisTotal+=calc.installCostBasis;
       });
-      const setupHrs=(parseFloat(pd.setupHrs)||0)+(parseFloat(pd.setupMins)||0)/60;
+      const setupHrs=nonNeg(pd.setupHrs)+nonNeg(pd.setupMins)/60;
       const designCost=designHrs*rates.myCostDesign;
       const setupCost=setupHrs*rates.myCostSetup;
-      const hardwareCost=(parseFloat(pd.hardwareCost)||0)+(parseFloat(pd.subsCost)||0);
+      const hardwareCost=nonNeg(pd.hardwareCost)+nonNeg(pd.subsCost);
 
       const seedDate=new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
       const seeds=[];
@@ -6325,12 +6551,23 @@ function savePricerProject(){
       addSeed('Hardware',hardwareCost,'hardware');
 
       if(seeds.length){
-        setJobMeta(id,{...existingMeta,expenses:[...(existingMeta.expenses||[]),...seeds]});
+        // Added once the job itself has reached the server: the expense list
+        // belongs to the job, and sent at the same moment it could arrive
+        // first and be refused (it then only went through at the next sync).
+        const addSeeds=()=>{
+          const cur=getJobMeta(id);
+          if((cur.expenses||[]).some(e=>e.source==='pricer'))return; // a quick second save already added them
+          setJobMeta(id,{...cur,expenses:[...(cur.expenses||[]),...seeds]});
+          renderSales();
+        };
+        lastProjectPush[id].then(addSeeds,addSeeds);
       }
     }catch(err){
       console.warn('Could not seed cost breakdown for this job:',err);
     }
   }
+
+  pricerCleanState=pricerSnapshot(); // everything on screen is saved now
 
   // Flash save button
   ['pricerSaveBtn','pricerSaveBtnMobile'].forEach(bid=>{
@@ -6362,10 +6599,26 @@ function inputDateToStored(v){
   return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
 }
 
+// Sends one PDF to the server, added to the job that's already there: a
+// PDF-only update (id + exportedPdfs, no job data), so it can't overwrite
+// newer changes or bring back a job deleted on another device (the server
+// only updates a job it already has). Not queued when offline: the bytes
+// can't be kept on the device anyway, and a missing PDF is simply rebuilt
+// from the saved numbers the next time it's viewed.
+async function pushPdfSnapshot(projectId,type,base64,savedAt){
+  try{ await lastProjectPush[projectId]; }catch(e){} // the job itself first
+  try{
+    const token=localStorage.getItem(AUTH_TOKEN_KEY);
+    const headers={'Content-Type':'application/json'};
+    if(token)headers['Authorization']='Bearer '+token;
+    const res=await fetch(CLOUD_API_BASE+'/projects',{method:'POST',headers,body:JSON.stringify({id:projectId,pdfsOnly:true,exportedPdfs:{[type]:{data:base64,savedAt}}})});
+    if(!res.ok)console.warn('PDF copy not stored in the cloud (server returned '+res.status+'); it will be rebuilt when viewed.');
+  }catch(err){
+    console.warn('PDF copy not stored in the cloud; it will be rebuilt when viewed.',err);
+  }
+}
 // Store the actual exported PDF bytes against the project — so "View
-// Estimate/Invoice" later shows exactly what was generated/sent, not a
-// fresh regeneration that could differ if rates changed since. Purely
-// client-side (browser localStorage), no server involved.
+// Estimate/Invoice" later shows exactly what was generated/sent.
 function savePdfSnapshot(projectId,type,base64){
   const list=getProjects();
   const idx=list.findIndex(p=>p.id===projectId);
@@ -6375,10 +6628,7 @@ function savePdfSnapshot(projectId,type,base64){
 
   // The actual PDF bytes go to the cloud, never into local storage — this
   // is the real fix for the quota problem, not just catching the error.
-  // Build the full record (WITH the bytes) only in memory, for this one
-  // sync call.
-  const fullForSync={...list[idx],exportedPdfs:{...list[idx].exportedPdfs,[type]:{data:base64,savedAt}}};
-  syncProjectToServer(fullForSync);
+  pushPdfSnapshot(projectId,type,base64,savedAt);
 
   // What actually gets written to this device just remembers that a PDF
   // exists and when — enough to show "View Estimate" as available, without
@@ -6678,20 +6928,18 @@ function gatherPricerPDFData(){
   const totalInstall=lineData.reduce((s,l)=>s+l.installCost,0);
   const designTotal=lineData.reduce((s,l)=>s+l.designCost,0);
   const rates=getRates();
-  const setupHrsTotal=(parseFloat(document.getElementById('setupHrs')?.value)||0)+
-    (parseFloat(document.getElementById('setupMins')?.value)||0)/60;
+  const setupHrsTotal=nonNeg(document.getElementById('setupHrs')?.value)+
+    nonNeg(document.getElementById('setupMins')?.value)/60;
   const setupTotal=setupHrsTotal*rates.setupRate;
-  const hardwareTotal=(parseFloat(document.getElementById('pricerHardware')?.value)||0)+
-    (parseFloat(document.getElementById('pricerSubs')?.value)||0);
+  const hardwareTotal=nonNeg(document.getElementById('pricerHardware')?.value)+
+    nonNeg(document.getElementById('pricerSubs')?.value);
   const sub=totalMat+designTotal+totalInstall+setupTotal+hardwareTotal;
   const dtype=document.getElementById('discType')?.value||'none';
-  const dval=parseFloat(document.getElementById('discVal')?.value)||0;
-  let disc=0;
-  if(dtype==='pct')disc=sub*dval/100;
-  if(dtype==='flat')disc=Math.min(dval,sub);
+  const dval=shownDiscountVal(dtype,document.getElementById('discVal')?.value);
+  const disc=discountAmount(dtype,dval,sub);
   let taxable=sub-disc;
   const minChargeOn=document.getElementById('minChargeChk')?.checked;
-  const minChargeVal=parseFloat(document.getElementById('minChargeVal')?.value)||0;
+  const minChargeVal=nonNeg(document.getElementById('minChargeVal')?.value);
   let minChargeAdj=0;
   if(minChargeOn&&taxable<minChargeVal){minChargeAdj=minChargeVal-taxable;taxable=minChargeVal;}
   const taxExempt=document.getElementById('taxExemptChk')?.checked;
@@ -6707,10 +6955,9 @@ function gatherPricerPDFData(){
   const jobName=(document.getElementById('pricerJobName')?.value||'').trim()||'Untitled Job';
   const notes=(document.getElementById('pricerNotes')?.value||'').trim();
   const terms=(document.getElementById('pricerTerms')?.value||'').trim();
-  const date=document.getElementById('pricerDate')?.value||
-    new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  const date=inputDateToStored(document.getElementById('pricerDate')?.value); // date picker "2026-10-18" → "Oct 18, 2026"
   const estNo=document.getElementById('pricerEstNo')?.value||('EST-'+pricerState.projectNum);
-  const invNo='INV-'+pricerState.projectNum;
+  const invNo=invNoForEst(estNo,pricerState.projectNum);
 
   const clients=getClients();
   const client=pricerState.clientId?clients.find(c=>c.id===pricerState.clientId):null;
@@ -6751,15 +6998,15 @@ function gatherPricerPDFDataFromSaved(p){
     if(pd.taxRate!=null)taxRate=pd.taxRate;
     if(pd.quotedAt&&pd.validDays){ validDays=pd.validDays; validUntil=estimateValidUntil(pd.quotedAt,pd.validDays); }
     dtype=pd.discType||'none';
-    dval=parseFloat(pd.discVal)||0;
+    dval=shownDiscountVal(dtype,pd.discVal);
     taxExempt=!!pd.taxExempt;
     minCharge=!!pd.minCharge;
     // Defaults to false for jobs saved before this feature existed —
     // never silently add a fee to a job that was priced without it.
     processingFeeOn=!!pd.processingFeeOn;
-    minChargeVal=parseFloat(pd.minChargeVal)||0;
-    hardwareTotal=(parseFloat(pd.hardware)||0)+(parseFloat(pd.subs)||0);
-    const setupHrsTotal=(parseFloat(pd.setupHrs)||0)+(parseFloat(pd.setupMins)||0)/60;
+    minChargeVal=nonNeg(pd.minChargeVal);
+    hardwareTotal=nonNeg(pd.hardware)+nonNeg(pd.subs);
+    const setupHrsTotal=nonNeg(pd.setupHrs)+nonNeg(pd.setupMins)/60;
     setupTotal=setupHrsTotal*rates.setupRate;
     lineData=(pd.lines||[]).map(l=>{
       const calc=calcSavedLine(l,pd.jobType,rates,vinyl,laminate,substrate);
@@ -6773,9 +7020,7 @@ function gatherPricerPDFDataFromSaved(p){
   const totalInstall=lineData.reduce((s,l)=>s+l.installCost,0);
   const designTotal=lineData.reduce((s,l)=>s+l.designCost,0);
   const sub=totalMat+designTotal+totalInstall+setupTotal+hardwareTotal;
-  let disc=0;
-  if(dtype==='pct')disc=sub*dval/100;
-  if(dtype==='flat')disc=Math.min(dval,sub);
+  const disc=discountAmount(dtype,dval,sub);
   let taxable=sub-disc;
   let minChargeAdj=0;
   if(minCharge&&taxable<minChargeVal){minChargeAdj=minChargeVal-taxable;taxable=minChargeVal;}
@@ -6800,6 +7045,25 @@ function gatherPricerPDFDataFromSaved(p){
     estNo:f.estNo||('EST-'+p.projectNum),
     invNo:f.invNo||('INV-'+p.projectNum),
     clientName,clientAddr,clientCityLine,clientPhone};
+}
+
+// "View Estimate / View Invoice": the numbers frozen when the job was saved
+// (the same ones Sales, the client page and Stripe use), not today's rates —
+// an invoice made months later used to show a different total. Only jobs
+// saved before that snapshot existed are still recalculated.
+function savedPDFData(p){
+  const d=gatherPricerPDFDataFromSaved(p); // labels, client, dates, validity, tax rate
+  const s=p.state?.form?.estimateSummary;
+  if(!s||!Array.isArray(s.lineItems)||isNaN(parseFloat(s.total)))return d;
+  const n=v=>parseFloat(v)||0;
+  const lineData=s.lineItems.map(l=>({desc:l.desc||'Item',sqft:n(l.sqft),matTotal:n(l.matTotal)}));
+  // Older snapshots have no minimum-charge row: work it out like the client page does.
+  const minChargeAdj=s.minChargeAdj!=null?n(s.minChargeAdj):Math.max(0,n(s.taxable)-(n(s.sub)-n(s.disc)));
+  return{...d,lineData,totalMat:lineData.reduce((a,l)=>a+l.matTotal,0),
+    setupTotal:n(s.setupTotal),designTotal:n(s.designTotal),totalInstall:n(s.totalInstall),hardwareTotal:n(s.hardwareTotal),
+    sub:n(s.sub),dtype:s.dtype||'none',dval:n(s.dval),disc:n(s.disc),taxable:n(s.taxable),tax:n(s.tax),total:n(s.total),
+    taxExempt:!!s.taxExempt,minChargeAdj,minChargeApplied:minChargeAdj>0.005,
+    processingFee:n(s.processingFee),processingFeeOn:!!s.processingFeeOn};
 }
 
 // ── Regenerate a PDF for an already-saved project (Projects tab menu) ──
@@ -6845,7 +7109,7 @@ async function generateSavedPDF(projectId,type){
     const {jsPDF}=window.jspdf;
     const doc=new jsPDF({unit:'pt',format:'letter'});
     const W=612,H=792,M=40;
-    const d=gatherPricerPDFDataFromSaved(p);
+    const d=savedPDFData(p); // the saved (frozen) numbers
 
     if(type==='invoice') drawInvoicePDF(doc,W,H,M,d);
     else drawEstimatePDF(doc,W,H,M,d);
@@ -6886,6 +7150,24 @@ function generatePricerPDF(type){
   }
 }
 
+// How long the price is good for: the date saved with the job, or for a new
+// estimate from the pricer, N days from today (it's saved with that date).
+function pdfValidity(d){
+  const vDays=d.validDays||getRates().estimateValidDays;
+  return {vDays,vUntil:d.validUntil||estimateValidUntil(new Date().toISOString(),vDays)};
+}
+// Draws already-wrapped lines one at a time. When the next line would go
+// below `bottom`, it starts a new page (onNewPage draws that page's header
+// and border and returns where to continue) and re-applies the text style.
+function drawLinesPaged(doc,lines,x,y,lineH,bottom,onNewPage,style,opts){
+  lines.forEach(t=>{
+    if(y>bottom){ doc.addPage(); y=onNewPage(doc); style(); }
+    doc.text(t,x,y,opts);
+    y+=lineH;
+  });
+  return y;
+}
+
 // ── ESTIMATE PDF (bordered, watermark, light footer) ────────────────────
 // Chrome (border/watermark/logo/title/client header) is a function so it
 // can be redrawn identically on every continuation page, not just page 1.
@@ -6908,7 +7190,9 @@ function drawEstimateChrome(doc,W,H,M,d){
   doc.text('Estimate #: '+d.estNo,W-M,M+47,{align:'right'});
   doc.setFont('helvetica','normal');doc.setTextColor(70);
   doc.text('Date: '+d.date,W-M,M+60,{align:'right'});
-  doc.text('Valid for: 30 Days',W-M,M+73,{align:'right'});
+  // The real date (it said "Valid for: 30 Days" whatever the setting was).
+  const {vUntil}=pdfValidity(d);
+  if(vUntil)doc.text('Valid through: '+vUntil,W-M,M+73,{align:'right'});
 
   let y=M+96;
   doc.setDrawColor(0);doc.setLineWidth(1);
@@ -6934,20 +7218,23 @@ function drawEstimatePDF(doc,W,H,M,d){
   y=drawLineItemsTable(doc,W,M,y,footTop-150,d,(doc)=>drawEstimateChrome(doc,W,H,M,d));
   y=drawTotalsBlock(doc,W,M,y,d,(doc)=>drawEstimateChrome(doc,W,H,M,d));
 
+  // Long notes and terms continue on a new page (same header and border)
+  // instead of running over the footer and off the page.
+  const textBottom=footTop-14, newPage=doc=>drawEstimateChrome(doc,W,H,M,d);
+
   // Notes
   if(d.notes){
+    if(y+32>textBottom){ doc.addPage(); y=newPage(doc); }
     y+=6;
     doc.setFont('helvetica','bold');doc.setFontSize(9.5);doc.setTextColor(0);
     doc.text('NOTES:',M,y);y+=13;
-    doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(50);
-    const nLines=doc.splitTextToSize(d.notes,W-2*M);
-    doc.text(nLines,M,y,{lineHeightFactor:1.4});
-    y+=nLines.length*13+6;
+    const noteStyle=()=>{doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(50);};
+    noteStyle();
+    y=drawLinesPaged(doc,doc.splitTextToSize(d.notes,W-2*M),M,y,12.6,textBottom,newPage,noteStyle)+6;
   }
 
   // How long the price is good for (material prices change).
-  const vDays=d.validDays||getRates().estimateValidDays;
-  const vUntil=d.validUntil||estimateValidUntil(new Date().toISOString(),vDays);
+  const {vDays,vUntil}=pdfValidity(d);
   if(vUntil){
     if(y+30>footTop-20){ doc.addPage(); y=drawEstimateChrome(doc,W,H,M,d); }
     doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(0);
@@ -6959,12 +7246,12 @@ function drawEstimatePDF(doc,W,H,M,d){
   // Terms & Conditions — shown on the Estimate too now, not just the
   // Invoice, so the client sees them BEFORE paying anything, not after.
   if(d.terms){
-    if(y+40>footTop-20){ doc.addPage(); y=drawEstimateChrome(doc,W,H,M,d); }
+    if(y+40>footTop-20){ doc.addPage(); y=newPage(doc); }
     doc.setFont('helvetica','bold');doc.setFontSize(9.5);doc.setTextColor(0);
     doc.text('TERMS & CONDITIONS:',M,y);y+=13;
-    doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(60);
-    const tLines=doc.splitTextToSize(d.terms,W-2*M);
-    doc.text(tLines,M,y,{lineHeightFactor:1.4});
+    const termStyle=()=>{doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(60);};
+    termStyle();
+    drawLinesPaged(doc,doc.splitTextToSize(d.terms,W-2*M),M,y,11.9,textBottom,newPage,termStyle);
   }
 
   // Light footer
@@ -7033,32 +7320,34 @@ function drawInvoicePDF(doc,W,H,M,d){
     });
     y+=8;
   }
+  const footY=H-FOOT_H;
+  // Long notes and terms continue on a new page (same header) instead of
+  // running under the black footer band and off the page.
+  const newPage=doc=>drawInvoiceChrome(doc,W,H,M,d);
   let notesBottomY=billingStartY;
   if(d.notes){
+    const firstPage=doc.getNumberOfPages();
     doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(100);
     doc.text('NOTES',W-M,billingStartY,{align:'right'});
-    doc.setFontSize(9.5);doc.setTextColor(0);
-    const nLines=doc.splitTextToSize(d.notes,180);
-    doc.text(nLines,W-M,billingStartY+14,{align:'right',lineHeightFactor:1.4});
-    // 9.5pt font x 1.4 line-height factor ≈ 13.3pt per wrapped line — this
-    // was previously never measured, so a long note could run past the
-    // fixed fallback below and get drawn over by the table that follows.
-    notesBottomY=billingStartY+14+nLines.length*13.3;
+    // 9.5pt font x 1.4 line height ≈ 13.3pt per wrapped line.
+    const noteStyle=()=>{doc.setFont('helvetica','normal');doc.setFontSize(9.5);doc.setTextColor(0);};
+    noteStyle();
+    notesBottomY=drawLinesPaged(doc,doc.splitTextToSize(d.notes,180),W-M,billingStartY+14,13.3,footY-30,newPage,noteStyle,{align:'right'});
+    if(doc.getNumberOfPages()>firstPage)y=notesBottomY; // continued on a new page: go on below the notes
   }
   y=Math.max(y,billingStartY+40,notesBottomY)+10;
 
-  const footY=H-FOOT_H;
-  y=drawLineItemsTable(doc,W,M,y,footY-170,d,(doc)=>drawInvoiceChrome(doc,W,H,M,d));
-  y=drawTotalsBlock(doc,W,M,y,d,(doc)=>drawInvoiceChrome(doc,W,H,M,d));
+  y=drawLineItemsTable(doc,W,M,y,footY-170,d,newPage);
+  y=drawTotalsBlock(doc,W,M,y,d,newPage);
 
-  // Terms & Conditions — separate from Notes, invoice only
+  // Terms & Conditions — separate from Notes
   if(d.terms){
-    if(y+40>footY-20){ doc.addPage(); y=drawInvoiceChrome(doc,W,H,M,d); }
+    if(y+40>footY-20){ doc.addPage(); y=newPage(doc); }
     doc.setFont('helvetica','bold');doc.setFontSize(9.5);doc.setTextColor(0);
     doc.text('TERMS & CONDITIONS:',M,y);y+=13;
-    doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(60);
-    const tLines=doc.splitTextToSize(d.terms,W-2*M);
-    doc.text(tLines,M,y,{lineHeightFactor:1.4});
+    const termStyle=()=>{doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(60);};
+    termStyle();
+    drawLinesPaged(doc,doc.splitTextToSize(d.terms,W-2*M),M,y,11.9,footY-20,newPage,termStyle);
   }
 
   // Footer black band
@@ -7295,7 +7584,7 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
   if(d.hardwareTotal>0) row('Hardware & Misc',d.hardwareTotal);
   if(d.disc>0) row('Discount',-d.disc,d.dtype==='pct'?'('+d.dval+'%)':null);
   if(d.minChargeApplied&&d.minChargeAdj>0) row('Minimum Job Charge Adj.',d.minChargeAdj);
-  row('Subtotal',d.sub-d.disc);
+  row('Subtotal',d.taxable); // includes the minimum-charge adjustment above, so the rows add up
   row(d.taxExempt?'Sales Tax (Exempt)':'Sales Tax',d.tax,d.taxExempt?null:'('+(d.taxRate??8.25)+'%)');
   if(d.processingFeeOn&&d.processingFee>0) row('Card Processing Fee',d.processingFee);
 
@@ -7480,15 +7769,15 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
           </div>
           <div class="jdc-field">
             <label>Date</label>
-            <input type="text" id="pricerDate"/>
+            <input type="date" id="pricerDate"/>
           </div>
         </div>
         <div class="jdc-field">
           <label>Notes</label>
-          <textarea id="pricerNotes" placeholder="Internal notes or client instructions…"></textarea>
+          <textarea id="pricerNotes" placeholder="Printed on the client's estimate and invoice (private notes go in the job window)…"></textarea>
         </div>
         <div class="jdc-field">
-          <label>Terms &amp; Conditions <span class="jdc-sub">(invoice only)</span></label>
+          <label>Terms &amp; Conditions <span class="jdc-sub">(on the estimate and invoice; the client accepts these)</span></label>
           <textarea id="pricerTerms" placeholder="Payment terms, warranty, etc."></textarea>
         </div>
       </div>
