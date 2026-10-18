@@ -360,6 +360,12 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 .pay-paid{background:#22c55e22;color:var(--green)}
 .pay-record-btn{background:none;border:1px solid var(--border);border-radius:6px;color:var(--blue);font-size:10.5px;padding:4px 9px;cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600}
 .pay-record-btn:hover{border-color:var(--blue)}
+.pmt-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:11.5px}
+.pmt-row-date{color:var(--muted);white-space:nowrap}
+.pmt-row-method{color:var(--text);overflow-wrap:anywhere}
+.pmt-row-amt{font-family:'DM Mono',monospace;font-weight:700;color:var(--green);white-space:nowrap}
+.pmt-row-del{background:none;border:none;color:var(--muted2);cursor:pointer;font-size:12px;padding:2px 4px}
+.pmt-row-del:hover{color:var(--red)}
 .doc-badge{font-size:10px;font-weight:700;padding:3px 7px;border-radius:4px;font-family:'DM Mono',monospace}
 .doc-est{background:#1e3a5f;color:#60a5fa}
 .doc-inv{background:#1c2e1c;color:#4ade80}
@@ -585,6 +591,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
   .modal-body{padding:14px 16px}
   .modal-actions{padding:12px 16px calc(12px + env(safe-area-inset-bottom))}
   .modal-close{font-size:24px;padding:4px 8px;margin-right:-8px}
+  .pmt-row{font-size:13px;gap:6px 10px}
+  .pmt-row-del{min-width:36px;min-height:36px;font-size:15px}
 
   /* pop-up notices sit above the bottom tab bar */
   .toast-container{top:auto;bottom:calc(70px + env(safe-area-inset-bottom));left:10px;right:10px;max-width:none}
@@ -815,6 +823,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
               <span id="pmtBalanceDue" style="font-size:20px;font-weight:800;color:var(--red);font-family:'DM Mono',monospace">$0.00</span>
             </div>
           </div>
+          <div id="pmtList" style="display:none;margin-bottom:14px"></div>
           <div class="jdc-field" style="margin-bottom:10px">
             <label>Amount <span style="font-weight:400;text-transform:none;color:var(--blue);cursor:pointer;text-decoration:underline" onclick="document.getElementById('pmtAmount').value=document.getElementById('pmtBalanceDue').textContent.replace('$','')">use full balance</span></label>
             <input type="number" id="pmtAmount" min="0" step="0.01" placeholder="0.00"/>
@@ -1552,6 +1561,7 @@ function getEstimateAcceptance(id){
 }
 function getPaymentStatus(id,total){
   const paid=getAmountPaid(id);
+  if(!(total>0.005))return 'paid'; // a $0 job (comped, warranty redo) has nothing to collect
   if(paid<=0)return 'unpaid';
   if(paid>=total-0.005)return 'paid';
   return 'partial';
@@ -1904,8 +1914,11 @@ function updateStats(projects){
   const active=meta.filter(p=>p.meta.status!=='done').length;
   const send=meta.filter(p=>p.meta.status==='send').length;
   const prod=meta.filter(p=>p.meta.status==='prod').length;
-  const thisMonth=new Date().toLocaleString('en-US',{month:'short',year:'numeric'});
-  const done=meta.filter(p=>p.meta.status==='done'&&p.savedAt?.includes(thisMonth.split(' ')[0])).length;
+  // Finished this month = marked Done (statusAt) since the 1st of this month.
+  // Matching the estimate's month name counted other years and missed jobs
+  // estimated last month but finished this one.
+  const now=new Date(), monthStart=new Date(now.getFullYear(),now.getMonth(),1).getTime(), nextMonth=new Date(now.getFullYear(),now.getMonth()+1,1).getTime();
+  const done=meta.filter(p=>p.meta.status==='done'&&Number(p.meta.statusAt)>=monthStart&&Number(p.meta.statusAt)<nextMonth).length;
 
   document.getElementById('stat-active').textContent=active;
   document.getElementById('stat-send').textContent=send;
@@ -1948,7 +1961,9 @@ function renderSales(){
     const badgeLabel=status==='paid'?'Paid':status==='partial'?'Partial':committed?'Unpaid':'Estimate';
     const excluded=getJobMeta(p.id).excluded;
     const fin=getJobFinancials(p);
-    const marginPct=fin.taxable>0?(fin.profit/fin.taxable*100):0;
+    // Same base as Reports: what you keep (total minus sales tax, card fee included).
+    const keptRevenue=fin.revenue-fin.tax;
+    const marginPct=keptRevenue>0?(fin.profit/keptRevenue*100):0;
     // A job that's both fully paid AND marked Done is finished business —
     // it doesn't need to compete for attention with jobs still in flight,
     // so its money columns tone down to muted instead of staying bright
@@ -1968,8 +1983,8 @@ function renderSales(){
       <div class="amount">$${total.toFixed(2)}</div>
       <div class="amount" style="color:${paidColor}">$${paid.toFixed(2)}</div>
       <div class="amount" style="color:${balance>0.005&&committed?'var(--red)':'var(--muted)'}" title="${committed?'':'Not committed yet: not counted as owed'}">$${balance.toFixed(2)}</div>
-      <div class="amount" onclick="event.stopPropagation();openExpenseListModal('${p.id}')" style="color:${costColor};cursor:pointer;text-decoration:underline;text-underline-offset:2px" title="View or edit this job's expenses">$${fin.cost.total.toFixed(2)}</div>
-      <div class="amount" style="color:${profitColor}">$${fin.profit.toFixed(2)}<div style="font-size:9.5px;color:var(--muted);font-weight:400">${marginPct.toFixed(0)}%</div></div>
+      <div class="amount" onclick="event.stopPropagation();openExpenseListModal('${p.id}')" style="color:${costColor};cursor:pointer;text-decoration:underline;text-underline-offset:2px" title="View or edit this job's expenses">${fmt(fin.cost.total)}</div>
+      <div class="amount" style="color:${profitColor}">${fmt(fin.profit)}<div style="font-size:9.5px;color:var(--muted);font-weight:400">${marginPct.toFixed(0)}%</div></div>
       <div><span class="${badgeCls}" style="${isResolved||!badgeClass?'background:var(--panel2);color:var(--muted)':''}">${badgeLabel}</span></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
         <button class="pay-record-btn" onclick="openPaymentModal('${p.id}')">+ Payment</button>
@@ -1989,7 +2004,11 @@ function openPaymentModal(projectId){
   document.getElementById('pmtPercent').value='';
   document.getElementById('pmtMethod').value='Cash';
   document.getElementById('pmtDate').value=storedDateToInput();
-
+  showPaymentBalance(projectId);
+  document.getElementById('paymentModal').classList.add('open');
+}
+// Balance due + the payments already on the job (refreshed after a delete).
+function showPaymentBalance(projectId){
   const p=getProjects().find(pr=>pr.id===projectId);
   const clients=getClients();
   const cl=p?clients.find(c=>c.id===p.clientId):null;
@@ -2000,8 +2019,29 @@ function openPaymentModal(projectId){
   document.getElementById('pmtClientLine').textContent=clientName+' — '+(p?.estNo||'');
   document.getElementById('pmtBalanceDue').textContent='$'+balance.toFixed(2);
   document.getElementById('pmtBalanceDue').style.color=balance<=0.005?'var(--green)':'var(--red)';
-
-  document.getElementById('paymentModal').classList.add('open');
+  // Each payment with a 🗑 — the way to fix a mistyped amount or remove a test payment.
+  const list=document.getElementById('pmtList');
+  const pays=getPayments(projectId);
+  list.style.display=pays.length?'block':'none';
+  list.innerHTML=pays.length?'<div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:2px">Payments recorded</div>'+
+    pays.map(pm=>`<div class="pmt-row">
+      <span class="pmt-row-date">${escapeHtml(pm.date||'—')}</span>
+      <span class="pmt-row-method">${escapeHtml(pm.method||'')}</span>
+      <span class="pmt-row-amt">${fmt(pm.amount)}</span>
+      ${pm.id?`<button class="pmt-row-del" data-pid="${escapeHtml(pm.id).replace(/"/g,'&quot;')}" onclick="deletePaymentFromModal(this.dataset.pid)" title="Delete this payment">🗑</button>`:'<span></span>'}
+    </div>`).join(''):'';
+}
+function deletePaymentFromModal(paymentId){
+  const projectId=paymentModalProjectId;
+  const pm=projectId?getPayments(projectId).find(x=>x.id===paymentId):null;
+  if(!pm)return;
+  const card=pm.stripeSessionId?'\n\nThis only removes it from the Dashboard. It does not refund the card in Stripe, and its Stripe fee stays under the job\'s Expenses.':'';
+  if(!confirm(`Delete the ${fmt(pm.amount)} payment from ${pm.date||'an unknown date'} (${pm.method||'no method'})?${card}`))return;
+  removePayment(projectId,paymentId);
+  showPaymentBalance(projectId);
+  renderSales(); // also updates the sidebar badges
+  renderReports();
+  refreshReminders();
 }
 function fillAmountFromPercent(){
   const pct=parseFloat(document.getElementById('pmtPercent').value)||0;
@@ -2840,7 +2880,7 @@ function renderTopClients(range){
       <div style="font-size:11px;color:var(--muted2);width:14px;flex-shrink:0">${i+1}</div>
       <div style="flex:1;min-width:0">
         <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
-          <span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.name}</span>
+          <span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(c.name)}</span>
           <span style="color:var(--green);font-weight:700;flex-shrink:0;margin-left:8px">$${c.revenue.toFixed(2)}</span>
         </div>
         <div style="background:var(--dark);border-radius:3px;height:5px;overflow:hidden">
@@ -2893,22 +2933,31 @@ function getJobFinancials(p){
   const extra=expenses.filter(e=>!e.category).reduce((s,e)=>s+e.amount,0);
   const totalCost=materials+design+install+setup+hardware+extra;
 
-  const empty={revenue:0,taxable:0,tax:0,paid:0,balance:0,
+  const empty={revenue:0,taxable:0,tax:0,taxExempt:false,paid:0,balance:0,
     cost:{materials,design,install,setup,hardware,extra,total:totalCost},profit:-totalCost};
   const f=p.state?.form;
-  if(!f||!f.pricerData)return empty;
+  if(!f)return empty;
 
   // Revenue side: the estimate frozen at save time (what the client was
   // quoted and what Stripe charges) when there is one; older jobs fall back
   // to recalculating from their saved line items.
   const frozen=f.estimateSummary;
-  const d=(frozen&&parseFloat(frozen.total)>0)?frozen:gatherPricerPDFDataFromSaved(p);
+  let d;
+  if(frozen&&parseFloat(frozen.total)>0)d=frozen;
+  else if(f.pricerData)d=gatherPricerPDFDataFromSaved(p);
+  else{
+    // Jobs from the old single-item tool: same total as Sales, which adds
+    // 8.25% tax on top (they were counted as $0 here before).
+    const total=getProjectAmount(p);
+    if(!(total>0))return empty;
+    d={total,taxable:total/1.0825,tax:total-total/1.0825,taxExempt:false};
+  }
 
   const paid=getAmountPaid(p.id);
   const balance=Math.max(0,d.total-paid);
 
   return{
-    revenue:d.total,taxable:d.taxable,tax:d.tax,paid,balance,
+    revenue:d.total,taxable:d.taxable,tax:d.tax,taxExempt:!!d.taxExempt,paid,balance,
     cost:{materials,design,install,setup,hardware,extra,total:totalCost},
     // Everything you keep (total minus sales tax, so the card fee counts,
     // same as Reports) minus what the job actually cost you.
@@ -2943,7 +2992,9 @@ function getPeriodRange(period,offset){
     const end=endOfDay(new Date(now.getFullYear()-offset,11,31));
     return{start,end};
   }
-  return{start:new Date(0),end:endOfDay(now)}; // 'all' has no meaningful offset
+  // 'all' has no meaningful offset. No end date, so a post-dated check counts
+  // here too (it already counts in its month and year).
+  return{start:new Date(0),end:new Date(8640000000000000)};
 }
 // The equivalent PRIOR window, same length/type — e.g. current is "This
 // Quarter", previous is the quarter before it. Used for the vs-last-period
@@ -2992,7 +3043,7 @@ function dateInRange(dateStr,range){
 // which range is passed in.
 function computeReportsDataForRange(range){
   const projects=getProjects();
-  let revenueCollected=0,taxCollected=0;
+  let revenueCollected=0,taxCollected=0,taxableCollected=0;
   const expenses={materials:0,design:0,install:0,setup:0,hardware:0,extra:0,total:0};
   let outstandingBalance=0,unpaidCount=0,unpaidTotal=0,partialCount=0,paidCount=0;
 
@@ -3003,7 +3054,10 @@ function computeReportsDataForRange(range){
     if(getJobMeta(p.id).excluded)return;
 
     const fin=getJobFinancials(p);
-    if(dateInRange(p.savedAt,range)){
+    const committed=isJobCommitted(p.id);
+    // The pricer's cost lines are only an estimate until the client commits:
+    // a quote that's never accepted didn't cost anything.
+    if(committed&&dateInRange(p.savedAt,range)){
       // Original pricing estimate — recognized when the job itself was
       // saved, same as always. "Extra" is deliberately excluded here since
       // it's recognized by each expense's own date instead, just below —
@@ -3021,13 +3075,17 @@ function computeReportsDataForRange(range){
       if(!exp.category&&dateInRange(exp.date,range))expenses.extra+=exp.amount;
     });
     const taxRatio=fin.revenue>0?fin.tax/fin.revenue:0;
+    // Share of each payment that is taxable sales: the pre-tax price, so not
+    // the card fee, and nothing for a tax-exempt job (for the Tax report).
+    const taxableRatio=fin.revenue>0&&!fin.taxExempt?(Number(fin.taxable)||0)/fin.revenue:0;
     getPayments(p.id).forEach(pmt=>{
       if(dateInRange(pmt.date,range)){
         revenueCollected+=pmt.amount;
         taxCollected+=pmt.amount*taxRatio;
+        taxableCollected+=pmt.amount*taxableRatio;
       }
     });
-    if(!isJobCommitted(p.id))return; // open estimates aren't owed money
+    if(!committed)return; // open estimates aren't owed money
     if(fin.balance>0.005)outstandingBalance+=fin.balance;
     const status=getPaymentStatus(p.id,fin.revenue);
     if(status==='unpaid'){unpaidCount++;unpaidTotal+=fin.revenue;}
@@ -3037,7 +3095,7 @@ function computeReportsDataForRange(range){
   expenses.total=expenses.materials+expenses.design+expenses.install+expenses.setup+expenses.hardware+expenses.extra;
 
   return{
-    revenueCollected,taxCollected,expenses,
+    revenueCollected,taxCollected,taxableCollected,expenses,
     netProfit:(revenueCollected-taxCollected)-expenses.total,
     outstandingBalance,unpaidCount,unpaidTotal,partialCount,paidCount,
   };
@@ -3054,18 +3112,19 @@ function computeTopClientsByRevenue(range,limit){
   const byClient={};
   projects.forEach(p=>{
     if(getJobMeta(p.id).excluded)return;
+    // Jobs with no client record (none picked, or the client was deleted) are
+    // kept apart by the billing name on the estimate, not lumped together.
+    const cl=p.clientId?clients.find(c=>c.id===p.clientId):null;
+    const billing=(p.state?.form?.billingName||'').trim();
+    const key=cl?'c:'+cl.id:billing?'b:'+billing.toLowerCase():'none';
     getPayments(p.id).forEach(pmt=>{
       if(dateInRange(pmt.date,range)){
-        const key=p.clientId||'—';
-        byClient[key]=(byClient[key]||0)+pmt.amount;
+        if(!byClient[key])byClient[key]={name:cl?cl.name:(billing||'No client'),revenue:0};
+        byClient[key].revenue+=pmt.amount;
       }
     });
   });
-  return Object.entries(byClient)
-    .map(([clientId,revenue])=>({
-      name:clients.find(c=>c.id===clientId)?.name||'Unknown Client',
-      revenue,
-    }))
+  return Object.values(byClient)
     .sort((a,b)=>b.revenue-a.revenue)
     .slice(0,limit||5);
 }
@@ -6515,7 +6574,11 @@ function printSalesList(){
   const projects=getProjects();
   const clients=getClients();
   let totalAll=0,paidAll=0,balAll=0,marginAll=0,expensesAll=0;
-  const rows=projects.map(p=>{
+  // Same order as the Sales tab (newest first), and each row is added up in
+  // the cents it prints with, so the totals match the columns above them.
+  const sorted=[...projects].sort((a,b)=>jobDateValue(b)-jobDateValue(a)||(b.estNo||'').localeCompare(a.estNo||'',undefined,{numeric:true}));
+  const cents=n=>Number((Number(n)||0).toFixed(2));
+  const rows=sorted.map(p=>{
     const cl=clients.find(c=>c.id===p.clientId);
     const clientName=cl?cl.name:(p.state?.form?.billingName||'—');
     const total=getProjectAmount(p);
@@ -6524,7 +6587,7 @@ function printSalesList(){
     const fin=getJobFinancials(p);
     const excluded=getJobMeta(p.id).excluded;
     const committed=isJobCommitted(p.id);
-    if(!excluded&&committed){totalAll+=total;paidAll+=paid;balAll+=balance;marginAll+=fin.profit;expensesAll+=fin.cost.total;}
+    if(!excluded&&committed){totalAll+=cents(total);paidAll+=cents(paid);balAll+=cents(balance);marginAll+=cents(fin.profit);expensesAll+=cents(fin.cost.total);}
     const status=getPaymentStatus(p.id,total);
     const statusLabel=status==='paid'?'Paid':status==='partial'?'Partial':committed?'Unpaid':'Estimate';
     return `<tr>
@@ -6533,8 +6596,8 @@ function printSalesList(){
       <td class="num">$${total.toFixed(2)}</td>
       <td class="num">$${paid.toFixed(2)}</td>
       <td class="num">$${balance.toFixed(2)}</td>
-      <td class="num">$${fin.cost.total.toFixed(2)}</td>
-      <td class="num">$${fin.profit.toFixed(2)}</td>
+      <td class="num">${fmt(fin.cost.total)}</td>
+      <td class="num">${fmt(fin.profit)}</td>
       <td>${statusLabel}${excluded?' (excluded)':''}</td>
     </tr>`;
   }).join('');
@@ -6545,8 +6608,8 @@ function printSalesList(){
     <div class="summary-row"><span>Total sold (committed jobs)</span><span>$${totalAll.toFixed(2)}</span></div>
     <div class="summary-row"><span>Total collected</span><span>$${paidAll.toFixed(2)}</span></div>
     <div class="summary-row total"><span>Balance outstanding</span><span>$${balAll.toFixed(2)}</span></div>
-    <div class="summary-row"><span>Total expenses</span><span>$${expensesAll.toFixed(2)}</span></div>
-    <div class="summary-row"><span>Total margin</span><span>$${marginAll.toFixed(2)}</span></div>
+    <div class="summary-row"><span>Total expenses</span><span>${fmt(expensesAll)}</span></div>
+    <div class="summary-row"><span>Total margin</span><span>${fmt(marginAll)}</span></div>
   </div>`;
   openPrintWindow('Sales — Inkable Studios',projects.length+' job'+(projects.length!==1?'s':''),body);
 }
@@ -6609,7 +6672,8 @@ function getNextQuarterlyDueDate(){
   const q=Math.floor(now.getMonth()/3);
   const prevQuarterEnd=new Date(now.getFullYear(),q*3,0);
   const prevDue=new Date(prevQuarterEnd.getFullYear(),prevQuarterEnd.getMonth()+1,20);
-  if(now<=prevDue)return prevDue;
+  // Keep showing it all day on the 20th itself (it's still due that day).
+  if(now<new Date(prevDue.getFullYear(),prevDue.getMonth(),prevDue.getDate()+1))return prevDue;
   return getTaxFilingDueDate('quarter');
 }
 
@@ -6618,9 +6682,10 @@ function renderTaxDueReminder(){
   if(!el)return;
   const due=getNextQuarterlyDueDate();
   const dueStr=due.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
-  const daysLeft=Math.ceil((due-new Date())/(1000*60*60*24));
+  const today=new Date(); today.setHours(0,0,0,0);
+  const daysLeft=Math.round((due-today)/(1000*60*60*24)); // whole days; 0 on the due date
   const urgent=daysLeft<=14;
-  el.innerHTML=`📅 Next Texas sales tax filing due: <span style="color:${urgent?'var(--red)':'var(--text)'};font-weight:600">${dueStr}</span> <span style="color:var(--muted2)">(${daysLeft} day${daysLeft===1?'':'s'} — assumes quarterly filing)</span>`;
+  el.innerHTML=`📅 Next Texas sales tax filing due: <span style="color:${urgent?'var(--red)':'var(--text)'};font-weight:600">${dueStr}</span> <span style="color:var(--muted2)">(${daysLeft===0?'today':daysLeft+' day'+(daysLeft===1?'':'s')} — assumes quarterly filing)</span>`;
 }
 
 // Prints the sales tax summary for whichever period is on screen in
@@ -6640,7 +6705,9 @@ function printTaxReport(){
 
   const rep=computeReportsData(period,offset);
   const grossSales=rep.revenueCollected;
-  const taxableSales=grossSales-rep.taxCollected;
+  // The taxable part of each payment (from the estimate as saved): not the
+  // tax itself, not the card fee, nothing from tax-exempt jobs.
+  const taxableSales=rep.taxableCollected;
 
   const body=`
     <table><thead><tr><th>Filing Period</th><th class="num"></th></tr></thead><tbody>
@@ -6651,7 +6718,7 @@ function printTaxReport(){
     <br/>
     <table><thead><tr><th>Sales Summary</th><th class="num"></th></tr></thead><tbody>
       <tr><td>Gross sales collected</td><td class="num">$${grossSales.toFixed(2)}</td></tr>
-      <tr><td>Taxable sales (gross minus tax)</td><td class="num">$${taxableSales.toFixed(2)}</td></tr>
+      <tr><td>Taxable sales (before tax; card fees and tax-exempt jobs left out)</td><td class="num">$${taxableSales.toFixed(2)}</td></tr>
       <tr><td><b>Sales tax collected</b></td><td class="num"><b>$${rep.taxCollected.toFixed(2)}</b></td></tr>
     </tbody></table>
     <div class="summary">

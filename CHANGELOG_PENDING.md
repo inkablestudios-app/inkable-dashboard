@@ -159,3 +159,26 @@
   total, PDFs, client page and Stripe already included it; now the box on screen matches.
 - Fix: Sales showed a red "$0.00" balance on a fully paid job when a Stripe payment differed by a
   fraction of a cent. It now shows grey like any paid job.
+- Money / Reports review fixes:
+  - Reports counted the pricer's estimated costs (materials, labor, setup, hardware) for EVERY
+    quote, including ones the client never accepted, so expenses were too high and profit too low.
+    Now only committed jobs count. Expenses you add by hand and Stripe fees still count by their date.
+  - Payments can now be deleted: the "+ Payment" window lists the job's payments (date, method,
+    amount) with a 🗑 for each, after a confirmation. Before, a mistyped payment could never be
+    fixed. Deleting a card payment does not refund it in Stripe.
+  - Tax report: "Taxable sales" was everything collected minus tax, so it included card fees and
+    tax-exempt jobs. Now it is only the taxable part of each payment.
+  - Jobs from the old single-item pricer counted as $0 in Reports (nothing owed, no tax). They now
+    use the same total as Sales.
+  - Sales margin % now uses the same base as Reports (total minus sales tax), so a job can't show
+    more than 100%. Negative amounts show as "-$50.00".
+  - Top clients: jobs with no client (or a deleted client) are listed by the name on the estimate
+    instead of all lumped together as "Unknown Client".
+  - Tax-due reminder still shows the due date on the 20th itself ("today") instead of jumping to
+    the next quarter.
+  - "All Time" now includes post-dated payments (they already showed in their month and year).
+  - "Done This Month" counts jobs marked Done this month (was: estimated in a month with the same
+    name, any year).
+  - Printed Sales list: same order as the Sales tab (newest first), and its totals add up to the
+    rows above them (they could be a cent off).
+  - A $0 job (comped, warranty redo) counts as paid instead of "Unpaid".
