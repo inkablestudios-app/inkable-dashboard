@@ -1529,8 +1529,9 @@ const COMMITTED_STATUSES=['approved','prod','done'];
 // Last day an estimate's price is good for, as "November 16, 2026".
 function estimateValidUntil(quotedAt,days){
   const d=new Date(quotedAt); if(isNaN(d))return '';
-  d.setDate(d.getDate()+Number(days));
-  return d.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
+  // The shop's calendar day (Houston), same as the client page and the server.
+  const [m,dd,y]=d.toLocaleDateString('en-US',{timeZone:'America/Chicago',year:'numeric',month:'numeric',day:'numeric'}).split('/').map(Number);
+  return new Date(y,m-1,dd+Number(days)).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
 }
 function getJobDepositPct(p){
   try{ const v=JSON.parse(p?.state?.form?.pricerData||'{}').depositPct; if(v>0)return v; }catch(e){}
@@ -3748,7 +3749,7 @@ function checkForNewAcceptances(all){
     const cl=proj?clients.find(c=>c.id===proj.clientId):null;
     const who=cl?cl.name:(a.name||'A client');
     newAcceptances.unshift({projectId:pid,key,who,name:a.name,estNo:proj?.estNo||'',at:a.at,total:a.total});
-    showToast('✍️','Estimate accepted',`${who}${proj?.estNo?' ('+proj.estNo+')':''} accepted ${fmt(Number(a.total))}, signed "${a.name}".`,
+    showToast('✍️','Estimate accepted',`${escapeHtml(who)}${proj?.estNo?' ('+escapeHtml(proj.estNo)+')':''} accepted ${fmt(Number(a.total))}, signed "${escapeHtml(a.name)}".`,
       {color:'var(--green)',duration:10000,onClick:()=>openNotifAcceptance(key)});
   });
   try{ localStorage.setItem(ACCEPT_SEEN_KEY,JSON.stringify([...seen])); localStorage.setItem('inkable_acceptances_unread',JSON.stringify(newAcceptances)); }catch(e){}
@@ -3853,13 +3854,13 @@ function toggleNotifDropdown(){
       const label=isApproved?'approved the proof':'requested changes';
       const dateStr=new Date(n.responseAt).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
       return`<div class="menu-item" style="white-space:normal;line-height:1.4;padding:10px 12px" onclick="openNotifResponse('${n.projectId}','${n.responseAt}')">
-        <div style="font-size:12px;color:var(--text)"><b>${who}</b> ${isApproved?'✓':'✎'} ${label}</div>
-        <div style="font-size:10.5px;color:var(--muted)">${n.estNo||''} · ${dateStr}</div>
-        ${n.responseNote?`<div style="font-size:11px;color:var(--muted);margin-top:3px;font-style:italic">"${n.responseNote}"</div>`:''}
+        <div style="font-size:12px;color:var(--text)"><b>${escapeHtml(who)}</b> ${isApproved?'✓':'✎'} ${label}</div>
+        <div style="font-size:10.5px;color:var(--muted)">${escapeHtml(n.estNo||'')} · ${dateStr}</div>
+        ${n.responseNote?`<div style="font-size:11px;color:var(--muted);margin-top:3px;font-style:italic">"${escapeHtml(n.responseNote)}"</div>`:''}
       </div>`;
     }).join('');
     const cardItems=newCardPayments.map(n=>`<div class="menu-item" style="white-space:normal;line-height:1.4;padding:10px 12px" onclick="openNotifCardPayment('${n.stripeSessionId}')">
-        <div style="font-size:12px;color:var(--text)">💳 <b>${n.who}</b> paid ${fmt(n.amount)} by card</div>
+        <div style="font-size:12px;color:var(--text)">💳 <b>${escapeHtml(n.who)}</b> paid ${fmt(n.amount)} by card</div>
         <div style="font-size:10.5px;color:var(--muted)">${n.estNo||''} · ${n.date||''}</div>
       </div>`).join('');
     const acceptItems=newAcceptances.map(n=>`<div class="menu-item" style="white-space:normal;line-height:1.4;padding:10px 12px" onclick="openNotifAcceptance('${n.key}')">
@@ -4667,7 +4668,7 @@ function renderClientLinkSection(jobId,data){
   if(data.response==='approved'){
     statusHtml=`<div style="font-size:11px;color:var(--green);margin-top:6px">✓ Client approved on ${fmtShareDate(data.responseAt)}</div>`;
   }else if(data.response==='changes'){
-    statusHtml=`<div style="font-size:11px;color:var(--amber);margin-top:6px">✎ Changes requested on ${fmtShareDate(data.responseAt)}${data.responseNote?': "'+data.responseNote+'"':''}</div>`;
+    statusHtml=`<div style="font-size:11px;color:var(--amber);margin-top:6px">✎ Changes requested on ${fmtShareDate(data.responseAt)}${data.responseNote?': "'+escapeHtml(data.responseNote)+'"':''}</div>`;
   }else if(data.viewCount>0){
     statusHtml=`<div style="font-size:10.5px;color:var(--muted);margin-top:6px">Viewed ${data.viewCount}× — last on ${fmtShareDate(data.lastViewedAt)}, no response yet</div>`;
   }else{

@@ -90,7 +90,9 @@ export default async (req) => {
       const amount = (session.amount_total || 0) / 100;
 
       if (projectId && amount > 0) {
-        const today = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+        // The shop's date (Houston), not the server's UTC date: an evening
+        // payment belongs to that day, month and tax quarter.
+        const today = new Date().toLocaleDateString("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", year: "numeric" });
         const { fee, exact } = await getStripeFee(session, amount);
         // Recorded as a regular job expense so Sales/Reports profit reflects
         // what actually reaches the bank. Editable/deletable like any other.

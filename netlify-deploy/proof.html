@@ -120,10 +120,18 @@
   const card = document.getElementById('mainCard');
 
   function fmtMoney(n){ return '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  // A plain date (install date "2026-10-25", saved date "Oct 18, 2026") is a
+  // calendar day: show that day, never shifted by the viewer's time zone.
+  // Exact times (accepted at, valid until) are shown on the shop's clock, so
+  // every client sees the same date as the estimate PDF.
   function fmtDate(s){
     if(!s) return '';
+    const opts = {month:'short',day:'numeric',year:'numeric'};
+    const ymd = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    if(ymd) return new Date(+ymd[1], +ymd[2]-1, +ymd[3]).toLocaleDateString('en-US', opts);
     const d = new Date(s);
-    return isNaN(d) ? s : d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+    if(isNaN(d)) return s;
+    return d.toLocaleDateString('en-US', /T\d/.test(s) ? {...opts, timeZone:'America/Chicago'} : opts);
   }
 
   function showError(msg){
@@ -136,9 +144,9 @@
       <div class="jobhead">
         <div class="jobhead-top">
           <div>
-            ${data.clientName ? `<div class="client">${data.clientName}</div>` : ''}
-            <h1>${data.jobName}</h1>
-            ${data.estNo ? `<div class="estno">${data.estNo}</div>` : ''}
+            ${data.clientName ? `<div class="client">${esc(data.clientName)}</div>` : ''}
+            <h1>${esc(data.jobName)}</h1>
+            ${data.estNo ? `<div class="estno">${esc(data.estNo)}</div>` : ''}
           </div>
           <div class="statuspill" style="background:${meta.color}22;color:${meta.color}">${meta.label}</div>
         </div>
@@ -156,7 +164,7 @@
     const lines = (summary.lineItems||[]).map(l => `
       <div class="lineitem">
         <div>
-          <div class="desc">${l.desc}</div>
+          <div class="desc">${esc(l.desc)}</div>
           ${l.sqft > 0 ? `<div class="spec">${l.sqft.toFixed(2)} sqft</div>` : ''}
         </div>
         <div class="price">${fmtMoney(l.matTotal)}</div>
@@ -226,7 +234,7 @@
           <span class="already-badge ${isApproved?'already-approved':'already-changes'}">
             ${isApproved ? '✓ You approved this proof' : '✎ You requested changes'}
           </span>
-          ${data.responseNote ? `<div style="font-size:12.5px;color:var(--muted);margin-bottom:10px">Your note: "${data.responseNote}"</div>` : ''}
+          ${data.responseNote ? `<div style="font-size:12.5px;color:var(--muted);margin-bottom:10px">Your note: "${esc(data.responseNote)}"</div>` : ''}
           <iframe class="proofbox" src="${data.proofEmbedUrl}"></iframe>
           <a class="newtab" href="${data.proofEmbedUrl.replace('/preview','/view')}" target="_blank" rel="noopener">Open in a new tab ↗</a>
         </section>`;
@@ -360,7 +368,7 @@
         </div>
       </section>`;
   }
-  function wireAccept(){
+  function wireAccept(data){
     const depBtn = document.getElementById('acceptPayDepositBtn');
     if(!depBtn) return;
     const fullBtn = document.getElementById('acceptPayFullBtn');
@@ -373,18 +381,29 @@
       if(name.length < 2){ show('Please type your full name.'); return false; }
       if(!document.getElementById('acceptAgree').checked){ show('Please check the box to confirm.'); return false; }
       err.style.display = 'none';
+      // The total on screen goes along: if the estimate was re-priced since
+      // this page loaded, the server refuses instead of recording a price
+      // the client never saw.
       const res = await fetch(API_BASE + '?token=' + encodeURIComponent(token), {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({action:'accept-estimate', name}),
+        body: JSON.stringify({action:'accept-estimate', name, total: data.estimateSummary.total}),
       });
       const out = await res.json();
-      if(!res.ok) throw new Error(out.error || "That didn't go through.");
+      if(!res.ok){ const e = new Error(out.error || "That didn't go through."); e.changed = !!out.changed; throw e; }
       return true;
+    }
+    // Estimate changed under the client: show the new numbers, then explain.
+    async function reloadChanged(msg){
+      await load();
+      const e2 = document.getElementById('acceptError');
+      if(e2){ e2.textContent = msg; e2.style.display = 'block'; }
     }
     async function acceptThenPay(amountType){
       busy(true);
+      let accepted = false;
       try{
         if(!(await accept())){ busy(false); return; }
+        accepted = true;
         const res = await fetch(window.location.origin + '/api/create-checkout-session', {
           method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({token, amountType}),
@@ -393,7 +412,11 @@
         if(!res.ok || !result.url) throw new Error(result.error || "Couldn't start checkout.");
         window.location.href = result.url;
       }catch(e){
-        busy(false); show((e.message || "Something went wrong.") + ' Your acceptance may have been saved — reload the page to check.');
+        if(e.changed) return reloadChanged(e.message);
+        busy(false);
+        show(accepted
+          ? (e.message || "Couldn't start the payment.") + ' Your acceptance was saved — reload the page to pay.'
+          : (e.message || "That didn't go through — check your connection and try again."));
       }
     }
     depBtn.onclick = () => acceptThenPay('deposit');
@@ -401,12 +424,24 @@
     later.onclick = async (ev) => {
       ev.preventDefault(); busy(true);
       try{ if(await accept()) load(); else busy(false); }
-      catch(e){ busy(false); show(e.message || "That didn't go through — try again."); }
+      catch(e){
+        if(e.changed) return reloadChanged(e.message);
+        busy(false); show(e.message || "That didn't go through — try again.");
+      }
     };
   }
 
   function paymentSectionHtml(data){
     const summary = data.estimateSummary;
+    if(confirmingPayment){
+      return `
+        <section>
+          <div class="estimate">
+            <div style="padding:13px 16px;font-size:13px;font-weight:600">Payment</div>
+            <div style="padding:0 16px 14px;font-size:12px;color:var(--muted)">Confirming your payment — please don't pay again.</div>
+          </div>
+        </section>`;
+    }
     // Before acceptance, paying happens through "Accept & Pay" above.
     if(summary && summary.total && !data.estimateAccepted && !((data.paid||0) > 0.005)) return '';
     if(!summary || !summary.total){
@@ -495,7 +530,7 @@
   function render(data){
     card.innerHTML = jobHeadHtml(data) + proofSectionHtml(data) + estimateVisualHtml(data) + estimateHtml(data.estimateSummary) + validityNoticeHtml(data) + acceptSectionHtml(data) + paymentSectionHtml(data) + contactSectionHtml(data.business);
     wireProofActions(data);
-    wireAccept();
+    wireAccept(data);
     const toggle = document.getElementById('estimateToggle');
     if(toggle){
       toggle.onclick = function(){
@@ -511,30 +546,51 @@
     if(remainingBtn) remainingBtn.onclick = () => startCheckout('full');
   }
 
+  // Back from Stripe: Stripe sends the client here the moment they pay,
+  // usually a few seconds before its confirmation reaches our server. Until
+  // this payment shows up on the job, the pay buttons stay hidden so nobody
+  // pays twice, and the page keeps checking for a while.
+  const paymentParam = params.get('payment');
+  const returnSession = params.get('session_id') || '';
+  let confirmingPayment = paymentParam === 'success';
+  let confirmTries = 0;
+  let banner = null;
+  function setBanner(text, kind){
+    if(!banner){
+      banner = document.createElement('div');
+      document.querySelector('.wrap').insertBefore(banner, card);
+    }
+    const colors = { ok:['#1b3a1e','var(--green)'], wait:['var(--panel2)','var(--text)'], warn:['#3a2f1b','#e8a33d'] }[kind];
+    banner.style.cssText = `background:${colors[0]};color:${colors[1]};border-radius:10px;padding:12px 16px;font-size:12.5px;font-weight:600;margin-top:20px;line-height:1.5`;
+    banner.textContent = text;
+  }
+  if(paymentParam){
+    history.replaceState(null, '', window.location.pathname + '?token=' + encodeURIComponent(token));
+  }
+
   async function load(){
     if(!token){ showError("This link is missing something — check that you copied the whole URL."); return; }
     try{
-      const res = await fetch(API_BASE + '?token=' + encodeURIComponent(token));
+      const check = confirmingPayment && returnSession ? '&session=' + encodeURIComponent(returnSession) : '';
+      const res = await fetch(API_BASE + '?token=' + encodeURIComponent(token) + check);
       const data = await res.json();
       if(!res.ok){ showError(data.error || "This link isn't working right now."); return; }
+      if(confirmingPayment && data.paymentConfirmed){
+        confirmingPayment = false;
+        setBanner('✓ Payment received — thank you!', 'ok');
+      }
       render(data);
+      if(confirmingPayment){
+        if(++confirmTries <= 10){
+          setBanner('Confirming your payment…', 'wait');
+          setTimeout(load, 3000);
+        }else{
+          setBanner("Your payment is still being confirmed by the card processor. It can take a few minutes to show here — please don't pay again. Refresh this page later to see it.", 'warn');
+        }
+      }
     }catch(e){
       showError("Couldn't load your job — check your connection and try again.");
     }
-  }
-
-  // Stripe redirects back here with ?payment=success right after checkout,
-  // before the webhook has necessarily finished updating the balance —
-  // so this shows a quick "updating" banner and reloads shortly after
-  // rather than the (possibly still-stale) balance from the first load.
-  const paymentParam = params.get('payment');
-  if(paymentParam === 'success'){
-    const banner = document.createElement('div');
-    banner.style.cssText = 'background:#1b3a1e;color:var(--green);border-radius:10px;padding:12px 16px;font-size:12.5px;font-weight:600;margin-top:20px';
-    banner.textContent = 'Payment received — updating your balance…';
-    document.querySelector('.wrap').insertBefore(banner, card);
-    history.replaceState(null, '', window.location.pathname + '?token=' + encodeURIComponent(token));
-    setTimeout(load, 3000);
   }
 
   load();

@@ -10,14 +10,36 @@ function getDriveEmbedUrl(url) {
   return match ? `https://drive.google.com/file/d/${match[1]}/preview` : url;
 }
 
+// Dates follow the shop's clock (Houston), not the server's (UTC), so the
+// client page, the estimate PDF and this check all agree on the last day.
+const SHOP_TZ = "America/Chicago";
+function shopClock(ms) {
+  const p = {};
+  for (const x of new Intl.DateTimeFormat("en-US", { timeZone: SHOP_TZ, year: "numeric", month: "numeric",
+    day: "numeric", hour: "numeric", minute: "numeric", second: "numeric", hourCycle: "h23" }).formatToParts(new Date(ms))) {
+    p[x.type] = Number(x.value);
+  }
+  return p;
+}
+// The moment a shop-calendar day starts (midnight in Houston).
+function shopMidnight(y, m, d) {
+  const utcMidnight = Date.UTC(y, m - 1, d);
+  let t = utcMidnight;
+  for (let i = 0; i < 2; i++) {
+    const c = shopClock(t);
+    t = utcMidnight - (Date.UTC(c.year, c.month - 1, c.day, c.hour, c.minute, c.second) - t);
+  }
+  return t;
+}
+
 // When an estimate's price stops being valid: quoted date + N days (end of
-// that day). Estimates saved before this existed have no expiry.
+// that day, shop time). Estimates saved before this existed have no expiry.
 function estimateValidity(summary) {
   const days = Number(summary?.validDays);
   const q = summary?.quotedAt ? new Date(summary.quotedAt) : null;
   if (!(days > 0) || !q || isNaN(q)) return { days: 0, expiresAt: 0 };
-  const end = new Date(q); end.setDate(end.getDate() + days); end.setHours(23, 59, 59, 999);
-  return { days, expiresAt: end.getTime() + 1 };
+  const c = shopClock(q.getTime());
+  return { days, expiresAt: shopMidnight(c.year, c.month, c.day + days + 1) };
 }
 
 export default async (req) => {
@@ -71,6 +93,9 @@ export default async (req) => {
 
       const paid = (payments || []).reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
       const balance = estimateSummary ? Math.max(0, estimateSummary.total - paid) : 0;
+      // Back from Stripe: has that checkout's payment been recorded yet?
+      const session = url.searchParams.get("session");
+      const paymentConfirmed = !!session && (payments || []).some(p => p.stripeSessionId === session);
       const accepted = !!(r.estimate_accepted_at && estimateSummary &&
         Math.abs(Number(r.estimate_accepted_total) - Number(estimateSummary.total)) < 0.005);
       const validity = estimateValidity(estimateSummary);
@@ -101,6 +126,7 @@ export default async (req) => {
           Math.abs(Number(r.estimate_accepted_total) - Number(estimateSummary.total)) >= 0.005),
         paid,
         balance,
+        paymentConfirmed,
         // This job's own deposit % if it has one, else the shop default.
         depositPct: Number(estimateSummary?.depositPct) > 0 ? Number(estimateSummary.depositPct)
           : Number(settings.depositPct) > 0 ? Number(settings.depositPct) : 50,
@@ -129,6 +155,11 @@ export default async (req) => {
         if (typeof st === "string") { try { st = JSON.parse(st); } catch { st = {}; } }
         const total = Number(st?.form?.estimateSummary?.total);
         if (!(total > 0)) return Response.json({ error: "There's no estimate to accept yet." }, { status: 400 });
+        // Record only the price the client was looking at. If the job was
+        // re-priced after their page loaded, they must see the new total first.
+        if (!(Math.abs(Number(body.total) - total) < 0.005)) {
+          return Response.json({ error: "This estimate was just updated. Please review the new total and accept again.", changed: true }, { status: 409 });
+        }
         const v = estimateValidity(st?.form?.estimateSummary);
         if (v.expiresAt && Date.now() > v.expiresAt) {
           return Response.json({ error: "This estimate has expired. Please contact us for an updated quote." }, { status: 400 });

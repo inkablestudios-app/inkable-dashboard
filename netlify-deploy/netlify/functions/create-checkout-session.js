@@ -99,7 +99,9 @@ export default async (req) => {
     amount = Math.round(amount * 100) / 100;
 
     const origin = new URL(req.url).origin;
-    const successUrl = `${origin}/proof.html?token=${encodeURIComponent(token)}&payment=success`;
+    // Stripe fills in {CHECKOUT_SESSION_ID}, so the page can tell when THIS
+    // payment has been recorded.
+    const successUrl = `${origin}/proof.html?token=${encodeURIComponent(token)}&payment=success&session_id={CHECKOUT_SESSION_ID}`;
     const cancelUrl = `${origin}/proof.html?token=${encodeURIComponent(token)}&payment=cancelled`;
 
     const jobName = state?.form?.jobName || r.job_name || "Your job";
