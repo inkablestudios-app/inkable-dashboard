@@ -22,7 +22,7 @@ function stripPdfBytes(exportedPdfs) {
 // pricing.js) so each save stays a small, precise operation, not a full
 // re-upload of everything.
 export default async (req) => {
-  if (!requireAuth(req)) {
+  if (!(await requireAuth(req))) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 

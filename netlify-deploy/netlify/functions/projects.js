@@ -17,7 +17,7 @@ function stripPdfBytes(exportedPdfs) {
 }
 
 export default async (req) => {
-  if (!requireAuth(req)) {
+  if (!(await requireAuth(req))) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 

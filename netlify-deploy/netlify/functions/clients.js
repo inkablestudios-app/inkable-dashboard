@@ -4,7 +4,7 @@ import { requireAuth } from "./_shared/auth.js";
 const db = getDatabase();
 
 export default async (req) => {
-  if (!requireAuth(req)) {
+  if (!(await requireAuth(req))) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -28,6 +28,40 @@ export default async (req) => {
 
     if (method === "POST") {
       const c = await req.json();
+      // Edits send only what changed, and the call log is merged by entry
+      // (not replaced), so a call logged on the phone survives the computer
+      // fixing the client's email.
+      if (c.patch && c.id) {
+        const has = k => Object.prototype.hasOwnProperty.call(c, k);
+        if (has("name") && !String(c.name || "").trim()) return Response.json({ error: "name is required" }, { status: 400 });
+        const upLog = Array.isArray(c.logUpsert) ? c.logUpsert.filter(e => e && e.id) : [];
+        const dropLog = JSON.stringify([...upLog.map(e => e.id), ...(Array.isArray(c.removedLogIds) ? c.removedLogIds : [])].map(String));
+        const [row] = await db.sql`
+          UPDATE clients SET
+            name = CASE WHEN ${has("name")} THEN ${c.name || ""} ELSE name END,
+            phone = CASE WHEN ${has("phone")} THEN ${c.phone || ""} ELSE phone END,
+            email = CASE WHEN ${has("email")} THEN ${c.email || ""} ELSE email END,
+            addr = CASE WHEN ${has("addr")} THEN ${c.addr || ""} ELSE addr END,
+            city = CASE WHEN ${has("city")} THEN ${c.city || ""} ELSE city END,
+            state = CASE WHEN ${has("state")} THEN ${c.state || ""} ELSE state END,
+            zip = CASE WHEN ${has("zip")} THEN ${c.zip || ""} ELSE zip END,
+            notes = CASE WHEN ${has("notes")} THEN ${c.notes || ""} ELSE notes END,
+            lead_source = CASE WHEN ${has("leadSource")} THEN ${c.leadSource || ""} ELSE lead_source END,
+            log = ${JSON.stringify(upLog)}::jsonb || COALESCE((
+              SELECT jsonb_agg(e) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(log) = 'array' THEN log ELSE '[]'::jsonb END) AS e
+              WHERE NOT jsonb_exists(${dropLog}::jsonb, e->>'id')
+            ), '[]'::jsonb),
+            updated_at = NOW()
+          WHERE id = ${c.id}
+          RETURNING *
+        `;
+        if (!row) return Response.json({ error: "That client no longer exists." }, { status: 409 });
+        return Response.json({
+          id: row.id, name: row.name, phone: row.phone, email: row.email || "", addr: row.addr, city: row.city,
+          state: row.state, zip: row.zip, notes: row.notes, log: row.log,
+          leadSource: row.lead_source,
+        });
+      }
       if (!c.id || !c.name) {
         return Response.json({ error: "id and name are required" }, { status: 400 });
       }

@@ -1,6 +1,6 @@
 import { getDatabase } from "@netlify/database";
 import crypto from "node:crypto";
-import { hashPassword, makeToken, verifyToken, hasSecret } from "./_shared/auth.js";
+import { hashPassword, makeToken, hasSecret, passwordStamp, isValidLogin } from "./_shared/auth.js";
 
 const db = getDatabase();
 const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
@@ -37,7 +37,7 @@ export default async (req) => {
       if (hash !== rows[0].password_hash) {
         return Response.json({ error: "Incorrect password." }, { status: 401 });
       }
-      const token = makeToken({ exp: Date.now() + THIRTY_DAYS });
+      const token = makeToken({ exp: Date.now() + THIRTY_DAYS, pw: passwordStamp(rows[0].password_hash) });
       return Response.json({ token });
     }
 
@@ -45,14 +45,13 @@ export default async (req) => {
       const rows = await db.sql`SELECT * FROM app_auth WHERE id = 1`;
       const hasExisting = rows.length && rows[0].password_hash;
       if (hasExisting) {
-        // Changing an existing password requires either the current
-        // password or a currently-valid session — not open to anyone.
+        // Replacing an existing password always needs the current one — a
+        // logged-in device (or a copied login) alone isn't enough.
         const currentValid = body.currentPassword
           ? hashPassword(body.currentPassword, rows[0].password_salt) === rows[0].password_hash
           : false;
-        const tokenValid = verifyToken((req.headers.get("authorization") || "").replace(/^Bearer\s+/i, ""));
-        if (!currentValid && !tokenValid) {
-          return Response.json({ error: "Current password (or an active session) is required to change it." }, { status: 401 });
+        if (!currentValid) {
+          return Response.json({ error: "The current password is required to change it." }, { status: 401 });
         }
       }
       if (!body.newPassword || body.newPassword.length < 6) {
@@ -68,7 +67,7 @@ export default async (req) => {
           password_salt = EXCLUDED.password_salt,
           updated_at = NOW()
       `;
-      const token = makeToken({ exp: Date.now() + THIRTY_DAYS });
+      const token = makeToken({ exp: Date.now() + THIRTY_DAYS, pw: passwordStamp(hash) });
       return Response.json({ token });
     }
 
@@ -87,12 +86,13 @@ export default async (req) => {
       const salt = crypto.randomBytes(16).toString("hex");
       const hash = hashPassword(body.newPassword, salt);
       await db.sql`UPDATE app_auth SET password_hash = ${hash}, password_salt = ${salt}, updated_at = NOW() WHERE id = 1`;
-      const token = makeToken({ exp: Date.now() + THIRTY_DAYS });
+      // A fresh login for this device; every other device is signed out.
+      const token = makeToken({ exp: Date.now() + THIRTY_DAYS, pw: passwordStamp(hash) });
       return Response.json({ token });
     }
 
     if (body.action === "verify") {
-      return Response.json({ valid: !!verifyToken(body.token) });
+      return Response.json({ valid: await isValidLogin(body.token) });
     }
 
     return Response.json({ error: "Unknown action." }, { status: 400 });

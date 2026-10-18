@@ -1444,12 +1444,69 @@ function getJobMeta(id){
 }
 function setJobMeta(id,data){
   const m=getMeta();
+  const before=m[id];
   // Stamp the moment the status changes here, so the server can tell this
   // newer change from an older one (e.g. a client's approval).
-  if(data&&data.status!==(m[id]?.status??'send'))data={...data,statusAt:Date.now()};
+  if(data&&data.status!==(before?.status??'send'))data={...data,statusAt:Date.now()};
   m[id]=data;
   saveMeta(m);
-  syncJobMetaToServer(id,data);
+  // Only what this edit changed goes to the server, so this device's copy of
+  // everything else (which may be older than another device's) never
+  // overwrites anything.
+  const patch=jobMetaPatch(before,data);
+  if(Object.keys(patch).length>1)syncJobMetaToServer(id,patch);
+}
+// The difference between two copies of a job's details, in the form the
+// server applies: changed fields, plus payments/expenses added, edited or
+// removed (by id).
+const META_FIELDS=['tags','notes','installDate','installTime','proofLink','estimateVisualLink','excluded','calendarEventId'];
+const META_LISTS=[['payments','paymentsUpsert','removedPaymentIds'],['expenses','expensesUpsert','removedExpenseIds']];
+function jobMetaPatch(before,after){
+  before=before||{}; after=after||{};
+  const same=(a,b)=>JSON.stringify(a??null)===JSON.stringify(b??null);
+  const patch={patch:true};
+  META_FIELDS.forEach(k=>{ if(k in after&&!same(before[k],after[k]))patch[k]=after[k]; });
+  if((after.status||'send')!==(before.status||'send')||(Number(after.statusAt)||0)!==(Number(before.statusAt)||0)){
+    patch.status=after.status||'send'; patch.statusAt=Number(after.statusAt)||0;
+  }
+  META_LISTS.forEach(([k,up,rm])=>{
+    const old=new Map((before[k]||[]).filter(x=>x&&x.id).map(x=>[x.id,JSON.stringify(x)]));
+    const now=(after[k]||[]).filter(x=>x&&x.id);
+    const changed=now.filter(x=>old.get(x.id)!==JSON.stringify(x));
+    if(changed.length)patch[up]=changed;
+    const nowIds=new Set(now.map(x=>x.id));
+    const removed=[...new Set([...(after[rm]||[]),...[...old.keys()].filter(id=>!nowIds.has(id))])];
+    if(removed.length)patch[rm]=removed;
+  });
+  return patch;
+}
+// Applies a change (a patch, or a whole record from an older app version or
+// a restore) to a local copy, the same way the server does.
+function applyJobMetaChange(cur,body){
+  cur={status:'send',tags:[],notes:'',payments:[],expenses:[],...(cur||{})};
+  const out={...cur};
+  if(!body.patch){
+    const statusAt=Number(body.statusAt)||0;
+    const won=statusAt>=(Number(cur.statusAt)||0);
+    META_FIELDS.forEach(k=>{ if(k in body)out[k]=body[k]; });
+    out.status=won?(body.status||'send'):cur.status; out.statusAt=Math.max(statusAt,Number(cur.statusAt)||0);
+    META_LISTS.forEach(([k,,rm])=>{
+      const incoming=Array.isArray(body[k])?body[k]:[];
+      const keepOut=new Set([...incoming.map(x=>x&&x.id),...(body[rm]||[])]);
+      out[k]=[...incoming,...(cur[k]||[]).filter(x=>!keepOut.has(x&&x.id))];
+    });
+    return out;
+  }
+  META_FIELDS.forEach(k=>{ if(k in body)out[k]=body[k]; });
+  if('status' in body&&(Number(body.statusAt)||0)>=(Number(cur.statusAt)||0)){
+    out.status=body.status||'send'; out.statusAt=Number(body.statusAt)||0;
+  }
+  META_LISTS.forEach(([k,up,rm])=>{
+    const ups=(body[up]||[]).filter(x=>x&&x.id);
+    const drop=new Set([...ups.map(x=>x.id),...(body[rm]||[])]);
+    out[k]=[...(cur[k]||[]).filter(x=>!drop.has(x&&x.id)),...ups];
+  });
+  return out;
 }
 // Marks a job as excluded from Reports totals — for comped jobs, personal
 // projects, anything that happened but shouldn't count toward the real
@@ -3556,10 +3613,11 @@ function updateSyncIndicator(ok,isFullSync){
   else{ el.textContent='☁ Offline'; el.style.color='var(--amber)'; el.title='Could not reach the server — changes are saved on THIS DEVICE ONLY until sync recovers. Do not assume other devices see this yet.'; }
 }
 
-// Outbox — a save that fails to reach the server (offline, server hiccup)
-// is remembered here and re-sent before the next pull. Without it, the
-// next successful sync replaced this device's copy with the server's and
-// the unsent change was silently lost. One entry per record (newest wins).
+// Outbox — a save that fails to reach the server (offline, server trouble)
+// is remembered here and sent again before the next pull. Everyday edits
+// are small "patches" (only what changed), so several unsent edits to the
+// same record are combined into one entry instead of the newest replacing
+// the others.
 const OUTBOX_KEY='inkable_sync_outbox';
 function readOutbox(){ try{ return JSON.parse(localStorage.getItem(OUTBOX_KEY)||'{}'); }catch(e){ return {}; } }
 function writeOutbox(box){
@@ -3571,25 +3629,87 @@ function outboxKey(path,body){
   const id=(body&&(body.id||body.projectId))||new URLSearchParams(query||'').get('id')||'';
   return base+':'+id;
 }
-function queueUnsent(path,method,body,stamp){
-  // PDF bytes are too big to park in browser storage; they're rebuilt on
-  // demand if missing, so keep just the metadata.
-  if(body&&body.exportedPdfs){
-    const slim={};
-    Object.entries(body.exportedPdfs).forEach(([k,v])=>{ slim[k]={savedAt:v&&v.savedAt,storedInCloud:true}; });
-    body={...body,exportedPdfs:slim};
+// PDF bytes are too big for browser storage; this device only notes that a
+// stored copy exists (they're rebuilt on demand if missing).
+function slimPdfs(pdfs){
+  const slim={};
+  Object.entries(pdfs||{}).forEach(([k,v])=>{ slim[k]={savedAt:v&&v.savedAt,storedInCloud:true}; });
+  return slim;
+}
+// Two changes to the same record (older, then newer) as one change.
+function combineChanges(path,older,newer){
+  if(!older)return newer;
+  if(!newer)return older;
+  const base=path.split('?')[0];
+  if(base==='/job-meta'){
+    if(!newer.patch)return newer;
+    if(!older.patch)return {...applyJobMetaChange(older,newer),projectId:newer.projectId};
+    const out={...older,...newer};
+    if('status' in older&&'status' in newer&&(Number(older.statusAt)||0)>(Number(newer.statusAt)||0)){ out.status=older.status; out.statusAt=older.statusAt; }
+    META_LISTS.forEach(([,up,rm])=>combineListChanges(out,older,newer,up,rm));
+    return out;
   }
+  if(base==='/clients'){
+    if(!newer.patch)return newer;
+    if(!older.patch)return applyClientChange(older,newer);
+    const out={...older,...newer};
+    combineListChanges(out,older,newer,'logUpsert','removedLogIds');
+    return out;
+  }
+  if(base==='/pricing'){
+    if(!newer.patch)return newer;
+    return older.patch?{patch:{...older.patch,...newer.patch}}:{...older,...newer.patch};
+  }
+  if(base==='/projects'&&!newer.state&&older.state){
+    // A stored-PDF update folded into an estimate save still waiting to go.
+    return {...older,exportedPdfs:{...(older.exportedPdfs||{}),...(newer.exportedPdfs||{})}};
+  }
+  return newer;
+}
+function combineListChanges(out,older,newer,up,rm){
+  const removedLater=new Set(newer[rm]||[]), upLater=new Set((newer[up]||[]).map(x=>x.id));
+  const ups=new Map();
+  (older[up]||[]).forEach(x=>{ if(!removedLater.has(x.id))ups.set(x.id,x); });
+  (newer[up]||[]).forEach(x=>ups.set(x.id,x));
+  const removed=[...new Set([...(older[rm]||[]).filter(id=>!upLater.has(id)),...(newer[rm]||[])])];
+  if(ups.size)out[up]=[...ups.values()];else delete out[up];
+  if(removed.length)out[rm]=removed;else delete out[rm];
+}
+function queueUnsent(path,method,body,stamp){
+  if(body&&body.exportedPdfs)body={...body,exportedPdfs:slimPdfs(body.exportedPdfs)};
   const box=readOutbox();
   const key=outboxKey(path,body);
-  if(!box[key]||box[key].stamp<=stamp){
-    // A retry of the same change keeps its rejection count; a newer change starts fresh.
-    const rejected=box[key]&&box[key].stamp===stamp?box[key].rejected:0;
-    box[key]={path,method,body,stamp,rejected};
-  }
+  const prev=box[key];
+  let entry;
+  if(!prev||method==='DELETE')entry={path,method,body,stamp};
+  else if(prev.method==='DELETE')entry=prev; // already deleted: later edits don't matter
+  else if(prev.stamp<=stamp)entry={path,method,body:combineChanges(path,prev.body,body),stamp};
+  else entry={...prev,body:combineChanges(path,body,prev.body)};
+  // A retry of the same change keeps its rejection count; anything new starts fresh.
+  entry.rejected=prev&&prev.stamp===entry.stamp?(prev.rejected||0):0;
+  box[key]=entry;
   writeOutbox(box);
 }
+// Saves on their way to the server right now, and ones delivered in the
+// last two minutes: a sync that started before they landed doesn't include
+// them, so they're applied again on top of what it brings back.
+const pushesInFlight=new Map();
+let recentPushes=[];
+let pushCounter=0;
 async function cloudPush(path,method,body,opts2){
   const stamp=(opts2&&opts2.stamp)||Date.now();
+  const key=outboxKey(path,body);
+  // Anything still waiting for this record goes along with this change, so
+  // a delivered change never leaves an older unsent one behind.
+  const queued=readOutbox()[key];
+  let carried=null;
+  if(opts2&&opts2.fromOutbox)carried=stamp;
+  else if(queued&&method!=='DELETE'&&queued.method!=='DELETE'){
+    body=queued.stamp<=stamp?combineChanges(path,queued.body,body):combineChanges(path,body,queued.body);
+    carried=queued.stamp;
+  }
+  const pushId=++pushCounter;
+  pushesInFlight.set(pushId,{path,method,body,stamp});
   try{
     const token=localStorage.getItem(AUTH_TOKEN_KEY);
     const headers={'Content-Type':'application/json'};
@@ -3597,11 +3717,12 @@ async function cloudPush(path,method,body,opts2){
     const opts={method,headers};
     if(body!==undefined)opts.body=JSON.stringify(body);
     const res=await fetch(CLOUD_API_BASE+path,opts);
+    if(res.status===401)onAuthExpired();
     if(!res.ok){ const e=new Error('Server returned '+res.status); e.httpStatus=res.status; throw e; }
-    // Delivered — drop a queued copy of this record unless a newer change
-    // for it was queued after this one started.
-    const box=readOutbox(), key=outboxKey(path,body);
-    if(box[key]&&box[key].stamp<=stamp){ delete box[key]; writeOutbox(box); }
+    // Delivered — drop the queued copy it carried (not one queued meanwhile).
+    const box=readOutbox();
+    if(carried!==null&&box[key]&&box[key].stamp===carried){ delete box[key]; writeOutbox(box); }
+    recentPushes.push({path,method,body,stamp,doneAt:Date.now()});
     updateSyncIndicator(true);
     return await res.json();
   }catch(err){
@@ -3610,22 +3731,25 @@ async function cloudPush(path,method,body,opts2){
     queueUnsent(path,method,body,stamp);
     updateSyncIndicator(false);
     return null;
+  }finally{
+    pushesInFlight.delete(pushId);
   }
 }
-// Re-sends everything waiting in the outbox, oldest first. True only if
-// nothing is left unsent.
-// One change the server keeps REJECTING (not just unreachable) — e.g. a
-// payment for a job that was since deleted — must not block every other
-// change forever: after 5 rejected tries it's dropped, with a notice.
-// Changes that simply couldn't reach the server are never dropped.
+// Re-sends everything waiting in the outbox, oldest first. Returns 'done'
+// (nothing left), 'pending' (something still waiting) or 'offline'.
+// One change the server keeps REJECTING (e.g. a payment for a job that was
+// since deleted) must not block every other change forever: after 5
+// rejected tries it's dropped, with a notice. Changes that couldn't reach
+// the server, or hit a server problem (5xx), are kept until they go through.
 let lastPushHttpStatus=0;
 async function flushOutbox(){
   const entries=Object.values(readOutbox()).sort((a,b)=>a.stamp-b.stamp);
   for(const e of entries){
-    const result=await cloudPush(e.path,e.method,e.body,{stamp:e.stamp});
+    const result=await cloudPush(e.path,e.method,e.body,{stamp:e.stamp,fromOutbox:true});
     if(result!==null)continue;
-    if(!lastPushHttpStatus)return false; // offline / unreachable: stop, try later
-    if(lastPushHttpStatus===401)return false; // logged out: keep it for after login
+    const st=lastPushHttpStatus;
+    if(!st||st===401)return 'offline'; // unreachable, or logged out: keep everything for later
+    if(st>=500||st===408||st===429)continue; // server trouble: keep it, try again next time
     const box=readOutbox(), key=outboxKey(e.path,e.body);
     if(!box[key])continue;
     box[key].rejected=(box[key].rejected||0)+1;
@@ -3636,17 +3760,46 @@ async function flushOutbox(){
     }
     writeOutbox(box);
   }
-  return Object.keys(readOutbox()).length===0;
+  return Object.keys(readOutbox()).length===0?'done':'pending';
 }
-function syncClientToServer(client){ cloudPush('/clients','POST',client); }
+// A new client goes as a whole record; edits send only what changed, so an
+// older copy on another device can't undo them (and the call log is merged
+// entry by entry).
+function syncClientToServer(client,before){
+  if(!before){ cloudPush('/clients','POST',client); return; }
+  const patch=clientPatch(before,client);
+  if(Object.keys(patch).length>2)cloudPush('/clients','POST',patch);
+}
+const CLIENT_FIELDS=['name','phone','email','addr','city','state','zip','notes','leadSource'];
+function clientPatch(before,after){
+  const patch={id:after.id,patch:true};
+  CLIENT_FIELDS.forEach(k=>{ if((before[k]??'')!==(after[k]??''))patch[k]=after[k]??''; });
+  const old=new Map((before.log||[]).filter(e=>e&&e.id).map(e=>[e.id,JSON.stringify(e)]));
+  const now=(after.log||[]).filter(e=>e&&e.id);
+  const ups=now.filter(e=>old.get(e.id)!==JSON.stringify(e));
+  if(ups.length)patch.logUpsert=ups;
+  const nowIds=new Set(now.map(e=>e.id));
+  const removed=[...old.keys()].filter(id=>!nowIds.has(id));
+  if(removed.length)patch.removedLogIds=removed;
+  return patch;
+}
+function applyClientChange(cur,b){
+  if(!b.patch)return {...(cur||{}),...b};
+  const out={...(cur||{})};
+  CLIENT_FIELDS.forEach(k=>{ if(k in b)out[k]=b[k]; });
+  const ups=(b.logUpsert||[]).filter(e=>e&&e.id), drop=new Set([...ups.map(e=>e.id),...(b.removedLogIds||[])]);
+  if(drop.size)out.log=[...ups,...(out.log||[]).filter(e=>!drop.has(e&&e.id))];
+  return out;
+}
 function syncClientDeleteToServer(id){ cloudPush('/clients?id='+encodeURIComponent(id),'DELETE'); }
 function syncProjectToServer(project){ cloudPush('/projects','POST',project); }
 function syncProjectDeleteToServer(id){ cloudPush('/projects?id='+encodeURIComponent(id),'DELETE'); }
-async function syncJobMetaToServer(projectId,data){
-  const saved=await cloudPush('/job-meta','POST',{projectId,...data});
+async function syncJobMetaToServer(projectId,patch){
+  const saved=await cloudPush('/job-meta','POST',{projectId,...patch});
   if(!saved)return;
   // Adopt the server's merged lists — they may hold a Stripe payment or
-  // Stripe fee this device hadn't pulled yet. Deletions the server just
+  // Stripe fee this device hadn't pulled yet — keeping this device's own
+  // changes that are still on their way. Deletions the server just
   // confirmed are done, so their pending-delete markers can go.
   const m=getMeta();
   if(!m[projectId])return;
@@ -3656,54 +3809,109 @@ async function syncJobMetaToServer(projectId,data){
     m[projectId].status=saved.status; m[projectId].statusAt=Number(saved.statusAt);
     setTimeout(()=>{ renderProjects(); if(typeof renderSales==='function')renderSales(); },0);
   }
-  [['payments','removedPaymentIds'],['expenses','removedExpenseIds']].forEach(([listKey,removedKey])=>{
+  const waitingChanges=[...pushesInFlight.values(),...Object.values(readOutbox())]
+    .filter(e=>e.path==='/job-meta'&&e.body&&e.body.projectId===projectId);
+  META_LISTS.forEach(([listKey,upKey,removedKey])=>{
     if(!Array.isArray(saved[listKey]))return;
-    const sent=new Set(data[removedKey]||[]);
+    const sent=new Set(patch[removedKey]||[]);
     const stillPending=(m[projectId][removedKey]||[]).filter(x=>!sent.has(x));
-    m[projectId][listKey]=saved[listKey].filter(x=>!stillPending.includes(x.id));
+    const waitingIds=new Set(waitingChanges.flatMap(e=>(e.body[upKey]||[]).map(x=>x.id)));
+    m[projectId][listKey]=[
+      ...saved[listKey].filter(x=>!stillPending.includes(x&&x.id)&&!waitingIds.has(x&&x.id)),
+      ...(m[projectId][listKey]||[]).filter(x=>x&&waitingIds.has(x.id)),
+    ];
     if(stillPending.length)m[projectId][removedKey]=stillPending;else delete m[projectId][removedKey];
   });
   saveMeta(m);
 }
+// Settings saves send only the fields that changed (see saveSettings).
 function syncPricingToServer(data){ cloudPush('/pricing','POST',data); }
 
-// Pulls the server's current data on load and makes it the local cache.
-// If the server can't be reached, the app just keeps using whatever was
-// already in localStorage — never blocks on this.
+// One of this device's changes applied to a copy of the server's data, the
+// same way the server applies it.
+function applyChangeLocally(local,e){
+  const [base,query]=e.path.split('?');
+  const id=new URLSearchParams(query||'').get('id');
+  const b=e.body||{};
+  if(base==='/clients'){
+    if(e.method==='DELETE'){ local.clients=local.clients.filter(c=>c.id!==id); return; }
+    const i=local.clients.findIndex(c=>c.id===b.id);
+    if(i>=0)local.clients[i]=applyClientChange(local.clients[i],b);
+    else if(!b.patch)local.clients.push(b);
+  }else if(base==='/projects'){
+    if(e.method==='DELETE'){ local.projects=local.projects.filter(p=>p.id!==id); return; }
+    const i=local.projects.findIndex(p=>p.id===b.id);
+    if(b.state){
+      const rec={...b,exportedPdfs:slimPdfs({...(i>=0?local.projects[i].exportedPdfs:{}),...(b.exportedPdfs||{})})};
+      if(i>=0)local.projects[i]=rec;else local.projects.unshift(rec);
+    }else if(i>=0&&b.exportedPdfs){
+      local.projects[i]={...local.projects[i],exportedPdfs:{...(local.projects[i].exportedPdfs||{}),...slimPdfs(b.exportedPdfs)}};
+    }
+  }else if(base==='/job-meta'&&b.projectId){
+    const {projectId,...change}=b;
+    local.meta[projectId]=applyJobMetaChange(local.meta[projectId],change);
+  }else if(base==='/pricing'){
+    local.pricing=b.patch?{...local.pricing,...b.patch}:{...b};
+  }
+}
+
+// Pulls the server's current data and makes it the local cache, keeping
+// this device's own changes the server doesn't have yet. If the server
+// can't be reached, the app just keeps using whatever is already in
+// localStorage — never blocks on this.
 let lastPullAt=0;
+let storageFullWarned=false;
 async function pullFromServerOnLoad(){
   lastPullAt=Date.now();
-  // Never overwrite this device's copy while it still holds changes the
-  // server hasn't received — send those first, and if that fails, keep
-  // working from the local copy and try again on the next sync.
-  if(!(await flushOutbox())){
+  // Send what's waiting first. If the server can't be reached at all, keep
+  // working from this device's copy and try again on the next sync.
+  if(await flushOutbox()==='offline'){
     console.warn('Unsent changes could not be delivered yet — keeping this device\'s copy.');
     updateSyncIndicator(false);
     return;
   }
+  // Give saves already on their way a moment to land (a few seconds at most).
+  for(let i=0;i<25&&pushesInFlight.size;i++)await new Promise(r=>setTimeout(r,200));
+  const pullStart=Date.now();
   try{
     const token=localStorage.getItem(AUTH_TOKEN_KEY);
     const headers=token?{'Authorization':'Bearer '+token}:{};
     const res=await fetch(CLOUD_API_BASE+'/sync-all',{headers});
+    if(res.status===401){ onAuthExpired(); return; }
     if(!res.ok)throw new Error('Server returned '+res.status);
     const data=await res.json();
     const oldMeta=getMeta();
-    localStorage.setItem(CLIENTS_KEY,JSON.stringify(data.clients||[]));
-    localStorage.setItem(SAVED_KEY,JSON.stringify(data.projects||[]));
-    localStorage.setItem(META_KEY,JSON.stringify(data.jobMeta||{}));
-    if(data.pricing&&Object.keys(data.pricing).length)localStorage.setItem(PRICING_KEY,JSON.stringify(data.pricing));
-    updateSyncIndicator(true,true);
+    // The server's copy plus this device's own changes it may not include
+    // yet: ones still waiting to be sent, ones on their way, and ones that
+    // landed after this sync started. (Before, an edit made during a sync
+    // vanished from the screen, and the next edit made the loss permanent.)
+    recentPushes=recentPushes.filter(r=>Date.now()-r.doneAt<120000);
+    const local={clients:data.clients||[],projects:data.projects||[],meta:data.jobMeta||{},pricing:data.pricing||{}};
+    [...Object.values(readOutbox()),...pushesInFlight.values(),...recentPushes.filter(r=>r.doneAt>=pullStart-2000)]
+      .sort((a,b)=>a.stamp-b.stamp).forEach(e=>applyChangeLocally(local,e));
+    // Each part saved on its own, so a full browser storage can't leave this
+    // device quietly half-updated.
+    const failed=[];
+    const put=(key,val)=>{ try{ localStorage.setItem(key,JSON.stringify(val)); }catch(e){ failed.push(key); } };
+    put(CLIENTS_KEY,local.clients); put(SAVED_KEY,local.projects); put(META_KEY,local.meta);
+    if(Object.keys(local.pricing).length)put(PRICING_KEY,local.pricing);
+    // Before the lists are drawn, so a newly accepted estimate shows at once.
+    put(ACCEPT_KEY,data.estimateAcceptances||{});
+    if(failed.length&&!storageFullWarned){
+      storageFullWarned=true;
+      showToast('⚠️','This device\'s storage is full','Some of the latest data couldn\'t be saved on this device, so parts of the Dashboard may be out of date here. Your changes still go to the server. Clearing old site data in this browser fixes it.',{color:'var(--red)',duration:20000});
+    }
+    updateSyncIndicator(Object.keys(readOutbox()).length===0,true);
     renderProjects();
     if(typeof renderSales==='function')renderSales();
     if(typeof renderClients==='function')renderClients();
     if(typeof renderReports==='function')renderReports();
     checkForNewClientResponses(data.proofResponses||{});
     checkForNewCardPayments(oldMeta,data.jobMeta||{});
-    try{ localStorage.setItem(ACCEPT_KEY,JSON.stringify(data.estimateAcceptances||{})); }catch(e){}
     checkForNewAcceptances(data.estimateAcceptances||{});
     refreshReminders();
   }catch(err){
-    console.warn('Initial cloud sync failed — using whatever is already on this device:',err);
+    console.warn('Cloud sync failed — using whatever is already on this device:',err);
     updateSyncIndicator(false);
   }
 }

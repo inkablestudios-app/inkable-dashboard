@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { getDatabase } from "@netlify/database";
 
 // AUTH_JWT_SECRET must be set as a Netlify environment variable — never
 // hardcoded here. Without it, tokens can't be signed or verified, and
@@ -33,12 +34,30 @@ export function verifyToken(token) {
   }
 }
 
-// Call at the top of every protected function. Returns true/false —
-// doesn't throw, so callers just do: if (!requireAuth(req)) return 401.
-export function requireAuth(req) {
+// A short fingerprint of the current password, carried inside every login.
+// Changing the password changes it, which signs out every other device
+// (e.g. a lost phone) instead of leaving their logins valid for 30 days.
+export function passwordStamp(passwordHash) {
+  return crypto.createHash("sha256").update(String(passwordHash || "")).digest("hex").slice(0, 16);
+}
+export async function currentPasswordStamp() {
+  const rows = await getDatabase().sql`SELECT password_hash FROM app_auth WHERE id = 1`;
+  return rows[0]?.password_hash ? passwordStamp(rows[0].password_hash) : null;
+}
+// A login that is validly signed, not expired, and issued under the
+// current password.
+export async function isValidLogin(token) {
+  const payload = verifyToken(token);
+  if (!payload) return false;
+  const stamp = await currentPasswordStamp();
+  return !!stamp && payload.pw === stamp;
+}
+
+// Call at the top of every protected function. Resolves true/false —
+// doesn't throw, so callers just do: if (!(await requireAuth(req))) return 401.
+export async function requireAuth(req) {
   const header = req.headers.get("authorization") || "";
-  const token = header.replace(/^Bearer\s+/i, "");
-  return !!verifyToken(token);
+  return isValidLogin(header.replace(/^Bearer\s+/i, ""));
 }
 
 export function hasSecret() {

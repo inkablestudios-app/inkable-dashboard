@@ -3,8 +3,16 @@ import { requireAuth } from "./_shared/auth.js";
 
 const db = getDatabase();
 
+const metaOut = row => ({
+  status: row.status, tags: row.tags, notes: row.notes,
+  installDate: row.install_date, installTime: row.install_time, proofLink: row.proof_link,
+  estimateVisualLink: row.estimate_visual_link, statusAt: Number(row.status_at) || 0,
+  payments: row.payments, expenses: row.expenses,
+  excluded: row.is_excluded, calendarEventId: row.calendar_event_id,
+});
+
 export default async (req) => {
-  if (!requireAuth(req)) {
+  if (!(await requireAuth(req))) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -35,6 +43,45 @@ export default async (req) => {
     if (method === "POST") {
       const m = await req.json();
       if (!m.projectId) return Response.json({ error: "projectId is required" }, { status: 400 });
+
+      // Everyday edits send only what changed (a "patch"), so a device holding
+      // an older copy of the job can't put back what another device changed or
+      // deleted (notes, install date, a removed payment...). Full records
+      // (restoring a backup, older app versions) go through the merge below.
+      if (m.patch) {
+        const has = k => Object.prototype.hasOwnProperty.call(m, k);
+        const statusAt = Number(m.statusAt) > 0 ? Math.floor(Number(m.statusAt)) : 0;
+        const upPay = Array.isArray(m.paymentsUpsert) ? m.paymentsUpsert.filter(p => p && p.id) : [];
+        const dropPay = JSON.stringify([...upPay.map(p => p.id), ...(Array.isArray(m.removedPaymentIds) ? m.removedPaymentIds : [])].map(String));
+        const upExp = Array.isArray(m.expensesUpsert) ? m.expensesUpsert.filter(e => e && e.id) : [];
+        const dropExp = JSON.stringify([...upExp.map(e => e.id), ...(Array.isArray(m.removedExpenseIds) ? m.removedExpenseIds : [])].map(String));
+        await db.sql`INSERT INTO job_meta (project_id, updated_at) VALUES (${m.projectId}, NOW()) ON CONFLICT (project_id) DO NOTHING`;
+        const [row] = await db.sql`
+          UPDATE job_meta SET
+            status = CASE WHEN ${has("status")} AND ${statusAt} >= COALESCE(status_at, 0) THEN ${m.status || "send"} ELSE status END,
+            status_at = CASE WHEN ${has("status")} THEN GREATEST(${statusAt}, COALESCE(status_at, 0)) ELSE status_at END,
+            tags = CASE WHEN ${has("tags")} THEN ${JSON.stringify(m.tags || [])}::jsonb ELSE tags END,
+            notes = CASE WHEN ${has("notes")} THEN ${m.notes || ""} ELSE notes END,
+            install_date = CASE WHEN ${has("installDate")} THEN ${m.installDate || ""} ELSE install_date END,
+            install_time = CASE WHEN ${has("installTime")} THEN ${m.installTime || ""} ELSE install_time END,
+            proof_link = CASE WHEN ${has("proofLink")} THEN ${m.proofLink || ""} ELSE proof_link END,
+            estimate_visual_link = CASE WHEN ${has("estimateVisualLink")} THEN ${m.estimateVisualLink || ""} ELSE estimate_visual_link END,
+            is_excluded = CASE WHEN ${has("excluded")} THEN ${!!m.excluded} ELSE is_excluded END,
+            calendar_event_id = CASE WHEN ${has("calendarEventId")} THEN ${m.calendarEventId || ""} ELSE calendar_event_id END,
+            payments = COALESCE((
+              SELECT jsonb_agg(e) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(payments) = 'array' THEN payments ELSE '[]'::jsonb END) AS e
+              WHERE NOT jsonb_exists(${dropPay}::jsonb, e->>'id')
+            ), '[]'::jsonb) || ${JSON.stringify(upPay)}::jsonb,
+            expenses = COALESCE((
+              SELECT jsonb_agg(e) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(expenses) = 'array' THEN expenses ELSE '[]'::jsonb END) AS e
+              WHERE NOT jsonb_exists(${dropExp}::jsonb, e->>'id')
+            ), '[]'::jsonb) || ${JSON.stringify(upExp)}::jsonb,
+            updated_at = NOW()
+          WHERE project_id = ${m.projectId}
+          RETURNING *
+        `;
+        return Response.json(metaOut(row));
+      }
 
       // Payments are MERGED, never blindly replaced. The Stripe webhook
       // writes payments straight to the server, so a Dashboard tab holding
@@ -82,17 +129,14 @@ export default async (req) => {
           is_excluded=EXCLUDED.is_excluded, calendar_event_id=EXCLUDED.calendar_event_id, updated_at=NOW()
         RETURNING *
       `;
-      return Response.json({
-        status: row.status, tags: row.tags, notes: row.notes,
-        installDate: row.install_date, installTime: row.install_time, proofLink: row.proof_link,
-        estimateVisualLink: row.estimate_visual_link, statusAt: Number(row.status_at) || 0,
-        payments: row.payments, expenses: row.expenses,
-        excluded: row.is_excluded, calendarEventId: row.calendar_event_id,
-      });
+      return Response.json(metaOut(row));
     }
 
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   } catch (err) {
+    // The job was deleted (e.g. on another device): a rejection, not a
+    // server problem, so the Dashboard stops retrying it.
+    if (err.code === "23503") return Response.json({ error: "That job no longer exists." }, { status: 409 });
     console.error("job-meta function error:", err);
     return Response.json({ error: err.message }, { status: 500 });
   }
