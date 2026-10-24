@@ -248,3 +248,8 @@
   - Search also finds words in the job window's notes.
   - Labels: Terms are printed on the estimate and invoice and accepted by the client (it said
     "invoice only"); the Notes box says it prints on the client's estimate and invoice.
+- Client profile page: clicking a client opens a full page (instead of a small window) with their
+  contact details (tap to call / email / map), totals (paid to date, owed now, number of jobs,
+  average job, client since), every job as a card with its items, status and money plus quick
+  buttons (estimate, invoice, receipt, + payment, copy as new), filters (all / open / owes / done),
+  all their payments, and the call & email log with "+ Add note". "← Clients" goes back.
