@@ -108,6 +108,7 @@ export default async (req) => {
       return Response.json({
         jobName: state?.form?.jobName || r.job_name || "Your job",
         estNo: r.est_no || "",
+        jobDesc: state?.form?.jobDesc || "",
         clientName: r.client_name || "",
         status: r.status || "send",
         requestedDate: r.saved_at || "",

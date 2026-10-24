@@ -1862,8 +1862,10 @@ function changeClientInPricer(){
 // Item descriptions, vehicle info and notes (the estimate's and the job
 // window's), for search ("F-150", "door decals", "gate code"...) — so an old
 // job is easy to find and copy.
+// The short title typed in the pricer ("Ford F-150 partial wrap"); empty for older jobs.
+function jobDescOf(p){ return (p?.state?.form?.jobDesc||'').trim(); }
 function jobSearchText(p,meta){
-  let txt=(p.state?.form?.notes||'')+' '+(p.state?.form?.jobName||'')+' '+((meta||getJobMeta(p.id)).notes||'');
+  let txt=(p.state?.form?.notes||'')+' '+(p.state?.form?.jobName||'')+' '+(p.state?.form?.jobDesc||'')+' '+((meta||getJobMeta(p.id)).notes||'');
   try{ (JSON.parse(p.state?.form?.pricerData||'{}').lines||[]).forEach(l=>{ txt+=' '+(l.desc||'')+' '+(l.vehicleInfo||''); }); }catch(e){}
   return txt.toLowerCase();
 }
@@ -1935,7 +1937,7 @@ function renderProjects(){
     const docType=p.docType||'estimate';
 
     return `<div class="job-row" onclick="openJobModal('${p.id}')">
-      <div class="job-client" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${clientName}">${clientName}</div>
+      <div class="job-client" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${clientName}">${clientName}${jobDescOf(p)?`<div style="font-size:11px;font-weight:400;color:var(--muted);overflow:hidden;text-overflow:ellipsis">${escapeHtml(jobDescOf(p))}</div>`:''}</div>
       <div class="job-number" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis">${p.estNo||'—'}</div>
       <div onclick="event.stopPropagation()">
         <select class="status-badge ${STATUS_CLASS[meta.status]||'s-send'}" onchange="quickStatusChange('${p.id}',this)" style="width:100%">
@@ -2066,7 +2068,7 @@ function renderSales(){
       <div>
         <div style="font-weight:700;font-size:13px;color:var(--text)">${clientName}${excluded?' <span style="background:var(--muted2);color:var(--dark);font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;letter-spacing:0.03em;vertical-align:middle">EXCLUDED</span>':''}</div>
         <div style="font-size:11px;font-family:'DM Mono',monospace;color:var(--muted)">${p.estNo||'—'}</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">${p.name||''}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${escapeHtml(jobDescOf(p)||jobItemsSummary(p))}</div>
       </div>
       <div class="amount">$${total.toFixed(2)}</div>
       <div class="amount" style="color:${paidColor}">$${paid.toFixed(2)}</div>
@@ -2373,7 +2375,7 @@ function renderInstalls(){
       <div style="font-weight:700;font-size:12px;color:var(--text)">${when}</div>
       <div style="min-width:0">
         <div style="font-weight:700;font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(who)} <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);font-weight:400">${escapeHtml(p.estNo||'')}</span></div>
-        <div style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(p.name||'')}${addr?` · <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--blue);text-decoration:none">📍 ${escapeHtml(addr)}</a>`:''}${cl&&cl.phone?` · <a href="tel:${escapeHtml(cl.phone.replace(/[^0-9+]/g,''))}" onclick="event.stopPropagation()" style="color:var(--blue);text-decoration:none">📞 ${escapeHtml(cl.phone)}</a>`:''}</div>
+        <div style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(jobDescOf(p)||jobItemsSummary(p))}${addr?` · <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--blue);text-decoration:none">📍 ${escapeHtml(addr)}</a>`:''}${cl&&cl.phone?` · <a href="tel:${escapeHtml(cl.phone.replace(/[^0-9+]/g,''))}" onclick="event.stopPropagation()" style="color:var(--blue);text-decoration:none">📞 ${escapeHtml(cl.phone)}</a>`:''}</div>
       </div>
       <div><span class="status-badge ${STATUS_CLASS[meta.status]||'s-send'}" style="display:inline-flex">${STATUS_LABELS[meta.status]||meta.status}</span></div>
       <div style="text-align:right;font-size:12px;font-weight:700;color:${bal>0.005?'var(--red)':'var(--green)'}">${bal>0.005?'Collect '+fmt(bal):'Paid ✓'}</div>
@@ -2576,7 +2578,7 @@ function renderClientProfile(){
   const lastContact=getLastContactDate(id), daysAgo=daysSince(lastContact);
   const statusBadge=st=>`<span class="status-badge ${STATUS_CLASS[st]||'s-send'}" style="display:inline-flex">${STATUS_LABELS[st]||st}</span>`;
   const jobCards=shown.length?shown.map(({p,meta,total,paid,balance,owes})=>{
-    const title=(p.state?.form?.jobDesc||'').trim();
+    const title=jobDescOf(p);
     const items=jobItemsSummary(p);
     const pid=escapeHtml(p.id);
     return `<div class="cp-job" onclick="openJobModal('${pid}')">
@@ -3413,7 +3415,7 @@ function openJobModal(id){
   const cl=clients.find(c=>c.id===p?.clientId);
   const clientName=cl?cl.name:(p?.state?.form?.billingName||'—');
 
-  document.getElementById('modal-title').textContent=clientName+' — '+(p?.estNo||'');
+  document.getElementById('modal-title').textContent=clientName+' — '+(p?.estNo||'')+(p&&jobDescOf(p)?' · '+jobDescOf(p):'');
   document.getElementById('modal-status').value=meta.status||'send';
   document.getElementById('modal-install-date').value=meta.installDate||'';
   document.getElementById('modal-install-time').value=meta.installTime||'';
@@ -3614,7 +3616,7 @@ function generateWorkOrderPDF(id){
     doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(90);
     doc.text('Status: '+(STATUS_LABELS[meta.status]||meta.status||''),W-M,y+19,{align:'right'});
     y+=34; line(M,y,W-M,y); y+=16;
-    doc.setTextColor(0);doc.setFont('helvetica','bold');doc.setFontSize(12);doc.text(f.jobName||p.name||'Job',M,y); y+=16;
+    doc.setTextColor(0);doc.setFont('helvetica','bold');doc.setFontSize(12);doc.text(f.jobDesc||f.jobName||p.name||'Job',M,y); y+=16;
     doc.setFont('helvetica','normal');doc.setFontSize(10);
     const who=cl?cl.name:(f.billingName||'');
     const addr=cl?[cl.addr,[cl.city,cl.state].filter(Boolean).join(', '),cl.zip].filter(Boolean).join(', '):'';
@@ -5190,7 +5192,7 @@ function buildClientLinkEmail(jobId,shareUrl){
   const cl=p?getClients().find(c=>c.id===p.clientId):null;
   const meta=getJobMeta(jobId);
   const first=((cl?.name||p?.state?.form?.billingName||'').trim().split(/\s+/)[0])||'there';
-  const job=p?.name||'your project';
+  const job=(p&&jobDescOf(p))||p?.name||'your project';
   const subject=`Your project with Inkable Studios${p?.estNo?' — '+p.estNo:''}`;
   const what=meta.proofLink
     ?'your proof is ready to review. You can approve it or request changes'
@@ -5751,7 +5753,8 @@ let pricerCleanState='';
 function pricerSnapshot(){
   try{
     return JSON.stringify([collectPricerData(),document.getElementById('pricerEstNo').value,document.getElementById('pricerDate').value,
-      document.getElementById('pricerNotes').value,document.getElementById('pricerTerms').value,pricerState.clientId]);
+      document.getElementById('pricerNotes').value,document.getElementById('pricerTerms').value,pricerState.clientId,
+      document.getElementById('pricerJobDesc').value]);
   }catch(e){ return ''; }
 }
 function pricerIsOpen(){ return !!document.getElementById('pricerOverlay')?.classList.contains('open'); }
@@ -5793,6 +5796,7 @@ function openPricer(projNum, clientId){
   // New estimates start with your saved default notes/terms (Settings → Business).
   const biz=getBusinessInfo();
   document.getElementById('pricerNotes').value=biz.defaultNotes||'';
+  document.getElementById('pricerJobDesc').value='';
   document.getElementById('pricerTerms').value=biz.defaultTerms||'';
   document.getElementById('setupHrs').value='0';
   document.getElementById('setupMins').value='15';
@@ -5865,6 +5869,7 @@ function loadPricerFromSaved(project){
   syncJobIdentity();
   document.getElementById('pricerNotes').value=f.notes||'';
   document.getElementById('pricerTerms').value=f.terms||'';
+  document.getElementById('pricerJobDesc').value=f.jobDesc||'';
 
   document.getElementById('pricerOverlay').classList.add('open');
   document.getElementById('lineItemsContainer').innerHTML='';
@@ -6934,6 +6939,7 @@ function savePricerProject(){
     billingName:pricerState.clientName,
     notes:document.getElementById('pricerNotes').value,
     terms:document.getElementById('pricerTerms').value,
+    jobDesc:(document.getElementById('pricerJobDesc').value||'').trim(),
     pricerData:JSON.stringify({...collectPricerData(),
       // Every save is a (re-)quote: the validity period starts now.
       quotedAt:new Date().toISOString(),
@@ -7456,6 +7462,7 @@ function gatherPricerPDFData(){
   const jobName=(document.getElementById('pricerJobName')?.value||'').trim()||'Untitled Job';
   const notes=(document.getElementById('pricerNotes')?.value||'').trim();
   const terms=(document.getElementById('pricerTerms')?.value||'').trim();
+  const jobDesc=(document.getElementById('pricerJobDesc')?.value||'').trim();
   const date=inputDateToStored(document.getElementById('pricerDate')?.value); // date picker "2026-10-18" → "Oct 18, 2026"
   const estNo=document.getElementById('pricerEstNo')?.value||('EST-'+pricerState.projectNum);
   const invNo=invNoForEst(estNo,pricerState.projectNum);
@@ -7470,7 +7477,7 @@ function gatherPricerPDFData(){
   return{lineData,totalMat,totalInstall,designTotal,setupTotal,hardwareTotal,sub,dtype,dval,disc,taxable,tax,total,taxExempt,minChargeApplied:minChargeOn,minChargeAdj,
     processingFee,processingFeeOn,taxRate,
     validUntil:typeof validUntil==='string'?validUntil:'',validDays:typeof validDays==='number'?validDays:0,
-    jobName,notes,terms,date,estNo,invNo,clientName,clientAddr,clientCityLine,clientPhone};
+    jobName,jobDesc,notes,terms,date,estNo,invNo,clientName,clientAddr,clientCityLine,clientPhone};
 }
 
 function pdfSlug(s){ return (s||'').replace(/[^a-zA-Z0-9]/g,''); }
@@ -7540,6 +7547,7 @@ function gatherPricerPDFDataFromSaved(p){
     processingFee,processingFeeOn,taxRate,
     validUntil:typeof validUntil==='string'?validUntil:'',validDays:typeof validDays==='number'?validDays:0,
     jobName:f.jobName||'Untitled Job',
+    jobDesc:f.jobDesc||'',
     notes:f.notes||'',
     terms:f.terms||'',
     date:p.savedAt||new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}),
@@ -7704,6 +7712,7 @@ function drawEstimateChrome(doc,W,H,M,d){
   doc.setFont('helvetica','bold');
   doc.text((d.clientName||d.jobName).toUpperCase(),M,y);
   doc.setCharSpace(0);doc.setTextColor(0);
+  if(d.jobDesc){ y+=15; doc.setFont('helvetica','normal');doc.setFontSize(10);doc.setTextColor(70);doc.text(d.jobDesc,M,y);doc.setTextColor(0); }
   y+=8;
   doc.setDrawColor(0);doc.setLineWidth(2.5);
   doc.line(M,y,M+56,y);
@@ -7799,6 +7808,7 @@ function drawInvoiceChrome(doc,W,H,M,d,titleLabel,numLabel,numValue){
   doc.setFont('helvetica','bold');
   doc.text((d.clientName||d.jobName).toUpperCase(),M,y);
   doc.setCharSpace(0);doc.setTextColor(0);
+  if(d.jobDesc){ y+=15; doc.setFont('helvetica','normal');doc.setFontSize(10);doc.setTextColor(70);doc.text(d.jobDesc,M,y);doc.setTextColor(0); }
   y+=8;
   doc.setDrawColor(0);doc.setLineWidth(2.5);
   doc.line(M,y,M+56,y);
@@ -8147,6 +8157,10 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
         <label style="font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:4px">Client</label>
         <input type="text" id="pricerJobName" readonly style="width:100%;background:var(--dark);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;font-family:'DM Sans',sans-serif;outline:none;cursor:default"/>
         <div style="font-size:10px;color:var(--muted);margin-top:4px;font-family:'DM Mono',monospace" id="jobNumDisplay">Job #—</div>
+      </div>
+      <div class="jd-field" style="margin-bottom:16px">
+        <label style="font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:4px">Job description <span style="font-weight:400;text-transform:none;letter-spacing:0">(optional — shows in lists, PDFs and the client page)</span></label>
+        <input type="text" id="pricerJobDesc" maxlength="80" placeholder="e.g. Ford F-150 partial wrap" style="width:100%;background:var(--dark);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;font-family:'DM Sans',sans-serif;outline:none"/>
       </div>
 
       <!-- Regular line items -->

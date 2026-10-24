@@ -253,3 +253,7 @@
   average job, client since), every job as a card with its items, status and money plus quick
   buttons (estimate, invoice, receipt, + payment, copy as new), filters (all / open / owes / done),
   all their payments, and the call & email log with "+ Add note". "← Clients" goes back.
+- Job description: an optional short title in the pricer (e.g. "Ford F-150 partial wrap"). It shows
+  under the client's name in Projects, in Sales, Installs, the job window title, the client profile,
+  the estimate / invoice / work-order PDFs, the client's page and Stripe's checkout, and search finds
+  it. Copy as New keeps it so it can be edited. Older jobs without one show their items instead.

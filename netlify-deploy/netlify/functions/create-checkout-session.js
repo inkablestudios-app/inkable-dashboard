@@ -129,7 +129,8 @@ export default async (req) => {
     const cancelUrl = `${origin}/proof.html?token=${encodeURIComponent(token)}&payment=cancelled`;
 
     const jobName = state?.form?.jobName || r.job_name || "Your job";
-    const productName = `${jobName}${r.est_no ? " — " + r.est_no : ""} (${description})`;
+    const jobDesc = (state?.form?.jobDesc || "").trim();
+    const productName = `${jobName}${jobDesc ? " — " + jobDesc : ""}${r.est_no ? " — " + r.est_no : ""} (${description})`;
 
     // Only one open checkout per job: cancel the previous one if it was never
     // finished. Stripe refuses to expire a session that was already paid or

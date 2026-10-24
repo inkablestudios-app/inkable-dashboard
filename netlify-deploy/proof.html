@@ -146,6 +146,7 @@
           <div>
             ${data.clientName ? `<div class="client">${esc(data.clientName)}</div>` : ''}
             <h1>${esc(data.jobName)}</h1>
+            ${data.jobDesc ? `<div style="font-size:13px;color:var(--muted);margin-top:2px">${esc(data.jobDesc)}</div>` : ''}
             ${data.estNo ? `<div class="estno">${esc(data.estNo)}</div>` : ''}
           </div>
           <div class="statuspill" style="background:${meta.color}22;color:${meta.color}">${meta.label}</div>
