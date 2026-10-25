@@ -65,3 +65,17 @@ Written after a read-through of v2.38 on 2026-10-16. Keep this updated when the 
 - Decided: same price for all payment methods; Processing Fee box ON by default. Payment method is
   recorded per payment (Cash/Check/Card/Zelle/Other; Stripe = "Card (Stripe)").
 - Login has no limit on wrong-password attempts (low risk for now; use a strong password).
+
+## Parked for later (owner's choice)
+- Owner's real rates: send a screenshot of Settings (pricing + materials) so tests can judge prices
+  with real numbers instead of the built-in defaults. (Parked Oct 25.)
+- Real past jobs (sizes, materials, what was charged) to compare against the pricer: the owner will
+  collect them from the tool later. (Parked Oct 25.)
+- "Customer supplied material" option and a print-only rate in Settings. (On hold since Oct 24.)
+- Multi-piece signs (e.g. clear acrylic face + vinyl + backer): enter each piece as its own item
+  ("＋ Add Item"). For a plain piece with no vinyl, add a material "None (substrate only)" at $0 in
+  Settings and untick "Printed on our printer". (A per-item "layers" feature was built and removed
+  on Oct 25 because items already cover this.)
+- The old Inkatool's ready-made item list (DEFAULT_QQ_PRESETS: yard sign, DOT decal, banners,
+  partner-shop print items) is still in the code but nothing uses it. Owner doesn't need it now.
+- Far future: monuments and channel letters (see the Oct 25 test report for what that would take).
