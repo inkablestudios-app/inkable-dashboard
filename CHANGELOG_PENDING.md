@@ -257,3 +257,11 @@
   under the client's name in Projects, in Sales, Installs, the job window title, the client profile,
   the estimate / invoice / work-order PDFs, the client's page and Stripe's checkout, and search finds
   it. Copy as New keeps it so it can be edited. Older jobs without one show their items instead.
+- Job page: clicking a job in Projects (or on a client's page) opens a full page for that job:
+  status (changeable right there), client, totals (total, paid, balance, profit, install date), each
+  pricer item with its layers (print media / vinyl, laminate, substrate) and the size, qty and sq ft
+  of each layer (a substrate cut to a different size shows its own size), design/install hours,
+  the price breakdown, payments, proof, profit, notes and this job's calls/emails. Buttons for
+  Estimate, Invoice, Receipt, Work Order, + Payment, Expenses, Copy as new, "Edit items" (pricer)
+  and "Status, proof & notes" (the old job window, which still does the editing). Sales, Installs
+  and notifications still open the job window directly.

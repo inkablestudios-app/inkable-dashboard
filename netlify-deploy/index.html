@@ -411,6 +411,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 .cp-box{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:18px}
 .cp-row{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:6px 0;border-bottom:1px solid var(--border)}
 .cp-row:last-child{border-bottom:none}
+.jp-layers{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px}
+.jp-layers th{text-align:left;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:4px 8px 4px 0;border-bottom:1px solid var(--border)}
+.jp-layers td{padding:6px 8px 6px 0;border-bottom:1px solid var(--border);color:var(--text);vertical-align:top}
+.jp-layers tr:last-child td{border-bottom:none}
+.jp-layers td:nth-child(n+2),.jp-layers th:nth-child(n+2){white-space:nowrap;font-family:'DM Mono',monospace}
 .client-card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:14px 16px;display:grid;grid-template-columns:1fr auto;align-items:center;gap:12px;cursor:pointer;transition:border-color .12s}
 .client-card:hover{border-color:var(--blue)}
 .client-name{font-size:14px;font-weight:700;color:#fff}
@@ -600,6 +605,12 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
   .cp-cols{grid-template-columns:minmax(0,1fr)}
   .cp-name{font-size:20px}
   .cp-head .btn{flex:1 1 auto}
+  .jp-layers thead{display:none}
+  .jp-layers tr{display:grid;grid-template-columns:repeat(3,auto);gap:2px 12px;justify-content:start;padding:6px 0;border-bottom:1px solid var(--border)}
+  .jp-layers tr:last-child{border-bottom:none}
+  .jp-layers td{border:none;padding:0}
+  .jp-layers td:first-child{grid-column:1/-1;white-space:normal}
+  .jp-layers td:nth-child(n+2)::before{content:attr(data-l) ": ";color:var(--muted);font-family:inherit}
 
   /* Reports */
   .reports-grid{grid-template-columns:minmax(0,1fr);gap:12px;padding:12px 14px}
@@ -954,6 +965,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 
     <!-- CLIENT PROFILE — one client's full page: contact, totals, every job, payments, log -->
     <div class="tab-content" id="tab-client-profile"><div id="client-profile" class="cp-page"></div></div>
+    <div class="tab-content" id="tab-job-page"><div id="job-page" class="cp-page"></div></div>
 
     <!-- ADD/EDIT CLIENT MODAL -->
     <div class="modal-overlay" id="clientFormModal">
@@ -1936,7 +1948,7 @@ function renderProjects(){
     const isHold=tags.includes('hold');
     const docType=p.docType||'estimate';
 
-    return `<div class="job-row" onclick="openJobModal('${p.id}')">
+    return `<div class="job-row" onclick="openJobPage('${p.id}')">
       <div class="job-client" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${clientName}">${clientName}${jobDescOf(p)?`<div style="font-size:11px;font-weight:400;color:var(--muted);overflow:hidden;text-overflow:ellipsis">${escapeHtml(jobDescOf(p))}</div>`:''}</div>
       <div class="job-number" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis">${p.estNo||'—'}</div>
       <div onclick="event.stopPropagation()">
@@ -1972,6 +1984,7 @@ function renderProjects(){
   }).join('');
 
   updateStats(projects);
+  if(jobPageVisible())renderJobPage();
 }
 
 function quickStatusChange(id, sel){
@@ -2145,6 +2158,7 @@ function closePaymentModal(){
   document.getElementById('paymentModal').classList.remove('open');
   paymentModalProjectId=null;
   if(clientProfileVisible())renderClientProfile();
+  if(jobPageVisible())renderJobPage();
 }
 function submitPayment(){
   if(!paymentModalProjectId)return;
@@ -2397,6 +2411,7 @@ function updateInstallsBadge(g){
 // ── Clients ────────────────────────────────────────────────────────────
 function renderClients(){
   if(clientProfileVisible())renderClientProfile();
+  if(jobPageVisible())renderJobPage();
   const clients=getClients();
   const projects=getProjects();
   const el=document.getElementById('clients-list');
@@ -2489,6 +2504,7 @@ function closeClientForm(){
   document.getElementById('clientFormModal').classList.remove('open');
   clientFormEditingId=null;
   if(clientProfileVisible())renderClientProfile();
+  if(jobPageVisible())renderJobPage();
 }
 function saveClientForm(){
   const name=document.getElementById('cf-name').value.trim();
@@ -2581,7 +2597,7 @@ function renderClientProfile(){
     const title=jobDescOf(p);
     const items=jobItemsSummary(p);
     const pid=escapeHtml(p.id);
-    return `<div class="cp-job" onclick="openJobModal('${pid}')">
+    return `<div class="cp-job" onclick="openJobPage('${pid}')">
       <div class="cp-job-top">
         <div style="min-width:0">
           <div class="cp-job-title">${escapeHtml(p.estNo||'Job')}${title?' · '+escapeHtml(title):''}</div>
@@ -2651,6 +2667,176 @@ function renderClientProfile(){
         <div class="cp-box">${logHtml}</div>
       </div>
     </div>`;
+}
+// ── Job page — everything about one job on a full page (like the client
+// page): what is being made, layer by layer, with sizes from the pricer;
+// the money; payments; proof; install; notes. Editing still happens in the
+// pricer (items) and the job window (status, proof, notes, expenses).
+let jobPageId=null;
+function openJobPage(id){
+  if(!getProjects().some(p=>p.id===id))return;
+  jobPageId=id;
+  document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
+  document.getElementById('tab-job-page').classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',!!el.getAttribute('onclick')?.includes("'projects'")));
+  renderJobPage();
+  document.querySelector('.main')?.scrollTo?.(0,0);
+}
+function jobPageVisible(){ return !!jobPageId&&document.getElementById('tab-job-page')?.classList.contains('active'); }
+function closeJobPage(){ jobPageId=null; switchTab('projects'); }
+// Sizes are saved at full precision (e.g. 20.833333333333332 ft): show at most 3 decimals.
+function jpDim(v,ft){ const n=+(parseFloat(v)||0).toFixed(3); return ft?(n+' ft'):(n+'"'); }
+function jpSqft(w,wFt,h,hFt){ const a=nonNeg(w)*(wFt?12:1), b=nonNeg(h)*(hFt?12:1); return a*b/144; }
+function renderJobPage(){
+  const el=document.getElementById('job-page');
+  const p=getProjects().find(x=>x.id===jobPageId);
+  if(!el)return;
+  if(!p){ closeJobPage(); return; }
+  const id=p.id, pid=escapeHtml(id), f=p.state?.form||{}, meta=getJobMeta(id);
+  const cl=getClients().find(c=>c.id===p.clientId);
+  const clientName=cl?cl.name:(f.billingName||'—');
+  let pd={}; try{ pd=JSON.parse(f.pricerData||'{}'); }catch(e){}
+  const lines=pd.lines||[];
+  const rates=getRates(), vinyl=getVinyl(), laminate=getLaminate(), substrate=getSubstrate();
+  // Money: the estimate frozen at save time (what the client sees and Stripe
+  // charges); older jobs are recalculated from their items.
+  let s=f.estimateSummary&&!isNaN(parseFloat(f.estimateSummary.total))?f.estimateSummary:null;
+  if(!s&&f.pricerData){ try{ s=gatherPricerPDFDataFromSaved(p); }catch(e){} }
+  const frozenLines=(s?.lineItems||s?.lineData||[]);
+  const total=getProjectAmount(p), paid=getAmountPaid(id), balance=Math.max(0,total-paid);
+  const committed=isJobCommitted(id), owes=committed&&!meta.excluded&&balance>0.005;
+  const fin=getJobFinancials(p);
+  const acc=getEstimateAcceptance(id);
+  const tags=meta.tags||[];
+  const num=v=>+(+v).toFixed(2);
+
+  const itemsHtml=lines.length?lines.map((l,i)=>{
+    const c=calcSavedLine(l,pd.jobType,rates,vinyl,laminate,substrate);
+    const qty=lineQty(l.qty);
+    const price=frozenLines.length===lines.length?parseFloat(frozenLines[i]?.matTotal):c.matTotal;
+    const rows=[];
+    if(l.pricingMode==='flat'){
+      rows.push(['Vendor / flat item','—',String(qty),'—']);
+    }else{
+      const each=jpSqft(l.w,l.wFt,l.h,l.hFt), size=jpDim(l.w,l.wFt)+' × '+jpDim(l.h,l.hFt);
+      const printed=l.printed!==undefined?l.printed:(l.vinyl!=='Oracal 651 Intermediate Cal'&&l.vinyl!=='Fellers Black Label Banner');
+      rows.push([(printed?'Print media':'Vinyl (cut, not printed)')+': '+(l.vinyl||'—'),size,String(qty),num(each*qty)]);
+      if(l.lam&&l.lam!=='No Laminate')rows.push(['Laminate: '+l.lam,size,String(qty),num(each*qty)]);
+      if(l.sub&&l.sub!=='None'){
+        const same=l.subSameSize!==false;
+        const sEach=same?each:jpSqft(l.subW,l.subWFt,l.subH,l.subHFt);
+        rows.push(['Substrate: '+l.sub+(l.subThickness?' — '+l.subThickness:''),same?size:jpDim(l.subW,l.subWFt)+' × '+jpDim(l.subH,l.subHFt),String(qty),num(sEach*qty)]);
+      }
+    }
+    const extras=[];
+    if(l.designChk)extras.push('Design: '+num(c.designHrsTotal)+' hr'+(l.designLevel&&l.designLevel!=='standard'?' ('+l.designLevel+')':''));
+    if(l.installChk)extras.push(l.installMode==='flat'?'Install: flat '+fmt(nonNeg(l.installFlatPrice)):'Install: '+num(c.installHrsTotal)+' hr'+(l.installLevel&&l.installLevel!=='standard'?' ('+l.installLevel+')':''));
+    return `<div class="cp-box jp-item">
+      <div class="cp-job-top">
+        <div style="min-width:0"><div class="cp-job-title">${i+1}. ${escapeHtml((l.desc||'').trim()||'Item')}</div>
+          ${l.vehicleInfo?`<div class="cp-job-sub">${escapeHtml(l.vehicleInfo)}</div>`:''}</div>
+        <b style="font-family:'DM Mono',monospace;white-space:nowrap">${isNaN(price)?'':fmt(price)}</b>
+      </div>
+      <table class="jp-layers"><thead><tr><th>Layer</th><th>Size (W × H)</th><th>Qty</th><th>Sq ft</th></tr></thead><tbody>
+        ${rows.map(r=>`<tr><td data-l="Layer">${escapeHtml(r[0])}</td><td data-l="Size">${escapeHtml(r[1])}</td><td data-l="Qty">${escapeHtml(r[2])}</td><td data-l="Sq ft">${escapeHtml(String(r[3]))}</td></tr>`).join('')}
+      </tbody></table>
+      ${extras.length?`<div class="cp-job-sub" style="margin-top:8px">${extras.map(escapeHtml).join(' · ')}</div>`:''}
+    </div>`;
+  }).join(''):'<div class="cp-box" style="font-size:12px;color:var(--muted2)">No items on this job.</div>';
+
+  const sumRow=(k,v,style)=>`<div class="cp-row"${style?` style="${style}"`:''}><span style="color:var(--muted)">${k}</span><b style="font-family:'DM Mono',monospace">${v}</b></div>`;
+  const totalsHtml=s?[
+    sumRow('Items',fmt(frozenLines.reduce((a,l)=>a+(parseFloat(l.matTotal)||0),0))),
+    s.designTotal>0.005?sumRow('Design',fmt(s.designTotal)):'',
+    s.totalInstall>0.005?sumRow('Install',fmt(s.totalInstall)):'',
+    s.setupTotal>0.005?sumRow('Setup',fmt(s.setupTotal)):'',
+    s.hardwareTotal>0.005?sumRow('Hardware',fmt(s.hardwareTotal)):'',
+    s.minChargeAdj>0.005?sumRow('Minimum charge',fmt(s.minChargeAdj)):'',
+    s.disc>0.005?sumRow('Discount','−'+fmt(s.disc)):'',
+    s.taxExempt?sumRow('Tax','exempt'):sumRow('Tax',fmt(s.tax||0)),
+    s.processingFee>0.005?sumRow('Card processing fee',fmt(s.processingFee)):'',
+    sumRow('Total',fmt(total),'font-size:14px'),
+  ].join(''):sumRow('Total',fmt(total));
+
+  const payments=getPayments(id);
+  const payHtml=payments.length?payments.map(pm=>`<div class="cp-row"><span style="color:var(--muted)">${escapeHtml(pm.date||'—')}<br><span style="color:var(--text)">${escapeHtml(pm.method||'')}</span></span><b style="color:var(--green);font-family:'DM Mono',monospace;white-space:nowrap">${fmt(pm.amount)}</b></div>`).join('')
+    :'<div style="font-size:12px;color:var(--muted2)">No payments yet.</div>';
+  const keep=fin.revenue-fin.tax;
+  const profitHtml=[sumRow('Price (before tax)',fmt(keep)),sumRow('Costs (expenses)',fmt(fin.cost.total)),
+    sumRow('Profit',`<span style="color:${fin.profit>=0?'var(--green)':'var(--red)'}">${fmt(fin.profit)}${keep>0.005?' ('+Math.round(fin.profit/keep*100)+'%)':''}</span>`)].join('');
+  const addr=cl?[cl.addr,[cl.city,cl.state].filter(Boolean).join(', '),cl.zip].filter(Boolean).join(' '):'';
+  const install=meta.installDate?new Date(meta.installDate+'T00:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'})+(meta.installTime?' at '+fmtInstallTime(meta.installTime):''):'';
+  const notes=[f.notes?['On the estimate',f.notes]:null,meta.notes?['Internal',meta.notes]:null].filter(Boolean);
+  const log=cl?getClientLog(cl.id).filter(e=>e.jobId===id):[];
+  const desc=jobDescOf(p);
+  el.innerHTML=`
+    <div class="cp-head">
+      <div style="min-width:0">
+        <button class="btn btn-ghost" style="padding:5px 10px;font-size:11px" onclick="closeJobPage()">← Projects</button>
+        <div class="cp-name">${escapeHtml(p.estNo||'Job')}${desc?' · '+escapeHtml(desc):''}</div>
+        <div class="cp-contact">
+          ${cl?`<a href="#" onclick="event.preventDefault();openClientProfile('${escapeHtml(cl.id)}')">👤 ${escapeHtml(clientName)}</a>`:`<span>👤 ${escapeHtml(clientName)}</span>`}
+          <span>Created ${escapeHtml(p.savedAt||'—')}</span>
+          ${tags.includes('rush')?'<span class="tag tag-rush">RUSH</span>':''}
+          ${tags.includes('hold')?'<span class="tag tag-hold">HOLD</span>':''}
+          ${acc?`<span style="color:var(--green)">✍️ Accepted by ${escapeHtml(acc.name||'client')}</span>`:''}
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <select class="status-badge ${STATUS_CLASS[meta.status]||'s-send'}" onchange="quickStatusChange('${pid}',this)" style="padding:8px 10px">
+          ${Object.entries(STATUS_LABELS).map(([k,v])=>`<option value="${k}" ${meta.status===k?'selected':''}>${v}</option>`).join('')}
+        </select>
+        <button class="btn btn-primary" onclick="editInPricer('${pid}')">✏️ Edit items</button>
+        <button class="btn btn-ghost" onclick="openJobModal('${pid}')">⚙️ Status, proof &amp; notes</button>
+      </div>
+    </div>
+    <div class="cp-actions" style="margin:-6px 0 18px">
+      <button class="pay-record-btn" onclick="viewDoc('${pid}','estimate')">📄 Estimate</button>
+      <button class="pay-record-btn" onclick="viewDoc('${pid}','invoice')">🧾 Invoice</button>
+      ${paid>0.005?`<button class="pay-record-btn" onclick="generateReceiptPDF('${pid}')">✓ Receipt</button>`:''}
+      <button class="pay-record-btn" onclick="generateWorkOrderPDF('${pid}')">🛠 Work Order</button>
+      <button class="pay-record-btn" onclick="openPaymentModal('${pid}')">＋ Payment</button>
+      <button class="pay-record-btn" onclick="openExpenseListModal('${pid}')">💸 Expenses</button>
+      <button class="pay-record-btn" onclick="copyJobToNewEstimate('${pid}')">⧉ Copy as new</button>
+    </div>
+    <div class="cp-stats">
+      <div class="cp-stat"><b>${fmt(total)}</b><span>Total</span></div>
+      <div class="cp-stat"><b style="color:var(--green)">${fmt(paid)}</b><span>Paid</span></div>
+      <div class="cp-stat"><b style="color:${owes?'var(--red)':'var(--muted)'}">${fmt(balance)}</b><span>Balance</span></div>
+      <div class="cp-stat"><b style="color:${fin.profit>=0?'var(--text)':'var(--red)'}">${fmt(fin.profit)}</b><span>Profit</span></div>
+      <div class="cp-stat"><b style="font-size:14px">${install?escapeHtml(install):'—'}</b><span>Install</span></div>
+    </div>
+    <div class="cp-cols">
+      <div>
+        <div class="cp-section"><span>Items (${lines.length})</span></div>
+        ${itemsHtml}
+        <div class="cp-section"><span>Price</span></div>
+        <div class="cp-box">${totalsHtml}</div>
+      </div>
+      <div>
+        <div class="cp-section"><span>Client</span></div>
+        <div class="cp-box" style="font-size:12px;line-height:1.7">
+          <div style="font-weight:700;color:var(--text);font-size:13px">${escapeHtml(clientName)}</div>
+          ${cl?.phone?`<div><a style="color:var(--blue);text-decoration:none" href="tel:${escapeHtml(cl.phone.replace(/[^0-9+]/g,''))}">📞 ${escapeHtml(cl.phone)}</a></div>`:''}
+          ${cl?.email?`<div><a style="color:var(--blue);text-decoration:none" href="mailto:${escapeHtml(cl.email)}">✉ ${escapeHtml(cl.email)}</a></div>`:''}
+          ${addr?`<div><a style="color:var(--blue);text-decoration:none" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}" target="_blank" rel="noopener">📍 ${escapeHtml(addr)}</a></div>`:''}
+        </div>
+        <div class="cp-section"><span>Proof</span></div>
+        <div class="cp-box" style="font-size:12px">${meta.proofLink?`<a href="#" style="color:var(--blue);text-decoration:none" onclick="event.preventDefault();openJobPageProof('${pid}')">📎 View proof</a>`:'<span style="color:var(--muted2)">No proof uploaded yet.</span>'}</div>
+        <div class="cp-section"><span>Payments (${payments.length})</span><button class="pay-record-btn" onclick="openPaymentModal('${pid}')">＋ Add</button></div>
+        <div class="cp-box">${payHtml}</div>
+        <div class="cp-section"><span>Profit (only you see this)</span></div>
+        <div class="cp-box">${profitHtml}</div>
+        <div class="cp-section"><span>Notes</span></div>
+        <div class="cp-box">${notes.length?notes.map(([k,v])=>`<div class="cp-row" style="display:block"><div style="color:var(--muted);font-size:11px">${k}</div><div style="color:var(--text);white-space:pre-wrap;overflow-wrap:anywhere">${escapeHtml(v)}</div></div>`).join(''):'<div style="font-size:12px;color:var(--muted2)">No notes.</div>'}</div>
+        ${log.length?`<div class="cp-section"><span>Calls &amp; emails (this job)</span></div>
+        <div class="cp-box">${log.slice(0,15).map(e=>`<div class="cp-row" style="display:block"><div style="color:var(--muted);font-size:11px">${escapeHtml(e.date||'')} · ${escapeHtml(e.type||'')}</div><div style="color:var(--text);white-space:pre-wrap;overflow-wrap:anywhere">${escapeHtml(e.note||'')}</div></div>`).join('')}</div>`:''}
+      </div>
+    </div>`;
+}
+function openJobPageProof(id){
+  const p=getProjects().find(x=>x.id===id), link=getJobMeta(id).proofLink;
+  if(link)openDocViewer('Proof — '+(p?.estNo||''),getDriveEmbedUrl(link),false);
 }
 // (The old pop-up client window, kept for reference by its helpers.)
 function openClientDetailModal(clientId){
@@ -2748,6 +2934,7 @@ function closeClientLog(){
   document.getElementById('clientLogModal').classList.remove('open');
   clientLogClientId=null;
   if(clientProfileVisible())renderClientProfile();
+  if(jobPageVisible())renderJobPage();
 }
 function submitClientLogEntry(){
   if(!clientLogClientId)return;
@@ -3439,6 +3626,7 @@ function closeModal(){
   document.getElementById('jobModal').classList.remove('open');
   currentJobId=null;
   if(clientProfileVisible())renderClientProfile();
+  if(jobPageVisible())renderJobPage();
 }
 
 function toggleTag(tag){
@@ -6006,6 +6194,7 @@ function addLineItemFromSaved(line){
 function closePricer(){
   if(!pricerCanLeave())return false; // unsaved changes: ask first ("← Projects" and Escape)
   document.getElementById('pricerOverlay').classList.remove('open');
+  if(jobPageVisible())renderJobPage();
   return true;
 }
 
