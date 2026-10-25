@@ -270,11 +270,3 @@
   - Fix: replacing a proof with the 📎 button in Projects now also sends the client back to
     "Awaiting Proof Approval" with fresh Approve / Request Changes buttons (only the job window
     did this before).
-- Extra layers on a pricer item ("＋ Add layer"): for signs built from several pieces, e.g. a clear
-  acrylic face + printed vinyl + a white acrylic backer. Each layer is a substrate, vinyl/media
-  (printed or not) or laminate from Settings, with its own size in inches (blank = same as the
-  item's media size) and, for substrates, a thickness. Priced like the item's own materials
-  (material cost, + print cost for printed vinyl, × sq ft × qty, then markup). Extra substrates are
-  named on the estimate/invoice line; every layer shows with its size on the job page and the work
-  order. Saved jobs without layers are priced exactly as before. A layer whose material was removed
-  from Settings has to be re-picked before saving.

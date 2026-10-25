@@ -411,14 +411,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 .cp-box{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:18px}
 .cp-row{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:6px 0;border-bottom:1px solid var(--border)}
 .cp-row:last-child{border-bottom:none}
-.li-layer{display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:var(--dark);border:1px solid var(--border);border-radius:6px;padding:6px 8px;margin:0 0 6px;font-size:11px;color:var(--muted)}
-.li-layer select,.li-layer input[type=number],.li-layer input[type=text]{background:var(--panel);border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:11px;padding:4px 6px;font-family:'DM Sans',sans-serif;outline:none;min-width:0}
-.li-layer .ly-name{flex:1 1 160px}
-.li-layer .ly-title{flex:1 1 100%;font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
-.li-layer .ly-w,.li-layer .ly-h{width:62px}
-.li-layer .ly-thick{width:80px}
-.li-layer .ly-printed-wrap{display:flex;align-items:center;gap:4px;cursor:pointer}
-.li-layer .line-del{margin-left:auto}
 .jp-layers{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px}
 .jp-layers th{text-align:left;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:4px 8px 4px 0;border-bottom:1px solid var(--border)}
 .jp-layers td{padding:6px 8px 6px 0;border-bottom:1px solid var(--border);color:var(--text);vertical-align:top}
@@ -2735,7 +2727,6 @@ function renderJobPage(){
         const sEach=same?each:jpSqft(l.subW,l.subWFt,l.subH,l.subHFt);
         rows.push(['Substrate: '+l.sub+(l.subThickness?' — '+l.subThickness:''),same?size:jpDim(l.subW,l.subWFt)+' × '+jpDim(l.subH,l.subHFt),String(qty),num(sEach*qty)]);
       }
-      (c.layers||[]).forEach(ly=>rows.push([LAYER_KINDS[ly.kind]+': '+layerLabel(ly),jpDim(ly.w)+' × '+jpDim(ly.h),String(qty),num(ly.sqft)]));
     }
     const extras=[];
     if(l.designChk)extras.push('Design: '+num(c.designHrsTotal)+' hr'+(l.designLevel&&l.designLevel!=='standard'?' ('+l.designLevel+')':''));
@@ -3840,7 +3831,6 @@ function generateWorkOrderPDF(id){
         specs.push('Media: '+(l.vinyl||'—')+(l.printed===false?' (not printed)':' (printed)'));
         if(l.lam&&l.lam!=='No Laminate')specs.push('Laminate: '+l.lam);
         if(l.sub&&l.sub!=='None')specs.push('Substrate: '+l.sub+(l.subThickness?' — '+l.subThickness:'')+(l.subSameSize===false?' ('+dim(l.subW,l.subWFt)+' × '+dim(l.subH,l.subHFt)+')':''));
-        (c.layers||[]).forEach(ly=>specs.push('Extra layer — '+LAYER_KINDS[ly.kind]+': '+layerLabel(ly)+' ('+dim(ly.w)+' × '+dim(ly.h)+', '+ly.sqft.toFixed(2)+' sqft total)'));
       }
       const tasks=[l.designChk?'Design':'',l.installChk?'Install':''].filter(Boolean);
       if(tasks.length)specs.push('Includes: '+tasks.join(' + '));
@@ -5739,31 +5729,11 @@ function refreshOpenPricerAfterSettingsSave(){
 // the legacy single-item tool (form.pMat/pInst/pDesign). Used by Sales and
 // Reports so revenue numbers are correct regardless of which pricer saved
 // the job.
-// Extra layers on one item (e.g. a clear acrylic face + printed vinyl + a
-// white acrylic backer): each is a substrate, vinyl or laminate with its own
-// size in inches; a blank size means "same as the item's media size". Priced
-// like the main layers: material cost (+ print cost for printed vinyl) × sq ft
-// × qty, then the markup.
-const LAYER_KINDS={sub:'Substrate',vinyl:'Vinyl / media',lam:'Laminate'};
-function layerMaterials(kind){ return kind==='vinyl'?getVinyl():kind==='lam'?getLaminate():getSubstrate(); }
-function layerCalc(layers,wIn,hIn,qty,rates,vinyl,laminate,substrate){
-  let raw=0; const out=[];
-  (Array.isArray(layers)?layers:[]).forEach(ly=>{
-    const kind=LAYER_KINDS[ly.kind]?ly.kind:'sub';
-    const lw=String(ly.w??'').trim()===''?wIn:nonNeg(ly.w), lh=String(ly.h??'').trim()===''?hIn:nonNeg(ly.h);
-    const sqft=lw*lh/144*qty;
-    const list=kind==='vinyl'?vinyl:kind==='lam'?laminate:substrate;
-    raw+=((list[ly.name]||0)+(kind==='vinyl'&&ly.printed?rates.printCost:0))*sqft;
-    out.push({kind,name:ly.name||'',w:lw,h:lh,sqft,thickness:(ly.thickness||'').trim(),printed:!!ly.printed});
-  });
-  return {raw,layers:out};
-}
-function layerLabel(ly){ return ly.name+(ly.kind==='sub'&&ly.thickness?' — '+ly.thickness:'')+(ly.kind==='vinyl'?(ly.printed?' (printed)':' (not printed)'):''); }
 function calcSavedLine(line, fallbackJobType, rates, vinyl, laminate, substrate){
   // Same guards as the live pricer (calcLine): qty at least 1, nothing negative.
   const qty=lineQty(line.qty);
 
-  let sqft=0,rawMatCost=0,matTotal=0,layerInfo={raw:0,layers:[]};
+  let sqft=0,rawMatCost=0,matTotal=0;
 
   if(line.pricingMode==='flat'){
     if(line.flatSubMode==='unit'){
@@ -5797,8 +5767,6 @@ function calcSavedLine(line, fallbackJobType, rates, vinyl, laminate, substrate)
       (line.vinyl!=='Oracal 651 Intermediate Cal'&&line.vinyl!=='Fellers Black Label Banner');
     const pCost=isPrinted?rates.printCost:0;
     rawMatCost=(vCost+lCost+pCost)*sqft + sCost*subSqft;
-    layerInfo=layerCalc(line.layers,wFinal,hFinal,qty,rates,vinyl,laminate,substrate);
-    rawMatCost+=layerInfo.raw;
     matTotal=rawMatCost*rates.markup;
   }
 
@@ -5826,10 +5794,8 @@ function calcSavedLine(line, fallbackJobType, rates, vinyl, laminate, substrate)
     }
   }
   const desc=(line.desc||'').trim()||'Item';
-  // Substrates named on the estimate: the item's own plus any extra substrate layers.
-  const subLabel=line.pricingMode==='flat'?'':[(line.sub&&line.sub!=='None')?(line.sub+(line.subThickness?' — '+line.subThickness:'')):'',
-    ...layerInfo.layers.filter(l=>l.kind==='sub'&&l.name).map(layerLabel)].filter(Boolean).join(' + ');
-  return {sqft,matTotal,rawMatCost,designCost,designHrsTotal,installCost,installHrsTotal,installCostBasis,desc,subLabel,layers:layerInfo.layers};
+  const subLabel=(line.pricingMode!=='flat'&&line.sub&&line.sub!=='None')?(line.sub+(line.subThickness?' — '+line.subThickness:'')):'';
+  return {sqft,matTotal,rawMatCost,designCost,designHrsTotal,installCost,installHrsTotal,installCostBasis,desc,subLabel};
 }
 
 function getProjectAmount(p){
@@ -5978,12 +5944,6 @@ function missingMaterialMessage(){
       if(!sel||Object.prototype.hasOwnProperty.call(obj,sel.value))continue;
       const item=(el.querySelector('.line-num')?.textContent||'this item').replace(/^Item/,'item');
       return `Pick ${what} for ${item}`+(sel.dataset.missing?` — ${sel.dataset.missing} was removed from Settings.`:'.');
-    }
-    for(const r of el.querySelectorAll('.li-layer')){
-      const sel=r.querySelector('.ly-name'), kind=r.querySelector('.ly-kind').value;
-      if(Object.prototype.hasOwnProperty.call(layerMaterials(kind),sel.value))continue;
-      const item=(el.querySelector('.line-num')?.textContent||'this item').replace(/^Item/,'item');
-      return `Pick a material for the extra ${LAYER_KINDS[kind].toLowerCase()} layer on ${item}`+(sel.dataset.missing?` — ${sel.dataset.missing} was removed from Settings.`:'.');
     }
   }
   return '';
@@ -6203,7 +6163,6 @@ function addLineItemFromSaved(line){
     });
   }
   if(line.subThickness)el.querySelector('.li-sub-thickness').value=line.subThickness;
-  (Array.isArray(line.layers)?line.layers:[]).forEach(ly=>addPricerLayer(el.id,ly));
 
   // Flat / unit pricing
   if(line.pricingMode==='flat'){
@@ -6412,8 +6371,6 @@ function addLineItem(){
         <input type="text" class="li-sub-thickness" placeholder='e.g. 3mm, 1/8&quot;' oninput="recalc()" style="font-size:11px"/>
       </div>
     </div>
-    <div class="li-layers"></div>
-    <button type="button" class="li-vehicle-toggle-btn" style="margin-bottom:8px" onclick="addPricerLayer('${id}')">＋ Add layer <span style="font-weight:400">(e.g. acrylic backer, 2nd vinyl — blank size = same as media)</span></button>
     </div>
     <div class="design-row">
       <input type="checkbox" class="install-check li-design-chk" id="dchk_${id}" onchange="toggleDesign('${id}')"/>
@@ -6693,54 +6650,6 @@ function toggleSubSize(lineId){
   recalc();
 }
 
-function addPricerLayer(lineId,data){
-  const el=document.getElementById(lineId);
-  if(!el)return;
-  const d=data||{kind:'sub'};
-  const kind=LAYER_KINDS[d.kind]?d.kind:'sub';
-  const row=document.createElement('div');
-  row.className='li-layer';
-  row.innerHTML=`
-    <div class="ly-title">Extra layer</div>
-    <select class="ly-kind" onchange="onLayerKindChange(this)">${Object.entries(LAYER_KINDS).map(([k,v])=>`<option value="${k}"${k===kind?' selected':''}>${v}</option>`).join('')}</select>
-    <select class="ly-name" onchange="recalc()"></select>
-    <label class="ly-printed-wrap"><input type="checkbox" class="ly-printed" onchange="recalc()"${d.printed?' checked':''}/> Printed</label>
-    <span class="ly-size"><input type="number" class="ly-w" min="0" step="0.1" placeholder="W in" oninput="recalc()"/> × <input type="number" class="ly-h" min="0" step="0.1" placeholder="H in" oninput="recalc()"/> in</span>
-    <input type="text" class="ly-thick" placeholder="Thickness" oninput="recalc()"/>
-    <button type="button" class="line-del" title="Remove layer" onclick="this.closest('.li-layer').remove();recalc()">✕</button>`;
-  el.querySelector('.li-layers').appendChild(row);
-  const nameSel=row.querySelector('.ly-name');
-  if(data&&data.name!==undefined)setMaterialSelect(nameSel,layerMaterials(kind),data.name);
-  else{ nameSel.innerHTML=Object.keys(layerMaterials(kind)).filter(k=>k!=='None').map(k=>`<option value="${escapeAttr(k)}">${escapeHtml(k)}</option>`).join(''); }
-  if(d.w!==undefined&&d.w!=='')row.querySelector('.ly-w').value=+(+d.w).toFixed(3);
-  if(d.h!==undefined&&d.h!=='')row.querySelector('.ly-h').value=+(+d.h).toFixed(3);
-  row.querySelector('.ly-thick').value=d.thickness||'';
-  showLayerFields(row);
-  if(!data)recalc();
-  return row;
-}
-function onLayerKindChange(sel){
-  const row=sel.closest('.li-layer');
-  row.querySelector('.ly-name').innerHTML=Object.keys(layerMaterials(sel.value)).filter(k=>k!=='None'&&k!=='No Laminate').map(k=>`<option value="${escapeAttr(k)}">${escapeHtml(k)}</option>`).join('');
-  row.querySelector('.ly-name').style.borderColor='';
-  showLayerFields(row);
-  recalc();
-}
-function showLayerFields(row){
-  const kind=row.querySelector('.ly-kind').value;
-  row.querySelector('.ly-printed-wrap').style.display=kind==='vinyl'?'':'none';
-  row.querySelector('.ly-thick').style.display=kind==='sub'?'':'none';
-}
-function readPricerLayers(el){
-  return Array.from(el.querySelectorAll('.li-layer')).map(r=>{
-    const kind=r.querySelector('.ly-kind').value;
-    return {kind,name:r.querySelector('.ly-name').value,
-      printed:kind==='vinyl'&&r.querySelector('.ly-printed').checked,
-      w:r.querySelector('.ly-w').value,h:r.querySelector('.ly-h').value,
-      thickness:kind==='sub'?(r.querySelector('.ly-thick').value||'').trim():''};
-  });
-}
-
 function applyInstallSuggestion(lineId){
   const el=document.getElementById(lineId);
   if(!el)return;
@@ -6835,7 +6744,6 @@ function calcLine(el){
     const pCost=isPrinted?rates.printCost:0;
 
     rawMatCost=(vCost+lCost+pCost)*sqft + sCost*subSqft; // wholesale, no markup — used for margin
-    rawMatCost+=layerCalc(readPricerLayers(el),wIn,hIn,qty,rates,vinyl,laminate,substrate).raw;
     matTotal=rawMatCost*rates.markup;
   }
 
@@ -7143,7 +7051,6 @@ function collectPricerData(){
         subWFt:el.querySelector('.li-subw-unit[data-unit="ft"]')?.classList.contains('active'),
         subHFt:el.querySelector('.li-subh-unit[data-unit="ft"]')?.classList.contains('active'),
         subThickness:el.querySelector('.li-sub-thickness')?.value||'',
-        layers:readPricerLayers(el),
       })),
       setupHrs:document.getElementById('setupHrs').value,
       setupMins:document.getElementById('setupMins').value,
@@ -7724,7 +7631,6 @@ function gatherPricerPDFData(){
       const thick=(el.querySelector('.li-sub-thickness')?.value||'').trim();
       desc+=' + '+subSel+(thick?' ('+thick+')':'');
     }
-    readPricerLayers(el).filter(l=>l.kind==='sub'&&l.name).forEach(l=>{ desc+=' + '+l.name+(l.thickness?' ('+l.thickness+')':''); });
     const vehicleInfo=(el.querySelector('.li-vehicle-info')?.value||'').trim();
     if(vehicleInfo)desc+=' — '+vehicleInfo;
     return {desc,sqft,matTotal,designCost,installCost};
