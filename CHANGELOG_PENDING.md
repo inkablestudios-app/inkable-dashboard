@@ -265,3 +265,8 @@
   Estimate, Invoice, Receipt, Work Order, + Payment, Expenses, Copy as new, "Edit items" (pricer)
   and "Status, proof & notes" (the old job window, which still does the editing). Sales, Installs
   and notifications still open the job window directly.
+  - Proof on the job page: Upload proof / Replace proof / View proof, and "Client link & email"
+    (opens the job window's client-link section). Needs Google Drive connected, same as before.
+  - Fix: replacing a proof with the 📎 button in Projects now also sends the client back to
+    "Awaiting Proof Approval" with fresh Approve / Request Changes buttons (only the job window
+    did this before).

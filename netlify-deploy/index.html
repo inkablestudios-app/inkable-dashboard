@@ -2822,7 +2822,14 @@ function renderJobPage(){
           ${addr?`<div><a style="color:var(--blue);text-decoration:none" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}" target="_blank" rel="noopener">📍 ${escapeHtml(addr)}</a></div>`:''}
         </div>
         <div class="cp-section"><span>Proof</span></div>
-        <div class="cp-box" style="font-size:12px">${meta.proofLink?`<a href="#" style="color:var(--blue);text-decoration:none" onclick="event.preventDefault();openJobPageProof('${pid}')">📎 View proof</a>`:'<span style="color:var(--muted2)">No proof uploaded yet.</span>'}</div>
+        <div class="cp-box" style="font-size:12px">
+          <div style="margin-bottom:8px;color:${meta.proofLink?'var(--green)':'var(--muted2)'}">${meta.proofLink?'✓ Proof uploaded':'No proof uploaded yet.'} <span id="jp-proof-status"></span></div>
+          <div class="cp-actions" style="margin-top:0">
+            ${meta.proofLink?`<button class="pay-record-btn" onclick="openJobPageProof('${pid}')">👁 View proof</button>`:''}
+            <button class="pay-record-btn" onclick="triggerRowProofUpload('${pid}')">⬆ ${meta.proofLink?'Replace proof':'Upload proof'}</button>
+            <button class="pay-record-btn" onclick="openJobModal('${pid}')">🔗 Client link &amp; email</button>
+          </div>
+        </div>
         <div class="cp-section"><span>Payments (${payments.length})</span><button class="pay-record-btn" onclick="openPaymentModal('${pid}')">＋ Add</button></div>
         <div class="cp-box">${payHtml}</div>
         <div class="cp-section"><span>Profit (only you see this)</span></div>
@@ -5178,17 +5185,25 @@ function handleRowProofFileSelected(inputEl){
   const jobId=inputEl.dataset.jobId;
   if(!jobId)return;
   const btn=document.getElementById('proofbtn-'+jobId);
-  if(btn){ btn.textContent='⏳'; btn.disabled=true; }
+  const jpStatus=document.getElementById('jp-proof-status'); // job page
   const file=inputEl.files?.[0];
-  if(!file){ if(btn){btn.textContent='📎';btn.disabled=false;} return; }
-  uploadProofFile(jobId,file).then(({link})=>{
+  if(!file)return;
+  if(btn){ btn.textContent='⏳'; btn.disabled=true; }
+  if(jpStatus){ jpStatus.textContent='Uploading…'; jpStatus.style.color='var(--muted)'; }
+  uploadProofFile(jobId,file).then(async ({link})=>{
     const meta=getJobMeta(jobId);
     setJobMeta(jobId,{...meta,proofLink:link});
+    renderProjects();
+    // Same as the job window: a new proof on a job that already has a client
+    // link sends it back to "waiting on them" with fresh Approve/Request
+    // Changes buttons (this button used to skip that).
+    await resetClientResponseAndMarkAwaiting(jobId);
     renderProjects();
   }).catch(err=>{
     console.error('Proof upload error:',err);
     alert('Proof upload failed: '+err.message);
     if(btn){ btn.textContent='📎'; btn.disabled=false; }
+    const st=document.getElementById('jp-proof-status'); if(st){ st.textContent='Upload failed: '+err.message; st.style.color='var(--red)'; }
   });
   inputEl.value='';
 }
