@@ -55,7 +55,7 @@ export default async (req) => {
 
     const rows = await db.sql`
       SELECT ps.token, ps.project_id, ps.checkout_session_id, c.email AS client_email,
-             ps.estimate_accepted_at, ps.estimate_accepted_total, p.name AS job_name, p.est_no, p.state, jm.payments
+             ps.estimate_accepted_at, ps.estimate_accepted_total, p.name AS job_name, p.est_no, p.state, jm.payments, jm.status
       FROM proof_shares ps
       JOIN projects p ON p.id = ps.project_id
       LEFT JOIN job_meta jm ON jm.project_id = ps.project_id
@@ -64,6 +64,8 @@ export default async (req) => {
     `;
     if (!rows.length) return Response.json({ error: "This link isn't valid." }, { status: 404 });
     const r = rows[0];
+
+    if (r.status === "cancelled") return Response.json({ error: "This job was cancelled. Please contact us if you have questions." }, { status: 400 });
 
     let state = r.state;
     if (typeof state === "string") {

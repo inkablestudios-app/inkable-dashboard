@@ -111,7 +111,7 @@
     prep:{label:'Preparing Proof',color:'#8b5cf6'}, proof:{label:'Proof Ready',color:'#06b6d4'},
     awaiting:{label:'Awaiting Your Approval',color:'#eab308'}, revision:{label:'Revising Design',color:'#ec4899'},
     approved:{label:'Proof Approved',color:'#10b981'}, prod:{label:'In Production',color:'#f97316'},
-    done:{label:'Completed',color:'#6b7280'},
+    done:{label:'Completed',color:'#6b7280'}, cancelled:{label:'Cancelled',color:'#ef4444'},
   };
 
   const params = new URLSearchParams(window.location.search);
@@ -563,6 +563,10 @@
   }
 
   function render(data){
+    // A cancelled job: the estimate stays readable, nothing to approve or pay.
+    if(data.status === 'cancelled'){
+      card.innerHTML = jobHeadHtml(data) + `<section><div class="sectionsub">This job was cancelled. If you have questions, please get in touch.</div></section>` + estimateHtml(data.estimateSummary) + contactSectionHtml(data.business);
+    }else
     card.innerHTML = jobHeadHtml(data) + proofSectionHtml(data) + estimateVisualHtml(data) + estimateHtml(data.estimateSummary) + validityNoticeHtml(data) + acceptSectionHtml(data) + paymentSectionHtml(data) + contactSectionHtml(data.business);
     wireProofActions(data);
     wireAccept(data);

@@ -156,9 +156,11 @@ export default async (req) => {
         const name = String(body.name || "").trim().slice(0, 120);
         if (name.length < 2) return Response.json({ error: "Please type your full name." }, { status: 400 });
         const rows = await db.sql`
-          SELECT ps.project_id, p.state FROM proof_shares ps JOIN projects p ON p.id = ps.project_id
+          SELECT ps.project_id, p.state, jm.status FROM proof_shares ps JOIN projects p ON p.id = ps.project_id
+          LEFT JOIN job_meta jm ON jm.project_id = ps.project_id
           WHERE ps.token = ${token}`;
         if (!rows.length) return Response.json({ error: "This link isn't valid." }, { status: 404 });
+        if (rows[0].status === "cancelled") return Response.json({ error: "This job was cancelled." }, { status: 400 });
         let st = rows[0].state;
         if (typeof st === "string") { try { st = JSON.parse(st); } catch { st = {}; } }
         const total = Number(st?.form?.estimateSummary?.total);
@@ -205,7 +207,7 @@ export default async (req) => {
       // field was ever synced.
       // Still recorded (and shown to you) when the job is already in
       // production or done, but a late click doesn't move it backwards.
-      if (["prod", "done"].includes(rows[0].status)) return Response.json({ ok: true });
+      if (["prod", "done", "cancelled"].includes(rows[0].status)) return Response.json({ ok: true });
       const newStatus = response === "approved" ? "approved" : "revision";
       await db.sql`
         INSERT INTO job_meta (project_id, status, status_at, updated_at)

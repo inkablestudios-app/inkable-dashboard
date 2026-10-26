@@ -332,6 +332,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 .s-approved{background:#06472522;color:var(--status-approved)}.s-approved::before{background:var(--status-approved)}
 .s-prod{background:#7c2d1222;color:var(--status-prod)}.s-prod::before{background:var(--status-prod)}
 .s-done{background:#ffffff08;color:var(--status-done)}.s-done::before{background:var(--status-done)}
+.s-cancelled{background:#ef444412;color:#f87171aa}.s-cancelled::before{background:#f87171aa}
 
 /* Empty state */
 .empty-state{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--muted);padding:60px}
@@ -799,6 +800,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
           <button class="filter-pill" data-status="approved" onclick="setStatusFilter('approved',this)">Proof Approved</button>
           <button class="filter-pill" data-status="prod" onclick="setStatusFilter('prod',this)">In Production</button>
           <button class="filter-pill" data-status="done" onclick="setStatusFilter('done',this)">Done</button>
+          <button class="filter-pill" data-status="cancelled" onclick="setStatusFilter('cancelled',this)">Cancelled</button>
         </div>
       </div>
 
@@ -864,7 +866,13 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
           </div>
           <div id="pmtList" style="display:none;margin-bottom:14px"></div>
           <div class="jdc-field" style="margin-bottom:10px">
-            <label>Amount <span style="font-weight:400;text-transform:none;color:var(--blue);cursor:pointer;text-decoration:underline" onclick="document.getElementById('pmtAmount').value=document.getElementById('pmtBalanceDue').textContent.replace('$','')">use full balance</span></label>
+            <label>Type</label>
+            <select id="pmtType" style="width:100%;background:var(--dark);border:1px solid var(--border);border-radius:6px;padding:7px 9px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;outline:none">
+              <option value="payment">Payment received</option><option value="refund">Refund (money given back)</option>
+            </select>
+          </div>
+          <div class="jdc-field" style="margin-bottom:10px">
+            <label>Amount <span style="font-weight:400;text-transform:none;color:var(--blue);cursor:pointer;text-decoration:underline" onclick="document.getElementById('pmtAmount').value=document.getElementById('pmtBalanceDue').dataset.balance||''">use full balance</span></label>
             <input type="number" id="pmtAmount" min="0" step="0.01" placeholder="0.00"/>
           </div>
           <div class="jdc-field" style="margin-bottom:10px">
@@ -1290,6 +1298,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
           <option value="approved">Proof Approved</option>
           <option value="prod">In Production</option>
           <option value="done">Done</option>
+          <option value="cancelled">Cancelled</option>
         </select>
       </div>
       <div class="modal-field">
@@ -1441,11 +1450,11 @@ const META_KEY = 'inkable_job_meta'; // dashboard-only metadata
 
 const STATUS_LABELS = {
   send: 'Send Estimate', art: 'Awaiting Artwork', prep: 'Prepare Proof',
-  proof: 'Send Proof', awaiting: 'Awaiting Proof Approval', revision: 'In Design Revision', approved: 'Proof Approved', prod: 'In Production', done: 'Done'
+  proof: 'Send Proof', awaiting: 'Awaiting Proof Approval', revision: 'In Design Revision', approved: 'Proof Approved', prod: 'In Production', done: 'Done', cancelled: 'Cancelled'
 };
 const STATUS_CLASS = {
   send:'s-send', art:'s-art', prep:'s-prep',
-  proof:'s-proof', awaiting:'s-awaiting', revision:'s-revision', approved:'s-approved', prod:'s-prod', done:'s-done'
+  proof:'s-proof', awaiting:'s-awaiting', revision:'s-revision', approved:'s-approved', prod:'s-prod', done:'s-done', cancelled:'s-cancelled'
 };
 
 let currentFilter = 'all';
@@ -1650,7 +1659,9 @@ function getJobDepositPct(p){
   try{ const v=JSON.parse(p?.state?.form?.pricerData||'{}').depositPct; if(v>0)return v; }catch(e){}
   return getRates().depositPct;
 }
+// A cancelled job owes nothing (money already received still counts in Reports).
 function isJobCommitted(id){
+  if(getJobMeta(id).status==='cancelled')return false;
   return getAmountPaid(id)>0.005||COMMITTED_STATUSES.includes(getJobMeta(id).status)||!!getEstimateAcceptance(id);
 }
 // Client accepted the estimate on their page — and still for the current
@@ -1896,6 +1907,7 @@ function getFilteredSortedProjects(){
   let filtered=projects.filter(p=>{
     const meta=getJobMeta(p.id);
     if(meta.status==='done'&&currentFilter!=='done') return false;
+    if(meta.status==='cancelled'&&currentFilter!=='cancelled') return false;
     const matchQ=!q||p.name?.toLowerCase().includes(q)||(p.estNo||'').toLowerCase().includes(q)||
       clients.find(c=>c.id===p.clientId)?.name.toLowerCase().includes(q)||
       (p.state?.form?.billingName||'').toLowerCase().includes(q)||
@@ -1906,7 +1918,7 @@ function getFilteredSortedProjects(){
 
   // Every status in workflow order (awaiting/revision were missing, so they
   // sorted as if they were "Send Estimate").
-  const statusOrder={send:0,art:1,prep:2,proof:3,awaiting:4,revision:5,approved:6,prod:7,done:8};
+  const statusOrder={send:0,art:1,prep:2,proof:3,awaiting:4,revision:5,approved:6,prod:7,done:8,cancelled:9};
   filtered.sort((a,b)=>{
     const ma=getJobMeta(a.id),mb=getJobMeta(b.id);
     const aRush=ma.tags?.includes('rush')?0:1;
@@ -2016,7 +2028,7 @@ function quickStatusChange(id, sel){
 
 function updateStats(projects){
   const meta=projects.map(p=>({...p,meta:getJobMeta(p.id)}));
-  const active=meta.filter(p=>p.meta.status!=='done').length;
+  const active=meta.filter(p=>!['done','cancelled'].includes(p.meta.status)).length;
   const send=meta.filter(p=>p.meta.status==='send').length;
   const prod=meta.filter(p=>p.meta.status==='prod').length;
   // Finished this month = marked Done (statusAt) since the 1st of this month.
@@ -2063,7 +2075,9 @@ function renderSales(){
     const status=getPaymentStatus(p.id,total);
     const committed=isJobCommitted(p.id);
     const badgeClass=status==='paid'?'pay-paid':status==='partial'?'pay-partial':committed?'pay-unpaid':'';
-    const badgeLabel=status==='paid'?'Paid':status==='partial'?'Partial':committed?'Unpaid':'Estimate';
+    const cancelled=getJobMeta(p.id).status==='cancelled';
+    const badgeLabel=cancelled?'Cancelled':status==='paid'?'Paid':status==='partial'?'Partial':committed?'Unpaid':'Estimate';
+    const credit=paid-total>0.005?paid-total:0; // paid more than the total: owed back to the client
     const excluded=getJobMeta(p.id).excluded;
     const fin=getJobFinancials(p);
     // Same base as Reports: what you keep (total minus sales tax, card fee included).
@@ -2073,7 +2087,7 @@ function renderSales(){
     // it doesn't need to compete for attention with jobs still in flight,
     // so its money columns tone down to muted instead of staying bright
     // green/amber forever.
-    const isResolved=status==='paid'&&getJobMeta(p.id).status==='done';
+    const isResolved=(status==='paid'&&getJobMeta(p.id).status==='done')||cancelled;
     const paidColor=isResolved?'var(--muted)':'var(--green)';
     const costColor=isResolved?'var(--muted)':'var(--amber)';
     const profitColor=isResolved?'var(--muted)':(fin.profit>=0?'var(--green)':'var(--red)');
@@ -2087,7 +2101,7 @@ function renderSales(){
       </div>
       <div class="amount">${fmt(total)}</div>
       <div class="amount" style="color:${paidColor}">${fmt(paid)}</div>
-      <div class="amount" style="color:${balance>0.005&&committed?'var(--red)':'var(--muted)'}" title="${committed?'':'Not committed yet: not counted as owed'}">${fmt(balance)}</div>
+      <div class="amount" style="color:${credit?'var(--amber)':balance>0.005&&committed?'var(--red)':'var(--muted)'}" title="${credit?'Paid more than the total: owed back to the client':cancelled?'Cancelled: nothing owed':committed?'':'Not committed yet: not counted as owed'}">${credit?fmt(-credit)+'<div style="font-size:9.5px;font-weight:400">credit</div>':cancelled?'—':fmt(balance)}</div>
       <div class="amount" onclick="event.stopPropagation();openExpenseListModal('${p.id}')" style="color:${costColor};cursor:pointer;text-decoration:underline;text-underline-offset:2px" title="View or edit this job's expenses">${fmt(fin.cost.total)}</div>
       <div class="amount" style="color:${profitColor}">${fmt(fin.profit)}<div style="font-size:9.5px;color:var(--muted);font-weight:400">${marginPct.toFixed(0)}%</div></div>
       <div><span class="${badgeCls}" style="${isResolved||!badgeClass?'background:var(--panel2);color:var(--muted)':''}">${badgeLabel}</span></div>
@@ -2108,6 +2122,7 @@ function openPaymentModal(projectId){
   document.getElementById('pmtAmount').value='';
   document.getElementById('pmtPercent').value='';
   document.getElementById('pmtMethod').value='Cash';
+  document.getElementById('pmtType').value='payment';
   document.getElementById('pmtDate').value=storedDateToInput();
   showPaymentBalance(projectId);
   document.getElementById('paymentModal').classList.add('open');
@@ -2120,10 +2135,13 @@ function showPaymentBalance(projectId){
   const clientName=cl?cl.name:(p?.state?.form?.billingName||'—');
   const total=p?getProjectAmount(p):0;
   const paid=getAmountPaid(projectId);
-  const balance=Math.max(0,total-paid);
+  const balance=Math.max(0,total-paid), credit=paid-total>0.005?paid-total:0;
   document.getElementById('pmtClientLine').textContent=clientName+' — '+(p?.estNo||'');
-  document.getElementById('pmtBalanceDue').textContent=fmt(balance);
-  document.getElementById('pmtBalanceDue').style.color=balance<=0.005?'var(--green)':'var(--red)';
+  const bd=document.getElementById('pmtBalanceDue');
+  bd.textContent=credit?fmt(credit)+' credit':fmt(balance);
+  bd.dataset.balance=cents(balance).toFixed(2);
+  bd.title=credit?'Paid more than the total: owed back to the client':'';
+  bd.style.color=credit?'var(--amber)':balance<=0.005?'var(--green)':'var(--red)';
   // Each payment with a 🗑 — the way to fix a mistyped amount or remove a test payment.
   const list=document.getElementById('pmtList');
   const pays=getPayments(projectId);
@@ -2164,14 +2182,26 @@ function closePaymentModal(){
 }
 function submitPayment(){
   if(!paymentModalProjectId)return;
-  const amount=parseFloat(document.getElementById('pmtAmount').value)||0;
+  const amount=cents(parseFloat(document.getElementById('pmtAmount').value)||0);
   if(amount<=0){ alert('Enter an amount greater than $0.'); return; }
   const method=document.getElementById('pmtMethod').value;
   const date=inputDateToStored(document.getElementById('pmtDate').value);
+  const refund=document.getElementById('pmtType')?.value==='refund';
 
   const proj=getProjects().find(p=>p.id===paymentModalProjectId);
   const total=proj?getProjectAmount(proj):0;
   const paidBefore=getAmountPaid(paymentModalProjectId);
+
+  // A refund is recorded as money going back (a negative payment): it comes
+  // off what was paid and off that period's income and tax in Reports.
+  if(refund){
+    if(amount>paidBefore+0.005){ alert(`You can refund at most the ${fmt(paidBefore)} received for this job.`); return; }
+    addPayment(paymentModalProjectId,-amount,'Refund — '+method,date);
+    closePaymentModal(); renderSales(); renderReports(); refreshReminders();
+    return;
+  }
+  const balanceBefore=Math.max(0,total-paidBefore);
+  if(total>0&&amount>balanceBefore+0.005&&!confirm(`That's ${fmt(amount-balanceBefore)} more than the balance due (${fmt(balanceBefore)}).\n\nRecord it anyway? The extra will show as a credit owed back to the client.`))return;
 
   addPayment(paymentModalProjectId,amount,method,date);
 
@@ -2226,6 +2256,42 @@ function removeExpense(id,expenseId){
   // there), so a deletion has to be stated explicitly.
   const removedExpenseIds=[...new Set([...(meta.removedExpenseIds||[]),expenseId])];
   setJobMeta(id,{...meta,expenses,removedExpenseIds});
+}
+// What a job should cost you, worked out from its pricer data at the job's own rates.
+const PRICER_COST_CATS=[['materials','Materials'],['design','Design Labor'],['install','Install Labor'],['setup','Setup'],['hardware','Hardware']];
+function pricerCosts(pd){
+  const rates=jobRates(pd), vinyl=getVinyl(), laminate=getLaminate(), substrate=getSubstrate();
+  let raw=0,designHrs=0,installBasis=0;
+  (pd.lines||[]).forEach(l=>{ const c=calcSavedLine(l,pd.jobType,rates,vinyl,laminate,substrate); raw+=c.rawMatCost; designHrs+=c.designHrsTotal; installBasis+=c.installCostBasis; });
+  const setupHrs=nonNeg(pd.setupHrs)+nonNeg(pd.setupMins)/60;
+  return {materials:cents(raw),design:cents(designHrs*rates.myCostDesign),install:cents(installBasis),
+    setup:cents(setupHrs*rates.myCostSetup),hardware:cents(nonNeg(pd.hardwareCost)+nonNeg(pd.subsCost))};
+}
+// Brings the job's pricer cost entries in line with its latest price. An entry
+// still at the amount the pricer last put there is updated; one changed by
+// hand is kept. (Entries from before this rule are compared with what the
+// previous save of the job would have recorded.)
+function updatePricerCosts(id,costs,prevCosts){
+  const cur=getJobMeta(id);
+  let exps=[...(cur.expenses||[])]; const removed=[], kept=[]; let changed=false;
+  const today=new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  PRICER_COST_CATS.forEach(([cat,label],i)=>{
+    const want=costs[cat]||0;
+    const e=exps.find(x=>x.source==='pricer'&&x.category===cat);
+    if(!e){
+      if(want>0.005){ exps.push({id:'exp_'+Date.now()+'_'+Math.floor(Math.random()*100000)+'_'+i,description:label,amount:want,seedAmount:want,date:today,source:'pricer',category:cat}); changed=true; }
+      return;
+    }
+    if(Math.abs(e.amount-want)<0.005){ if(e.seedAmount==null){ exps=exps.map(x=>x.id===e.id?{...x,seedAmount:want}:x); changed=true; } return; }
+    const untouched=e.seedAmount!=null?Math.abs(e.amount-e.seedAmount)<0.005:(prevCosts?Math.abs(e.amount-(prevCosts[cat]||0))<0.011:false);
+    if(!untouched){ kept.push(e.description||label); return; }
+    if(want>0.005)exps=exps.map(x=>x.id===e.id?{...x,amount:want,seedAmount:want}:x);
+    else{ exps=exps.filter(x=>x.id!==e.id); removed.push(e.id); }
+    changed=true;
+  });
+  if(changed)setJobMeta(id,{...cur,expenses:exps,...(removed.length?{removedExpenseIds:[...new Set([...(cur.removedExpenseIds||[]),...removed])]}:{})});
+  if(kept.length)showToast('ℹ️','Some costs were left as they were',`${kept.join(', ')}: changed by hand, so not updated to the new price. Check this job's Expenses.`,{color:'var(--amber)',duration:9000});
+  renderSales();
 }
 function getTotalExpenses(id){
   return getExpenses(id).reduce((s,e)=>s+e.amount,0);
@@ -2344,7 +2410,7 @@ function getInstallGroups(){
   const groups={overdue:[],today:[],tomorrow:[],week:[],later:[],nodate:[]};
   projects.forEach(p=>{
     const meta=getJobMeta(p.id);
-    if(meta.excluded||meta.status==='done')return;
+    if(meta.excluded||meta.status==='done'||meta.status==='cancelled')return;
     const cl=clients.find(c=>c.id===p.clientId);
     const item={p,meta,cl,date:installDateOf(meta)};
     if(!item.date){
@@ -2457,9 +2523,13 @@ function deleteProjectConfirm(id){
   const clients=getClients();
   const cl=clients.find(c=>c.id===p.clientId);
   const clientName=cl?cl.name:(p.state?.form?.billingName||'this client');
-  const paid=getAmountPaid(id);
-  let warn=`Delete ${p.estNo||'this job'} for ${clientName}? This can't be undone.`;
-  if(paid>0)warn+=` This job has ${fmt(paid)} in recorded payments — that payment history will be deleted too.`;
+  // Money received has to stay in Reports and the sales-tax report, so a job
+  // with payments can't be deleted: it can be marked Cancelled instead.
+  if(getPayments(id).some(pm=>Math.abs(Number(pm.amount)||0)>0.004)){
+    alert(`${p.estNo||'This job'} for ${clientName} has payments recorded, so it can't be deleted — money you received has to stay in your Reports and tax report.\n\nIf the job was cancelled: set its status to "Cancelled" (and record a refund for anything you gave back).\nIf a payment was entered by mistake: delete that payment first (+ Payment → 🗑), then delete the job.`);
+    return;
+  }
+  const warn=`Delete ${p.estNo||'this job'} for ${clientName}? This can't be undone.`;
   if(!confirm(warn))return;
 
   const updated=projects.filter(pr=>pr.id!==id);
@@ -2589,7 +2659,7 @@ function renderClientProfile(){
   const dates=jobs.map(jobDateValue).filter(Boolean);
   const dateStr=t=>new Date(t).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
   const since=dates.length?dateStr(Math.min(...dates)):'—';
-  const filters={all:r=>true,open:r=>r.meta.status!=='done',unpaid:r=>r.owes,done:r=>r.meta.status==='done'};
+  const filters={all:r=>true,open:r=>!['done','cancelled'].includes(r.meta.status),unpaid:r=>r.owes,done:r=>r.meta.status==='done'};
   const shown=rows.filter(filters[clientProfileFilter]||filters.all);
   const count=k=>rows.filter(filters[k]).length;
   const addr=[client.addr,[client.city,client.state].filter(Boolean).join(', '),client.zip].filter(Boolean).join(' ');
@@ -2610,7 +2680,7 @@ function renderClientProfile(){
       <div class="cp-money">
         <span>Total <b style="color:var(--text)">${fmt(total)}</b></span>
         <span>Paid <b style="color:var(--green)">${fmt(paid)}</b></span>
-        <span>Balance <b style="color:${owes?'var(--red)':'var(--muted)'}">${fmt(balance)}</b></span>
+        ${paid-total>0.005?`<span>Credit <b style="color:var(--amber)" title="Paid more than the total: owed back to the client">${fmt(paid-total)}</b></span>`:`<span>Balance <b style="color:${owes?'var(--red)':'var(--muted)'}">${fmt(balance)}</b></span>`}
         ${meta.excluded?'<span style="color:var(--muted2)">excluded from Reports</span>':''}
       </div>
       <div class="cp-actions" onclick="event.stopPropagation()">
@@ -2722,7 +2792,7 @@ function renderJobPage(){
     }else{
       const each=jpSqft(l.w,l.wFt,l.h,l.hFt), size=jpDim(l.w,l.wFt)+' × '+jpDim(l.h,l.hFt);
       const printed=l.printed!==undefined?l.printed:(l.vinyl!=='Oracal 651 Intermediate Cal'&&l.vinyl!=='Fellers Black Label Banner');
-      rows.push([(printed?'Print media':'Vinyl (cut, not printed)')+': '+(l.vinyl||'—'),size,String(qty),num(each*qty)]);
+      if(!/^none\b/i.test(l.vinyl||''))rows.push([(printed?'Print media':'Vinyl (cut, not printed)')+': '+(l.vinyl||'—'),size,String(qty),num(each*qty)]); // a plain board has no media
       if(l.lam&&l.lam!=='No Laminate')rows.push(['Laminate: '+l.lam,size,String(qty),num(each*qty)]);
       if(l.sub&&l.sub!=='None'){
         const same=l.subSameSize!==false;
@@ -2804,7 +2874,7 @@ function renderJobPage(){
     <div class="cp-stats">
       <div class="cp-stat"><b>${fmt(total)}</b><span>Total</span></div>
       <div class="cp-stat"><b style="color:var(--green)">${fmt(paid)}</b><span>Paid</span></div>
-      <div class="cp-stat"><b style="color:${owes?'var(--red)':'var(--muted)'}">${fmt(balance)}</b><span>Balance</span></div>
+      ${paid-total>0.005?`<div class="cp-stat"><b style="color:var(--amber)">${fmt(paid-total)}</b><span>Credit — owed back</span></div>`:`<div class="cp-stat"><b style="color:${owes?'var(--red)':'var(--muted)'}">${fmt(balance)}</b><span>Balance</span></div>`}
       <div class="cp-stat"><b style="color:${fin.profit>=0?'var(--text)':'var(--red)'}">${fmt(fin.profit)}</b><span>Profit</span></div>
       <div class="cp-stat"><b style="font-size:14px">${install?escapeHtml(install):'—'}</b><span>Install</span></div>
     </div>
@@ -3457,6 +3527,20 @@ function dateInRange(dateStr,range){
 // snapshot, never period-filtered — "how much am I currently owed" doesn't
 // have a meaningful "this week" version, so they're the same regardless of
 // which range is passed in.
+// The part (0–1) of a job's costs that belongs to a period: the share of its
+// price paid in that period. A job with nothing to collect ($0) counts its
+// costs when it was priced, once committed.
+function costShareInRange(p,fin,range,committed){
+  if(!(fin.revenue>0.005))return committed&&dateInRange(p.savedAt,range)?1:0;
+  const pays=[...getPayments(p.id)].sort((a,b)=>(new Date(a.date).getTime()||0)-(new Date(b.date).getTime()||0));
+  let paid=0, share=0;
+  for(const pm of pays){
+    const before=Math.min(1,Math.max(0,paid/fin.revenue)); paid+=Number(pm.amount)||0;
+    const after=Math.min(1,Math.max(0,paid/fin.revenue));
+    if(dateInRange(pm.date,range))share+=after-before;
+  }
+  return share;
+}
 function computeReportsDataForRange(range){
   const projects=getProjects();
   let revenueCollected=0,taxCollected=0,taxableCollected=0;
@@ -3473,18 +3557,13 @@ function computeReportsDataForRange(range){
     const committed=isJobCommitted(p.id);
     // The pricer's cost lines are only an estimate until the client commits:
     // a quote that's never accepted didn't cost anything.
-    if(committed&&dateInRange(p.savedAt,range)){
-      // Original pricing estimate — recognized when the job itself was
-      // saved, same as always. "Extra" is deliberately excluded here since
-      // it's recognized by each expense's own date instead, just below —
-      // it's real spending that happened whenever it happened, not
-      // whenever the job was first priced.
-      expenses.materials+=fin.cost.materials;
-      expenses.design+=fin.cost.design;
-      expenses.install+=fin.cost.install;
-      expenses.setup+=fin.cost.setup;
-      expenses.hardware+=fin.cost.hardware;
-    }
+    // The pricer's costs are counted along with the money they belong to:
+    // each payment brings its share of the job's costs (a 50% deposit in
+    // October counts half the costs in October), so a job priced one month
+    // and paid the next doesn't split its income and costs across months.
+    // "Extra" (added by hand) is counted by each expense's own date, below.
+    const share=costShareInRange(p,fin,range,committed);
+    if(share>0)['materials','design','install','setup','hardware'].forEach(k=>{ expenses[k]+=fin.cost[k]*share; });
     // Only expenses added by hand count here — the pricer's categorized
     // ones were already counted just above, by the job's save date.
     getExpenses(p.id).forEach(exp=>{
@@ -3818,7 +3897,7 @@ function generateWorkOrderPDF(id){
     doc.setTextColor(0);doc.setFont('helvetica','bold');doc.setFontSize(12);doc.text(f.jobDesc||f.jobName||p.name||'Job',M,y); y+=16;
     doc.setFont('helvetica','normal');doc.setFontSize(10);
     const who=cl?cl.name:(f.billingName||'');
-    const addr=cl?[cl.addr,[cl.city,cl.state].filter(Boolean).join(', '),cl.zip].filter(Boolean).join(', '):'';
+    const addr=cl?[cl.addr,[[cl.city,cl.state].filter(Boolean).join(', '),cl.zip].filter(Boolean).join(' ')].filter(Boolean).join(', '):'';
     [['Client',who],['Phone',cl?.phone||''],['Email',cl?.email||''],['Install address',addr],
      ['Install',meta.installDate?new Date(meta.installDate+'T00:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})+(meta.installTime?' at '+fmtInstallTime(meta.installTime):''):'Not scheduled']
     ].forEach(([k,v])=>{ if(!v)return; doc.setFont('helvetica','bold');doc.text(k+':',M,y); doc.setFont('helvetica','normal'); doc.text(doc.splitTextToSize(String(v),W-2*M-100),M+100,y); y+=14; });
@@ -3832,7 +3911,7 @@ function generateWorkOrderPDF(id){
       if(l.pricingMode==='flat'){ specs.push('Qty '+lineQty(l.qty)+' (vendor / flat item)'); }
       else{
         specs.push('Size: '+dim(l.w,l.wFt)+' W × '+dim(l.h,l.hFt)+' H   ·   Qty '+lineQty(l.qty)+'   ·   '+c.sqft.toFixed(2)+' sqft total');
-        specs.push('Media: '+(l.vinyl||'—')+(l.printed===false?' (not printed)':' (printed)'));
+        if(!/^none\b/i.test(l.vinyl||''))specs.push('Media: '+(l.vinyl||'—')+(l.printed===false?' (not printed)':' (printed)')); // a plain board has no media
         if(l.lam&&l.lam!=='No Laminate')specs.push('Laminate: '+l.lam);
         if(l.sub&&l.sub!=='None')specs.push('Substrate: '+l.sub+(l.subThickness?' — '+l.subThickness:'')+(l.subSameSize===false?' ('+dim(l.subW,l.subWFt)+' × '+dim(l.subH,l.subHFt)+')':''));
       }
@@ -5988,6 +6067,21 @@ function missingMaterialMessage(){
   return '';
 }
 
+// Easy mistakes worth a second look before saving: a by-material item with
+// no width or height (priced at $0), or a discount that takes the job to $0.
+function priceWarnings(){
+  const msgs=[];
+  document.querySelectorAll('.line-item').forEach(el=>{
+    if((el.dataset.pricingMode||'material')==='flat')return;
+    const w=nonNeg(el.querySelector('.li-w')?.value), h=nonNeg(el.querySelector('.li-h')?.value);
+    if(w>0&&h>0)return;
+    const name=(el.querySelector('.line-desc')?.value||'').trim()||(el.querySelector('.line-num')?.textContent||'An item');
+    msgs.push(`"${name}" has no ${!w&&!h?'size':!w?'width':'height'}, so its material is priced at $0.00.`);
+  });
+  const d=gatherPricerPDFData();
+  if(d.disc>0.005&&d.sub>0.005&&d.taxable<0.005)msgs.push('The discount takes this job to $0.00.');
+  return msgs.join('\n');
+}
 // ── Unsaved changes in the pricer ─────────────────────────────────────
 // What the pricer would save, as text: compared with the copy taken when the
 // estimate was opened or last saved, so leaving with unsaved work asks first.
@@ -6917,7 +7011,7 @@ function recalc(){
       const suggestedHrs=sqft/(ir.sqftPerHr||100);
       // Round the whole time to 15 minutes first, then split it (1.9 h used
       // to show "1h 60min" and Apply set 1h 45min).
-      const totalMins=Math.round(suggestedHrs*60/15)*15;
+      const totalMins=Math.max(15,Math.round(suggestedHrs*60/15)*15); // never suggest 0 minutes
       const sH=Math.floor(totalMins/60);
       const sM=totalMins%60;
       const label=sH>0?(sH+'h'+(sM>0?' '+sM+'min':'')):(sM+'min');
@@ -7171,6 +7265,8 @@ function savePricerProject(){
   // A by-material item whose material was removed from Settings: pick one first.
   const missingMat=missingMaterialMessage();
   if(missingMat){ alert(missingMat); return false; }
+  const oops=priceWarnings();
+  if(oops&&!confirm(oops+'\n\nSave anyway?'))return false;
   // The job's date comes from the pricer's Date picker (which shows the
   // original date when a job is reopened). Re-saving used to reset it to
   // today, which moved an old job's costs into the current Reports period
@@ -7287,61 +7383,18 @@ function savePricerProject(){
     showToast('⚠️','Saved to the cloud, but not on this device','This browser\'s storage is full. Reload the page to refresh the local copy from the cloud.',{color:'var(--red)',duration:12000});
   }
 
-  // Seed the pricer's cost breakdown as real, editable expense entries —
-  // but only the FIRST time this job is saved. Once seeded, each one is
-  // fully independent (editable, deletable, just like a manually-added
-  // expense), so a later pricer edit never silently overwrites a real
-  // correction you've already made to one of these numbers.
-  const existingMeta=getJobMeta(id);
-  const alreadySeeded=(existingMeta.expenses||[]).some(e=>e.source==='pricer');
-  if(!alreadySeeded){
-    try{
-      const pd=JSON.parse(state.form.pricerData);
-      const rates=jobRates(pd), vinyl=getVinyl(), laminate=getLaminate(), substrate=getSubstrate();
-      let rawMat=0, designHrs=0, installCostBasisTotal=0;
-      (pd.lines||[]).forEach(l=>{
-        const calc=calcSavedLine(l,pd.jobType,rates,vinyl,laminate,substrate);
-        rawMat+=calc.rawMatCost;
-        designHrs+=calc.designHrsTotal;
-        installCostBasisTotal+=calc.installCostBasis;
-      });
-      const setupHrs=nonNeg(pd.setupHrs)+nonNeg(pd.setupMins)/60;
-      const designCost=designHrs*rates.myCostDesign;
-      const setupCost=setupHrs*rates.myCostSetup;
-      const hardwareCost=nonNeg(pd.hardwareCost)+nonNeg(pd.subsCost);
-
-      const seedDate=new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
-      const seeds=[];
-      const addSeed=(desc,amount,category)=>{
-        if(amount>0.005){
-          seeds.push({
-            id:'exp_'+Date.now()+'_'+Math.floor(Math.random()*100000)+'_'+seeds.length,
-            description:desc,amount:Math.round(amount*100)/100,date:seedDate,
-            source:'pricer',category,
-          });
-        }
-      };
-      addSeed('Materials',rawMat,'materials');
-      addSeed('Design Labor',designCost,'design');
-      addSeed('Install Labor',installCostBasisTotal,'install');
-      addSeed('Setup',setupCost,'setup');
-      addSeed('Hardware',hardwareCost,'hardware');
-
-      if(seeds.length){
-        // Added once the job itself has reached the server: the expense list
-        // belongs to the job, and sent at the same moment it could arrive
-        // first and be refused (it then only went through at the next sync).
-        const addSeeds=()=>{
-          const cur=getJobMeta(id);
-          if((cur.expenses||[]).some(e=>e.source==='pricer'))return; // a quick second save already added them
-          setJobMeta(id,{...cur,expenses:[...(cur.expenses||[]),...seeds]});
-          renderSales();
-        };
-        lastProjectPush[id].then(addSeeds,addSeeds);
-      }
-    }catch(err){
-      console.warn('Could not seed cost breakdown for this job:',err);
-    }
+  // The pricer's cost breakdown is kept as real, editable expense entries
+  // (Materials, Design Labor, ...). They follow the job when it's re-priced,
+  // except an entry you changed by hand, which is left alone (you're told).
+  // Updated once the job itself has reached the server: the expense list
+  // belongs to the job, and sent at the same moment it could arrive first.
+  try{
+    const costs=pricerCosts(JSON.parse(state.form.pricerData));
+    let prevCosts=null; try{ if(old)prevCosts=pricerCosts(JSON.parse(old.state?.form?.pricerData||'{}')); }catch(e){}
+    const syncCosts=()=>updatePricerCosts(id,costs,prevCosts);
+    lastProjectPush[id].then(syncCosts,syncCosts);
+  }catch(err){
+    console.warn('Could not update the cost breakdown for this job:',err);
   }
 
   pricerCleanState=pricerSnapshot(); // everything on screen is saved now
