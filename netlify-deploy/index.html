@@ -412,6 +412,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 .cp-box{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:18px}
 .cp-row{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:6px 0;border-bottom:1px solid var(--border)}
 .cp-row:last-child{border-bottom:none}
+.mat-extra{width:62px;flex-shrink:0}.mat-extra input{width:100%;min-width:0}
+.xs-input{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text);font-size:12px;max-width:230px}
+.charge-fields{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:11px;color:var(--muted);margin:8px 0}
+.charge-fields input{width:64px;background:var(--dark);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:4px 6px;font-size:11px}
 .rates-notice{background:#3b82f61a;border:1px solid #3b82f655;border-radius:8px;padding:9px 12px;margin:0 0 14px;font-size:12px;color:var(--text);line-height:1.5}
 .rates-notice-btn{margin-left:6px;background:var(--blue);border:none;border-radius:5px;color:#fff;font-size:11px;font-weight:700;padding:4px 10px;cursor:pointer;font-family:'DM Sans',sans-serif}
 .jp-layers{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px}
@@ -3865,6 +3869,7 @@ function copyJobToNewEstimate(id){
   pricerState.invNo='INV-'+projNum;
   pricerState.taxRate=getRates().taxRate;
   pricerState.date=new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  document.getElementById('pricerTaxRate').value=pricerState.taxRate;
   document.getElementById('pricerProjNum').textContent='Project '+projNum+' (copy of '+(p.estNo||'')+')';
   document.getElementById('pricerEstNo').value=pricerState.estNo;
   document.getElementById('pricerDate').value=storedDateToInput();
@@ -4859,7 +4864,128 @@ function getRates(src){
     taxRate:pd.taxRate??8.25,
     depositPct:pd.depositPct??50,
     estimateValidDays:pd.estimateValidDays??30,
+    printLaborRate:pd.printLaborRate??0, cutLaborRate:pd.cutLaborRate??0,
+    custPrintRate:pd.custPrintRate??2.5, custCutRate:pd.custCutRate??1.5,
+    rushPct:pd.rushPct??0, tripBase:pd.tripBase??0, tripPerMile:pd.tripPerMile??0, tripFreeMiles:pd.tripFreeMiles??0,
+    qtyBreaks:Array.isArray(pd.qtyBreaks)?pd.qtyBreaks:[], feeFixed:pd.feeFixed??0,
   };
+}
+// Settings added Oct 26. Every one starts at today's behavior (off / 0 / the
+// value the app used before), so nothing changes until it's filled in.
+const EXTRA_SETTINGS=[
+  // Shop tab
+  {key:'printLaborRate',def:0,kind:'num',tab:'shop',group:'Production labor (added to each item)',label:'Print & trim labor',help:'$/sqft added to printed items: handling, trimming, masking. 0 = off.',pre:'$'},
+  {key:'cutLaborRate',def:0,kind:'num',tab:'shop',group:'Production labor (added to each item)',label:'Cut & weed labor',help:'$/sqft added to cut (not printed) items: weeding, masking, transfer tape. 0 = off.',pre:'$'},
+  {key:'custPrintRate',def:2.5,kind:'num',tab:'shop',group:"Customer's own material",label:'Print only',help:'$/sqft for an item marked "Customer\'s material" that you print. Replaces the material price.',pre:'$'},
+  {key:'custCutRate',def:1.5,kind:'num',tab:'shop',group:"Customer's own material",label:'Cut only',help:'$/sqft for an item marked "Customer\'s material" that you only cut.',pre:'$'},
+  {key:'rushPct',def:0,kind:'num',tab:'shop',group:'Rush, trips & quantity breaks',label:'Rush fee',help:'Added when "Rush" is ticked in the pricer (on items, design, install and setup). 0 = off.',post:'%'},
+  {key:'tripBase',def:0,kind:'num',tab:'shop',group:'Rush, trips & quantity breaks',label:'Trip charge — base',help:'Charged when "Trip charge" is ticked in the pricer.',pre:'$'},
+  {key:'tripPerMile',def:0,kind:'num',tab:'shop',group:'Rush, trips & quantity breaks',label:'Trip charge — per mile',pre:'$'},
+  {key:'tripFreeMiles',def:0,kind:'num',tab:'shop',group:'Rush, trips & quantity breaks',label:'Free miles',help:'Miles included before the per-mile charge starts.',post:'mi'},
+  {key:'qtyBreaks',def:[],kind:'breaks',tab:'shop',group:'Rush, trips & quantity breaks',label:'Quantity breaks',help:'Discount on an item by its quantity: "10=5, 50=10" means 10+ pieces 5% off, 50+ pieces 10% off. Blank = off.'},
+  {key:'feeFixed',def:0,kind:'num',tab:'shop',group:'Card fee',label:'Card fee — fixed part',help:'Added to the % above (Stripe charges 2.9% + $0.30). 0 = off.',pre:'$'},
+  {key:'feeMode',def:'always',kind:'select',tab:'shop',group:'Card fee',label:'When the card fee is charged',options:[['always','In the estimate total, when the job\'s box is ticked'],['cardOnly','Only when the client pays by card (added at checkout)']]},
+  // Business tab
+  {key:'bizAddress',def:'',kind:'text',tab:'business',group:'More contact details',label:'Address',help:'Printed on estimates, invoices and receipts. Blank = left off.'},
+  {key:'bizWebsite',def:'',kind:'text',tab:'business',group:'More contact details',label:'Website'},
+  {key:'invoiceTerms',def:'receipt',kind:'select',tab:'business',group:'Invoices & payments',label:'Invoices due',options:[['receipt','Due on receipt'],['net7','Net 7'],['net15','Net 15'],['net30','Net 30'],['net45','Net 45'],['net60','Net 60']]},
+  {key:'lateFeeNote',def:'',kind:'text',tab:'business',group:'Invoices & payments',label:'Late payment note',help:'Printed under the invoice total, e.g. "1.5% per month on past-due balances."'},
+  {key:'paymentMethods',def:'Cash, Check, Card, Zelle, Other',kind:'text',tab:'business',group:'Invoices & payments',label:'Payment methods',help:'Choices when recording a payment, separated by commas.'},
+  {key:'paySchedule',def:'',kind:'schedule',tab:'business',group:'Invoices & payments',label:'Payment schedule (big jobs)',help:'Default for new estimates, e.g. "50/40/10" = 3 payments. Blank = deposit, then the balance. Can be changed per job.'},
+  {key:'defaultSetupMins',def:15,kind:'select',tab:'business',group:'New estimate defaults (more)',label:'Setup time',options:[[0,'0 min'],[15,'15 min'],[30,'30 min'],[45,'45 min'],[60,'1 hr'],[90,'1 hr 30 min'],[120,'2 hr']]},
+  {key:'minChargeDefault',def:25,kind:'num',tab:'business',group:'New estimate defaults (more)',label:'Minimum job charge',pre:'$'},
+  {key:'minChargeOn',def:false,kind:'bool',tab:'business',group:'New estimate defaults (more)',label:'Minimum charge on for new estimates'},
+  {key:'feeBoxDefault',def:true,kind:'bool',tab:'business',group:'New estimate defaults (more)',label:'Card fee box ticked on new estimates'},
+  {key:'estPrefix',def:'EST-',kind:'text',tab:'business',group:'Numbering',label:'Estimate prefix'},
+  {key:'invPrefix',def:'INV-',kind:'text',tab:'business',group:'Numbering',label:'Invoice prefix'},
+  {key:'startNumber',def:0,kind:'int',tab:'business',group:'Numbering',label:'Next number at least',help:'E.g. 2500 to continue your CoreBridge numbers. 0 = keep counting.'},
+  {key:'accentColor',def:'',kind:'color',tab:'business',group:'Branding',label:'Client page color',help:'Buttons and links on the client page, e.g. #00a8e8. Blank = built-in blue.'},
+  {key:'bizLogo',def:'',kind:'logo',tab:'business',group:'Branding',label:'Logo',help:'PNG or JPG, printed on PDFs. Blank = built-in logo.'},
+  // Reminders tab
+  {key:'installReminderDays',def:1,kind:'int',tab:'reminders',group:'More reminders',label:'Upcoming install',help:'Remind me this many days before an install. 0 = off.',post:'days'},
+  {key:'proofWaitDays',def:3,kind:'int',tab:'reminders',group:'More reminders',label:'Proof waiting on the client',help:'Remind me when a proof has waited this many days for an answer. 0 = off.',post:'days'},
+  {key:'taxFiling',def:'quarterly',kind:'select',tab:'reminders',group:'More reminders',label:'Sales tax filing',options:[['monthly','Monthly'],['quarterly','Quarterly'],['yearly','Yearly']]},
+];
+function setting(key){ const pd=getPricingData(), e=EXTRA_SETTINGS.find(x=>x.key===key); return pd[key]!=null?pd[key]:(e?e.def:undefined); }
+// "10=5, 50=10" → [{min:10,pct:5},{min:50,pct:10}] (null if it can't be read)
+function parseQtyBreaks(text){
+  const t=String(text||'').trim(); if(!t)return [];
+  const out=[];
+  for(const part of t.split(/[,;\n]+/)){ const m=/^\s*(\d+)\s*\+?\s*[=:→>-]+\s*(\d+(?:\.\d+)?)\s*%?\s*$/.exec(part); if(!m)return null; const pct=parseFloat(m[2]); if(pct<0||pct>=100)return null; out.push({min:parseInt(m[1]),pct}); }
+  return out.sort((a,b)=>a.min-b.min);
+}
+function qtyBreaksText(list){ return (list||[]).map(b=>b.min+'='+b.pct).join(', '); }
+// "50/40/10" → [50,40,10] (must add up to 100), [] when blank, null if it can't be read
+function parseSchedule(text){
+  const t=String(text||'').trim(); if(!t)return [];
+  const parts=t.split(/[\/,+\s]+/).filter(Boolean).map(Number);
+  if(parts.some(n=>!(n>0))||parts.length<2)return null;
+  return Math.abs(parts.reduce((a,b)=>a+b,0)-100)<0.001?parts:null;
+}
+function renderExtraSettings(){
+  ['shop','business','reminders'].forEach(tab=>{
+    const box=document.getElementById('extraSettings-'+tab); if(!box||!settingsDraft)return;
+    let html='', group='';
+    EXTRA_SETTINGS.filter(e=>e.tab===tab).forEach(e=>{
+      if(e.group!==group){ group=e.group; html+=`<div class="settings-section-title" style="margin-top:18px">${escapeHtml(group)}</div>`; }
+      const v=settingsDraft[e.key], id='xs-'+e.key;
+      let input;
+      if(e.kind==='select')input=`<select id="${id}" class="xs-input">${e.options.map(([o,l])=>`<option value="${escapeAttr(String(o))}"${String(o)===String(v)?' selected':''}>${escapeHtml(l)}</option>`).join('')}</select>`;
+      else if(e.kind==='bool')input=`<input id="${id}" type="checkbox"${v?' checked':''} style="width:18px;height:18px"/>`;
+      else if(e.kind==='logo')input=`<div style="display:flex;gap:6px;align-items:center">${v?`<img src="${escapeAttr(v)}" alt="logo" style="height:28px;max-width:90px;background:#fff;border-radius:4px;padding:2px"/>`:''}<input id="${id}" type="file" accept="image/png,image/jpeg" onchange="readLogoFile(this)" style="font-size:11px;max-width:150px"/>${v?`<button type="button" class="btn btn-ghost" style="padding:4px 8px;font-size:11px" onclick="settingsDraft.bizLogo='';renderExtraSettings()">Remove</button>`:''}</div>`;
+      else{
+        const val=e.kind==='breaks'?qtyBreaksText(v):(v??'');
+        const type=(e.kind==='num'||e.kind==='int')?'number':'text';
+        input=`<div class="pi">${e.pre?`<span>${e.pre}</span>`:''}<input id="${id}" type="${type}" ${type==='number'?`min="0" step="${e.kind==='int'?1:0.01}"`:''} value="${escapeAttr(String(val))}"/>${e.post?`<span>${e.post}</span>`:''}</div>`;
+      }
+      html+=`<div class="shop-row"><div><label>${escapeHtml(e.label)}</label>${e.help?`<small>${escapeHtml(e.help)}</small>`:''}</div>${input}</div>`;
+    });
+    box.innerHTML=html;
+  });
+}
+// Logo picked in Settings: shrunk to at most 600 px wide and kept with the settings.
+function readLogoFile(input){
+  const f=input.files&&input.files[0]; if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{
+    const src=String(r.result);
+    const img=new Image();
+    img.onload=()=>{
+      try{
+        const scale=Math.min(1,600/img.width), c=document.createElement('canvas');
+        c.width=Math.round(img.width*scale); c.height=Math.round(img.height*scale);
+        const ctx=c.getContext('2d'); if(!ctx)throw new Error('no canvas');
+        ctx.drawImage(img,0,0,c.width,c.height); settingsDraft.bizLogo=c.toDataURL('image/png');
+      }catch(e){ if(src.length>400000){ alert('That logo is too large. Use a PNG or JPG under 300 KB.'); return; } settingsDraft.bizLogo=src; }
+      renderExtraSettings();
+    };
+    img.onerror=()=>alert('That file could not be read as an image.');
+    img.src=src;
+  };
+  r.readAsDataURL(f);
+}
+// Reads the new settings from the screen into the draft. Returns an error
+// message (nothing saved) or ''.
+function readExtraSettings(s){
+  for(const e of EXTRA_SETTINGS){
+    const el=document.getElementById('xs-'+e.key); if(!el)continue;
+    if(e.kind==='num'||e.kind==='int'){
+      const v=parseFloat(el.value); if(isNaN(v))continue; // empty: keep what was there
+      if(v<0)return `${e.label} can't be below 0.`;
+      s[e.key]=e.kind==='int'?Math.round(v):v;
+    }else if(e.kind==='bool')s[e.key]=!!el.checked;
+    else if(e.kind==='select')s[e.key]=typeof e.def==='number'?Number(el.value):el.value;
+    else if(e.kind==='breaks'){ const b=parseQtyBreaks(el.value); if(b===null)return 'Quantity breaks: write them like "10=5, 50=10" (quantity = % off, below 100%).'; s[e.key]=b; }
+    else if(e.kind==='schedule'){ const t=el.value.trim(); if(parseSchedule(t)===null)return 'Payment schedule: write it like "50/40/10" — at least 2 payments that add up to 100.'; s[e.key]=t; }
+    else if(e.kind==='color'){ const t=el.value.trim(); if(t&&!/^#[0-9a-f]{6}$/i.test(t))return 'Client page color: use a color code like #00a8e8, or leave it blank.'; s[e.key]=t; }
+    else if(e.kind==='text'){
+      let t=el.value.trim();
+      if(e.key==='estPrefix'||e.key==='invPrefix'){ t=t.replace(/\s+/g,''); if(!t||t.length>8||/\d$/.test(t))return `${e.label}: 1 to 8 characters, not ending in a number (e.g. EST-).`; }
+      if(e.key==='paymentMethods'&&!t.split(',').some(x=>x.trim()))t=e.def;
+      s[e.key]=t;
+    }
+  }
+  return '';
 }
 // Each job keeps the rates it was priced with (saved in its pricer data), so
 // changing Settings later never quietly re-prices an old job. Material
@@ -4870,12 +4996,34 @@ function rateSnapshot(r){
     designBasic:r.designLevels.basic.rate,designStandard:r.designLevels.standard.rate,designAdvanced:r.designLevels.advanced.rate,
     installBasic:r.installLevels.basic.rate,installStandard:r.installLevels.standard.rate,installAdvanced:r.installLevels.advanced.rate,
     installSqftBasic:r.installLevels.basic.sqftPerHr,installSqftStandard:r.installLevels.standard.sqftPerHr,installSqftAdvanced:r.installLevels.advanced.sqftPerHr,
-    processingFeeRate:r.processingFeeRate,myCostDesign:r.myCostDesign,myCostInstall:r.myCostInstall,myCostSetup:r.myCostSetup};
+    processingFeeRate:r.processingFeeRate,myCostDesign:r.myCostDesign,myCostInstall:r.myCostInstall,myCostSetup:r.myCostSetup,
+    printLaborRate:r.printLaborRate,cutLaborRate:r.cutLaborRate,custPrintRate:r.custPrintRate,custCutRate:r.custCutRate,
+    rushPct:r.rushPct,tripBase:r.tripBase,tripPerMile:r.tripPerMile,tripFreeMiles:r.tripFreeMiles,qtyBreaks:r.qtyBreaks,feeFixed:r.feeFixed};
 }
+// Jobs saved before a rate existed were priced without it: missing = off.
+const RATES_ADDED_OFF={printLaborRate:0,cutLaborRate:0,rushPct:0,tripBase:0,tripPerMile:0,tripFreeMiles:0,qtyBreaks:[],feeFixed:0};
 // A saved job's own rates. Jobs saved before rates were kept per job use today's.
-function jobRates(pd){ return pd&&pd.rates?getRates({...getPricingData(),...pd.rates}):getRates(); }
+function jobRates(pd){ return pd&&pd.rates?getRates({...getPricingData(),...RATES_ADDED_OFF,...pd.rates}):getRates(); }
 // The rates the open pricer works with: the job's own while editing a saved job.
-function pricerRates(){ return (typeof pricerState!=='undefined'&&pricerState&&pricerState.rates)?getRates({...getPricingData(),...pricerState.rates}):getRates(); }
+function pricerRates(){ return (typeof pricerState!=='undefined'&&pricerState&&pricerState.rates)?getRates({...getPricingData(),...RATES_ADDED_OFF,...pricerState.rates}):getRates(); }
+// Settings markup / waste % for one material (undefined = shop markup / none).
+function matMarkupOf(cat,name){ const v=getPricingData().matMarkup?.[cat]?.[name]; return v!=null&&v!==''?Number(v):undefined; }
+function matWasteOf(cat,name){ const v=getPricingData().matWaste?.[cat]?.[name]; return v!=null&&v!==''?Number(v):undefined; }
+function qtyBreakPct(qty,breaks){ let pct=0; (breaks||[]).forEach(b=>{ if(qty>=b.min)pct=b.pct; }); return pct; }
+// Price and your cost for one by-material item. The media area includes the
+// material's waste %, the board area the board's. Labor per sqft is on the
+// real area. "Customer's material": their vinyl costs you nothing, and the
+// print-only / cut-only rate replaces the material price and the labor.
+function itemMaterialPrice(o,rates){
+  const media=o.sqft*(1+(o.vWaste||0)/100), board=o.subSqft*(1+(o.sWaste||0)/100);
+  const ink=o.printed?rates.printCost:0;
+  const raw=(o.cust?0:o.vCost)*media+o.lCost*media+ink*media+o.sCost*board;
+  const price=o.cust
+    ?(o.printed?rates.custPrintRate:rates.custCutRate)*o.sqft+o.lCost*media*o.lMk+o.sCost*board*o.sMk
+    :o.vCost*media*o.vMk+ink*media*rates.markup+o.lCost*media*o.lMk+o.sCost*board*o.sMk+(o.printed?rates.printLaborRate:rates.cutLaborRate)*o.sqft;
+  const breakPct=qtyBreakPct(o.qty,rates.qtyBreaks);
+  return {price:price*(1-breakPct/100),raw,breakPct};
+}
 // Money rounded to the cent the way people do it (10.725 → 10.73), the same
 // rule the server uses for card charges.
 function cents(n){
@@ -4938,6 +5086,9 @@ function openSettings(){
     taxRate:pd.taxRate??8.25,
     depositPct:pd.depositPct??50,
     estimateValidDays:pd.estimateValidDays??30,
+    ...Object.fromEntries(EXTRA_SETTINGS.map(e=>[e.key,JSON.parse(JSON.stringify(setting(e.key)))])),
+    matMarkup:JSON.parse(JSON.stringify(pd.matMarkup||{vinyl:{},laminate:{},substrate:{}})),
+    matWaste:JSON.parse(JSON.stringify(pd.matWaste||{vinyl:{},substrate:{}})),
     ...getBusinessInfo(),
     // Your saved lists as they are. Mixing the defaults back in made a
     // deleted default material reappear the next time Settings was saved.
@@ -5697,6 +5848,7 @@ function renderSettingsPanel(){
   renderMatCostRows('vinylCostRows','vinyl');
   renderMatCostRows('laminateCostRows','laminate');
   renderMatCostRows('substrateCostRows','substrate');
+  renderExtraSettings();
 }
 
 function renderMatCostRows(containerId,category){
@@ -5712,6 +5864,8 @@ function renderMatCostRows(containerId,category){
           <span>$</span>
           <input type="number" step="0.01" min="0" value="${(cost||0).toFixed(2)}"/>
         </div>
+        <div class="pi mat-extra" title="Markup for this material (blank = shop markup)"><span>×</span><input class="mat-mk" type="number" step="0.1" min="1" placeholder="${escapeAttr(String(settingsDraft.markup))}" value="${settingsDraft.matMarkup?.[category]?.[name]??''}"/></div>
+        ${category!=='laminate'?`<div class="pi mat-extra" title="Waste / overage added to this material's area"><input class="mat-waste" type="number" step="1" min="0" max="100" placeholder="0" value="${settingsDraft.matWaste?.[category]?.[name]??''}"/><span>%</span></div>`:''}
         <button
           style="background:none;border:1px solid var(--border);color:var(--muted);border-radius:5px;padding:5px 9px;cursor:pointer;font-size:12px;flex-shrink:0">🗑</button>
       </div>
@@ -5726,6 +5880,9 @@ function renderMatCostRows(containerId,category){
   el.querySelectorAll('.mat-row').forEach(row=>{
     const name=row.dataset.name;
     row.querySelector('input').addEventListener('change',e=>updateMatCost(category,name,e.target.value));
+    const setMap=(map,v)=>{ settingsDraft[map]=settingsDraft[map]||{}; settingsDraft[map][category]=settingsDraft[map][category]||{}; if(v===''||isNaN(parseFloat(v)))delete settingsDraft[map][category][name]; else settingsDraft[map][category][name]=parseFloat(v); };
+    row.querySelector('.mat-mk')?.addEventListener('change',e=>setMap('matMarkup',e.target.value));
+    row.querySelector('.mat-waste')?.addEventListener('change',e=>setMap('matWaste',e.target.value));
     row.querySelector('button').addEventListener('click',()=>removeMaterial(category,name));
   });
 }
@@ -5753,6 +5910,8 @@ function removeMaterial(category,name){
   }
   if(Object.keys(settingsDraft[category]).length<=1){alert('Need at least one option.');return;}
   if(!confirm('Remove "'+name+'" from your '+category+' list? This also removes it from every dropdown.'))return;
+  if(settingsDraft.matMarkup?.[category])delete settingsDraft.matMarkup[category][name];
+  if(settingsDraft.matWaste?.[category])delete settingsDraft.matWaste[category][name];
   delete settingsDraft[category][name];
   renderMatCostRows(category+'CostRows',category);
 }
@@ -5762,6 +5921,8 @@ function resetMatCategory(category){
   const defaults=category==='vinyl'?DEFAULT_VINYL:category==='laminate'?DEFAULT_LAMINATE:DEFAULT_SUBSTRATE;
   if(!confirm('Reset '+category+' prices to Inkable defaults? This discards your custom '+category+' list and costs (until you Save, nothing is written yet).'))return;
   settingsDraft[category]={...defaults};
+  if(settingsDraft.matMarkup)settingsDraft.matMarkup[category]={};
+  if(settingsDraft.matWaste&&category!=='laminate')settingsDraft.matWaste[category]={};
   renderMatCostRows(category+'CostRows',category);
 }
 
@@ -5801,6 +5962,10 @@ function saveSettings(){
   const negative=Object.keys(labels).filter(k=>Number(s[k])<0).map(k=>labels[k]);
   if(negative.length){ alert('These can\'t be below 0: '+negative.join(', ')+'.\nNothing was saved.'); return; }
   if(Number(s.markup)<1){ alert('The markup multiplier must be at least 1 (1 = selling materials at your cost).\nNothing was saved.'); return; }
+  const extraErr=readExtraSettings(s);
+  if(extraErr){ alert(extraErr+'\nNothing was saved.'); return; }
+  for(const cat of ['vinyl','laminate','substrate'])for(const [name,m] of Object.entries((s.matMarkup||{})[cat]||{}))if(m!=null&&m<1){ alert(`Markup for "${name}" must be at least 1 (or blank for the shop markup).\nNothing was saved.`); return; }
+  for(const cat of ['vinyl','substrate'])for(const [name,wp] of Object.entries((s.matWaste||{})[cat]||{}))if(wp!=null&&(wp<0||wp>100)){ alert(`Waste for "${name}" must be between 0 and 100%.\nNothing was saved.`); return; }
   const txt=id=>(document.getElementById(id)?.value||'').trim();
   s.bizEmail=txt('settingBizEmail');
   s.bizPhone=txt('settingBizPhone');
@@ -5851,13 +6016,14 @@ function calcSavedLine(line, fallbackJobType, rates, vinyl, laminate, substrate)
   // Same guards as the live pricer (calcLine): qty at least 1, nothing negative.
   const qty=lineQty(line.qty);
 
-  let sqft=0,rawMatCost=0,matTotal=0;
+  let sqft=0,rawMatCost=0,matTotal=0,breakPct=0;
 
   if(line.pricingMode==='flat'){
     if(line.flatSubMode==='unit'){
       const unitPrice=nonNeg(line.unitPrice);
       const unitCost=nonNeg(line.unitCost);
-      matTotal=unitPrice*qty;
+      breakPct=qtyBreakPct(qty,rates.qtyBreaks);
+      matTotal=unitPrice*qty*(1-breakPct/100);
       rawMatCost=unitCost*qty;
     }else{
       matTotal=nonNeg(line.totalPrice);
@@ -5885,9 +6051,16 @@ function calcSavedLine(line, fallbackJobType, rates, vinyl, laminate, substrate)
     // the old material-name heuristic just for those.
     const isPrinted=line.printed!==undefined?line.printed:
       (line.vinyl!=='Oracal 651 Intermediate Cal'&&line.vinyl!=='Fellers Black Label Banner');
-    const pCost=isPrinted?rates.printCost:0;
-    rawMatCost=(vCost+lCost+pCost)*sqft + sCost*subSqft;
-    matTotal=rawMatCost*rates.markup;
+    // Markup and waste as saved with the item. Items saved before these
+    // existed: the job's markup and no waste (jobs from before rates were
+    // kept per job: today's Settings).
+    const kept=line.vinylCost!=null;
+    const mkOf=(own,cat,name)=>own!=null&&own!==''?Number(own):(kept?rates.markup:(matMarkupOf(cat,name)??rates.markup));
+    const wasteOf=(own,cat,name)=>own!=null&&own!==''?Number(own):(kept?0:(matWasteOf(cat,name)??0));
+    const ip=itemMaterialPrice({sqft,subSqft,vCost,lCost,sCost,printed:isPrinted,cust:!!line.custMat,
+      vMk:mkOf(line.vinylMk,'vinyl',line.vinyl),lMk:mkOf(line.lamMk,'laminate',line.lam),sMk:mkOf(line.subMk,'substrate',line.sub),
+      vWaste:wasteOf(line.vinylWaste,'vinyl',line.vinyl),sWaste:wasteOf(line.subWaste,'substrate',line.sub),qty},rates);
+    rawMatCost=ip.raw; matTotal=ip.price; breakPct=ip.breakPct;
   }
 
   let designCost=0, designHrsTotal=0;
@@ -5915,7 +6088,7 @@ function calcSavedLine(line, fallbackJobType, rates, vinyl, laminate, substrate)
   }
   const desc=(line.desc||'').trim()||'Item';
   const subLabel=(line.pricingMode!=='flat'&&line.sub&&line.sub!=='None')?(line.sub+(line.subThickness?' — '+line.subThickness:'')):'';
-  return {sqft,matTotal,rawMatCost,designCost,designHrsTotal,installCost,installHrsTotal,installCostBasis,desc,subLabel};
+  return {sqft,matTotal,rawMatCost,designCost,designHrsTotal,installCost,installHrsTotal,installCostBasis,desc,subLabel,breakPct,cust:!!line.custMat};
 }
 
 function getProjectAmount(p){
@@ -5976,14 +6149,18 @@ function priceJob(lineData,o){
   const setupTotal=cents(o.setupTotal);
   const hardwareOnly=cents(o.hardware), subsTotal=cents(o.subs);
   const hardwareTotal=add([hardwareOnly,subsTotal]);
-  const sub=add([totalMat,designTotal,totalInstall,setupTotal,hardwareTotal]);
+  // Rush: a % on the work (items, design, install, setup). Trip: base + per mile past the free miles.
+  const rushPct=o.rush?nonNeg(o.rushPct):0;
+  const rushTotal=rushPct>0?cents((totalMat+designTotal+totalInstall+setupTotal)*rushPct/100):0;
+  const tripTotal=o.trip?cents(nonNeg(o.tripBase)+Math.max(0,nonNeg(o.tripMiles)-nonNeg(o.tripFreeMiles))*nonNeg(o.tripPerMile)):0;
+  const sub=add([totalMat,designTotal,totalInstall,setupTotal,hardwareTotal,rushTotal,tripTotal]);
   const disc=cents(discountAmount(o.dtype,o.dval,sub));
   let taxable=cents(sub-disc), minChargeAdj=0;
   if(o.minCharge&&taxable<nonNeg(o.minChargeVal)){ minChargeAdj=cents(nonNeg(o.minChargeVal)-taxable); taxable=add([taxable,minChargeAdj]); }
   const tax=o.taxExempt?0:cents(taxable*o.taxRate/100);
-  const processingFee=o.feeOn?cents((taxable+tax)*o.feeRate/100):0;
+  const processingFee=o.feeOn&&taxable+tax>0.005?cents((taxable+tax)*o.feeRate/100+nonNeg(o.feeFixed)):0;
   const total=add([taxable,tax,processingFee]);
-  return {lineData,totalMat,designTotal,totalInstall,setupTotal,hardwareOnly,subsTotal,hardwareTotal,sub,disc,taxable,minChargeAdj,tax,processingFee,total};
+  return {lineData,totalMat,designTotal,totalInstall,setupTotal,hardwareOnly,subsTotal,hardwareTotal,rushPct,rushTotal,tripTotal,sub,disc,taxable,minChargeAdj,tax,processingFee,total};
 }
 // Leaving a number box in the pricer: negatives become 0, qty below 1
 // becomes 1 and a % discount over 100 becomes 100, so the box shows what is
@@ -6147,8 +6324,9 @@ function openPricer(projNum, clientId){
   document.getElementById('pricerNotes').value=biz.defaultNotes||'';
   document.getElementById('pricerJobDesc').value='';
   document.getElementById('pricerTerms').value=biz.defaultTerms||'';
-  document.getElementById('setupHrs').value='0';
-  document.getElementById('setupMins').value='15';
+  const setupDef=Number(setting('defaultSetupMins'))||0;
+  document.getElementById('setupHrs').value=String(Math.floor(setupDef/60));
+  document.getElementById('setupMins').value=String(setupDef%60);
   document.getElementById('pricerHardware').value='0';
   document.getElementById('pricerHardwareCost').value='0';
   document.getElementById('pricerSubs').value='0';
@@ -6156,15 +6334,20 @@ function openPricer(projNum, clientId){
   document.getElementById('discType').value='none';
   document.getElementById('discVal').value='0';
   document.getElementById('taxExemptChk').checked=false;
-  document.getElementById('minChargeChk').checked=false;
-  document.getElementById('minChargeVal').value='25';
-  document.getElementById('minChargeField').style.display='none';
+  document.getElementById('minChargeChk').checked=!!setting('minChargeOn');
+  document.getElementById('minChargeVal').value=String(setting('minChargeDefault'));
+  document.getElementById('minChargeField').style.display=setting('minChargeOn')?'flex':'none';
   // Checked by default on every new estimate. The SPA reuses this same
   // overlay across multiple "new estimate" clicks without a page reload,
   // so this reset has to be re-applied explicitly every time — the
   // checkbox's HTML "checked" attribute only takes effect on first load.
-  document.getElementById('processingFeeChk').checked=true;
+  document.getElementById('processingFeeChk').checked=!!setting('feeBoxDefault');
   document.getElementById('depositPctInput').value=getRates().depositPct;
+  document.getElementById('rushChk').checked=false;
+  document.getElementById('tripChk').checked=false;
+  document.getElementById('tripMiles').value='';
+  document.getElementById('pricerTaxRate').value=pricerState.taxRate;
+  syncChargeFields();
 
   // Open overlay first, then populate
   document.getElementById('pricerOverlay').classList.add('open');
@@ -6248,6 +6431,11 @@ function loadPricerFromSaved(project){
   // silently turn on a fee for an estimate that was priced without one.
   document.getElementById('processingFeeChk').checked=!!pd.processingFeeOn;
   document.getElementById('depositPctInput').value=pd.depositPct!=null?pd.depositPct:getRates().depositPct;
+  document.getElementById('rushChk').checked=!!pd.rush;
+  document.getElementById('tripChk').checked=!!pd.trip;
+  document.getElementById('tripMiles').value=pd.tripMiles||'';
+  document.getElementById('pricerTaxRate').value=pricerState.taxRate;
+  syncChargeFields();
 
   (pd.lines||[]).forEach(line=>addLineItemFromSaved(line));
   if(!(pd.lines||[]).length) addLineItem(); // never leave the pricer with zero items
@@ -6283,6 +6471,9 @@ function addLineItemFromSaved(line){
   if(line.vinylCost!=null){ el.dataset.vname=line.vinyl||''; el.dataset.vcost=line.vinylCost; }
   if(line.lamCost!=null){ el.dataset.lname=line.lam||'No Laminate'; el.dataset.lcost=line.lamCost; }
   if(line.subCost!=null){ el.dataset.sname=line.sub||'None'; el.dataset.scost=line.subCost; }
+  if(line.vinylMk!=null)el.dataset.vmk=line.vinylMk; if(line.lamMk!=null)el.dataset.lmk=line.lamMk; if(line.subMk!=null)el.dataset.smk=line.subMk;
+  if(line.vinylWaste!=null)el.dataset.vwaste=line.vinylWaste; if(line.subWaste!=null)el.dataset.swaste=line.subWaste;
+  if(line.custMat)el.querySelector('.li-cust-chk').checked=true;
   [['.li-vinyl',getVinyl(),line.vinyl,'v'],['.li-lam',getLaminate(),line.lam||'No Laminate','l'],['.li-sub',getSubstrate(),line.sub||'None','s']].forEach(([cls,obj,name,k])=>{
     const sel=el.querySelector(cls);
     if(byMaterial)setMaterialSelect(sel,obj,name,el.dataset[k+'cost']!==undefined&&el.dataset[k+'name']===name);
@@ -6409,6 +6600,10 @@ function addLineItem(){
       <label class="li-printed-toggle">
         <input type="checkbox" class="li-printed-chk" checked onchange="recalc()"/>
         <span>Printed on our printer</span>
+      </label>
+      <label class="li-printed-toggle" title="The client brings the material: priced at your print-only / cut-only rate (Settings → Shop)">
+        <input type="checkbox" class="li-cust-chk" onchange="recalc()"/>
+        <span>Customer's material</span>
       </label>
     </div>
     <div class="li-vehicle-wrap">
@@ -6645,7 +6840,7 @@ function updateRatesNotice(d){
 function useTodaysRates(silent){
   pricerState.rates=null; pricerState.switchedToToday=true;
   document.querySelectorAll('.line-item').forEach(el=>{
-    ['vname','vcost','lname','lcost','sname','scost'].forEach(k=>{ delete el.dataset[k]; });
+    ['vname','vcost','lname','lcost','sname','scost','vmk','lmk','smk','vwaste','swaste'].forEach(k=>{ delete el.dataset[k]; });
     if((el.dataset.pricingMode||'material')==='flat')return;
     [['.li-vinyl',getVinyl()],['.li-lam',getLaminate()],['.li-sub',getSubstrate()]].forEach(([cls,obj])=>{
       const sel=el.querySelector(cls); if(sel)setMaterialSelect(sel,obj,sel.value||sel.dataset.missing||'');
@@ -6654,6 +6849,15 @@ function useTodaysRates(silent){
   recalc();
   if(!silent)showToast('🔄','Using today\'s rates','The pricer now shows this job at today\'s Settings. Nothing changes until you press Save.',{color:'var(--blue)',duration:7000});
 }
+// Rush label shows the % from Settings; trip miles box only when Trip is ticked.
+function syncChargeFields(){
+  const r=pricerRates();
+  const rl=document.getElementById('rushLabel'); if(rl)rl.textContent=r.rushPct>0?`Rush (+${r.rushPct}%)`:'Rush (set % in Settings)';
+  const tf=document.getElementById('tripMilesField'); if(tf)tf.style.display=document.getElementById('tripChk')?.checked?'':'none';
+  const fl=document.getElementById('processingFeeLabel'); if(fl)fl.textContent=setting('feeMode')==='cardOnly'?'Card fee if paid by card':'Processing Fee';
+}
+// Tax rate for this job only (e.g. an install where the rate is different).
+function setPricerTaxRate(v){ const n=parseFloat(v); if(!isNaN(n)&&n>=0&&n<=20){ pricerState.taxRate=n; recalc(); } }
 function updateDoneColumn(){
   const doneEls=document.querySelectorAll('#doneItemsContainer .line-item');
   const countEl=document.getElementById('doneCount');
@@ -6877,6 +7081,13 @@ function lineMatCost(el,k,name,list){
   if(!ignoreKeptPrices&&el.dataset[k+'name']===name&&el.dataset[k+'cost']!==undefined&&el.dataset[k+'cost']!=='')return Number(el.dataset[k+'cost'])||0;
   return Number(list[name])||0;
 }
+// Markup ('mk') or waste ('waste') for one material of an item: as quoted when
+// the item was saved, else today's Settings (shop markup / no waste if none).
+function lineMatProp(el,k,name,prop,current,shopMarkup){
+  const kept=!ignoreKeptPrices&&el.dataset[k+'name']===name&&el.dataset[k+'cost']!==undefined&&el.dataset[k+'cost']!=='';
+  if(kept){ const v=el.dataset[k+prop]; return v!==undefined&&v!==''?Number(v):(prop==='mk'?shopMarkup:0); }
+  return current!=null?Number(current):(prop==='mk'?shopMarkup:0);
+}
 function calcLine(el){
   const vinyl=getVinyl();
   const laminate=getLaminate();
@@ -6886,7 +7097,7 @@ function calcLine(el){
   const qty=lineQty(el.querySelector('.li-qty')?.value); // below 1 counts as 1, same as saved jobs
   const pricingMode=el.dataset.pricingMode||'material';
 
-  let sqft=0,subSqft=0,subSameSize=true,subThickness='',vinylName='',lamName='',subName='',rawMatCost=0,matTotal=0;
+  let sqft=0,subSqft=0,subSameSize=true,subThickness='',vinylName='',lamName='',subName='',rawMatCost=0,matTotal=0,breakPct=0,cust=false;
 
   if(pricingMode==='flat'){
     // Flat pricing — vended goods, no sqft or material math. What you type
@@ -6896,7 +7107,8 @@ function calcLine(el){
     if(flatSubMode==='unit'){
       const unitPrice=nonNeg(el.querySelector('.li-unit-price')?.value);
       const unitCost=nonNeg(el.querySelector('.li-unit-cost')?.value);
-      matTotal=unitPrice*qty;
+      breakPct=qtyBreakPct(qty,rates.qtyBreaks);
+      matTotal=unitPrice*qty*(1-breakPct/100);
       rawMatCost=unitCost*qty;
     }else{
       // One lump sum for the whole batch — e.g. "50 brochures from the
@@ -6932,14 +7144,21 @@ function calcLine(el){
     const vCost=lineMatCost(el,'v',vinylName,vinyl);
     const lCost=lineMatCost(el,'l',lamName,laminate);
     const sCost=subName!=='None'?lineMatCost(el,'s',subName,substrate):0;
+    const vMk=lineMatProp(el,'v',vinylName,'mk',matMarkupOf('vinyl',vinylName),rates.markup);
+    const lMk=lineMatProp(el,'l',lamName,'mk',matMarkupOf('laminate',lamName),rates.markup);
+    const sMk=lineMatProp(el,'s',subName,'mk',matMarkupOf('substrate',subName),rates.markup);
+    const vWaste=lineMatProp(el,'v',vinylName,'waste',matWasteOf('vinyl',vinylName),rates.markup);
+    const sWaste=lineMatProp(el,'s',subName,'waste',matWasteOf('substrate',subName),rates.markup);
+    cust=!!el.querySelector('.li-cust-chk')?.checked;
     // Print cost is an explicit fact you set per item — whether it's
     // actually going through your printer — not a guess based on material
     // name or a job-type label.
     const isPrinted=el.querySelector('.li-printed-chk')?.checked!==false;
     const pCost=isPrinted?rates.printCost:0;
 
-    rawMatCost=(vCost+lCost+pCost)*sqft + sCost*subSqft; // wholesale, no markup — used for margin
-    matTotal=rawMatCost*rates.markup;
+    // Your cost (for margin and recorded costs) and the price, from the same routine as saved jobs.
+    const ip=itemMaterialPrice({sqft,subSqft,vCost,lCost,sCost,printed:isPrinted,cust,vMk,lMk,sMk,vWaste,sWaste,qty},rates);
+    rawMatCost=ip.raw; matTotal=ip.price; breakPct=ip.breakPct;
   }
 
   // Design for this line — level picked per item, decoupled from material
@@ -6974,7 +7193,7 @@ function calcLine(el){
       installCostBasis=installHrsTotal*rates.myCostInstall;
     }
   }
-  return{sqft,subSqft,subSameSize,subThickness,matTotal,rawMatCost,designCost,designHrsTotal,installCost,installHrsTotal,installCostBasis,installMode,vinylName,lamName,subName,qty,pricingMode,designLevel,installLevel};
+  return{sqft,subSqft,subSameSize,subThickness,matTotal,rawMatCost,designCost,designHrsTotal,installCost,installHrsTotal,installCostBasis,installMode,vinylName,lamName,subName,qty,pricingMode,designLevel,installLevel,breakPct,cust};
 }
 
 function recalc(){
@@ -7142,6 +7361,8 @@ function renderLivePreview(d){
   if(d.totalInstall>0)extraRows+=`<div class="lp-row"><span>Installation</span><span>${fmt(d.totalInstall)}</span></div>`;
   if(d.hardwareOnly>0)extraRows+=`<div class="lp-row"><span>Hardware &amp; Misc</span><span>${fmt(d.hardwareOnly)}</span></div>`;
   if(d.subsTotal>0)extraRows+=`<div class="lp-row"><span>Subcontracted Work</span><span>${fmt(d.subsTotal)}</span></div>`;
+  if(d.rushTotal>0)extraRows+=`<div class="lp-row"><span>Rush Fee (${d.rushPct}%)</span><span>${fmt(d.rushTotal)}</span></div>`;
+  if(d.tripTotal>0)extraRows+=`<div class="lp-row"><span>Trip Charge</span><span>${fmt(d.tripTotal)}</span></div>`;
 
   let discRow='';
   if(d.disc>0)discRow=`<div class="lp-row discount"><span>Discount${d.dtype==='pct'?' ('+d.dval+'%)':''}</span><span>${fmt(-(d.disc))}</span></div>`;
@@ -7224,7 +7445,15 @@ function collectPricerData(){
         vinylCost:lineMatCost(el,'v',el.querySelector('.li-vinyl').value,getVinyl()),
         lamCost:lineMatCost(el,'l',el.querySelector('.li-lam').value,getLaminate()),
         subCost:el.querySelector('.li-sub').value==='None'?0:lineMatCost(el,'s',el.querySelector('.li-sub').value,getSubstrate()),
+        ...(()=>{ const r=pricerRates(), v=el.querySelector('.li-vinyl').value, l=el.querySelector('.li-lam').value, sb=el.querySelector('.li-sub').value;
+          return {custMat:!!el.querySelector('.li-cust-chk')?.checked,
+            vinylMk:lineMatProp(el,'v',v,'mk',matMarkupOf('vinyl',v),r.markup),lamMk:lineMatProp(el,'l',l,'mk',matMarkupOf('laminate',l),r.markup),
+            subMk:lineMatProp(el,'s',sb,'mk',matMarkupOf('substrate',sb),r.markup),
+            vinylWaste:lineMatProp(el,'v',v,'waste',matWasteOf('vinyl',v),r.markup),subWaste:lineMatProp(el,'s',sb,'waste',matWasteOf('substrate',sb),r.markup)}; })(),
       })),
+      rush:!!document.getElementById('rushChk')?.checked,
+      trip:!!document.getElementById('tripChk')?.checked,
+      tripMiles:document.getElementById('tripMiles')?.value||'',
       rates:pricerState.rates||rateSnapshot(),
       setupHrs:document.getElementById('setupHrs').value,
       setupMins:document.getElementById('setupMins').value,
@@ -7344,7 +7573,7 @@ function savePricerProject(){
     entry.state.form.estimateSummary={
       lineItems:d.lineData.map(l=>({desc:l.desc,sqft:l.sqft,matTotal:l.matTotal})),
       setupTotal:d.setupTotal,designTotal:d.designTotal,totalInstall:d.totalInstall,
-      hardwareTotal:d.hardwareTotal,hardwareOnly:d.hardwareOnly,subsTotal:d.subsTotal,disc:d.disc,dtype:d.dtype,dval:d.dval,
+      hardwareTotal:d.hardwareTotal,hardwareOnly:d.hardwareOnly,subsTotal:d.subsTotal,rushTotal:d.rushTotal,rushPct:d.rushPct,tripTotal:d.tripTotal,disc:d.disc,dtype:d.dtype,dval:d.dval,
       sub:d.sub,taxable:d.taxable,tax:d.tax,total:d.total,taxExempt:d.taxExempt,
       processingFee:d.processingFee,processingFeeOn:d.processingFeeOn,
       minChargeAdj:d.minChargeAdj||0,
@@ -7375,7 +7604,10 @@ function savePricerProject(){
     const spd=JSON.parse(state.form.pricerData);
     pricerState.rates=spd.rates; pricerState.quotedTotal=newTotal; pricerState.switchedToToday=false;
     document.querySelectorAll('.line-item').forEach((el,i)=>{ const l=spd.lines[i]; if(!l)return;
-      el.dataset.vname=l.vinyl||''; el.dataset.vcost=l.vinylCost; el.dataset.lname=l.lam||''; el.dataset.lcost=l.lamCost; el.dataset.sname=l.sub||'None'; el.dataset.scost=l.subCost; });
+      el.dataset.vname=l.vinyl||''; el.dataset.vcost=l.vinylCost; el.dataset.lname=l.lam||''; el.dataset.lcost=l.lamCost; el.dataset.sname=l.sub||'None'; el.dataset.scost=l.subCost;
+      el.dataset.vmk=l.vinylMk; el.dataset.lmk=l.lamMk; el.dataset.smk=l.subMk; el.dataset.vwaste=l.vinylWaste; el.dataset.swaste=l.subWaste; });
+    // A rush job gets the Rush tag too.
+    if(spd.rush){ const tm=getJobMeta(id); if(!(tm.tags||[]).includes('rush'))setJobMeta(id,{...tm,tags:[...(tm.tags||[]),'rush']}); }
   }catch(e){}
   noteIssuedNum(projNum,estDigits(estNo));
   const rawList=JSON.parse(localStorage.getItem(SAVED_KEY)||'[]');
@@ -7774,6 +8006,9 @@ function gatherPricerPDFData(){
     }
     const vehicleInfo=(el.querySelector('.li-vehicle-info')?.value||'').trim();
     if(vehicleInfo)desc+=' — '+vehicleInfo;
+    const c=calcLine(el);
+    if(c.cust)desc+=' (customer-supplied material)';
+    if(c.breakPct>0)desc+=` (${c.breakPct}% quantity discount)`;
     return {desc,sqft,matTotal,designCost,installCost};
   });
   const setupHrsTotal=nonNeg(document.getElementById('setupHrs')?.value)+
@@ -7789,7 +8024,10 @@ function gatherPricerPDFData(){
   const m=priceJob(lineData,{setupTotal:setupHrsTotal*rates.setupRate,
     hardware:nonNeg(document.getElementById('pricerHardware')?.value),subs:nonNeg(document.getElementById('pricerSubs')?.value),
     dtype,dval,minCharge:minChargeOn,minChargeVal:nonNeg(document.getElementById('minChargeVal')?.value),
-    taxExempt,taxRate,feeOn:processingFeeOn,feeRate:rates.processingFeeRate});
+    taxExempt,taxRate,feeOn:processingFeeOn,feeRate:rates.processingFeeRate,feeFixed:rates.feeFixed,
+    rush:!!document.getElementById('rushChk')?.checked,rushPct:rates.rushPct,
+    trip:!!document.getElementById('tripChk')?.checked,tripMiles:nonNeg(document.getElementById('tripMiles')?.value),
+    tripBase:rates.tripBase,tripPerMile:rates.tripPerMile,tripFreeMiles:rates.tripFreeMiles});
 
   const jobName=(document.getElementById('pricerJobName')?.value||'').trim()||'Untitled Job';
   const notes=(document.getElementById('pricerNotes')?.value||'').trim();
@@ -7839,6 +8077,8 @@ function gatherPricerPDFDataFromSaved(p){
     const calc=calcSavedLine(l,pd.jobType,rates,vinyl,laminate,substrate);
     let desc=calc.subLabel?calc.desc+' + '+calc.subLabel:calc.desc;
     if(l.vehicleInfo)desc+=' — '+l.vehicleInfo;
+    if(calc.cust)desc+=' (customer-supplied material)';
+    if(calc.breakPct>0)desc+=` (${calc.breakPct}% quantity discount)`;
     return {...calc,desc};
   });
   const setupHrsTotal=nonNeg(pd.setupHrs)+nonNeg(pd.setupMins)/60;
@@ -7846,7 +8086,8 @@ function gatherPricerPDFDataFromSaved(p){
   // never silently add a fee to a job that was priced without it.
   const processingFeeOn=!!pd.processingFeeOn, taxExempt=!!pd.taxExempt, minCharge=!!pd.minCharge;
   const m=priceJob(lineData,{setupTotal:setupHrsTotal*rates.setupRate,hardware:nonNeg(pd.hardware),subs:nonNeg(pd.subs),
-    dtype,dval,minCharge,minChargeVal:nonNeg(pd.minChargeVal),taxExempt,taxRate,feeOn:processingFeeOn,feeRate:rates.processingFeeRate});
+    dtype,dval,minCharge,minChargeVal:nonNeg(pd.minChargeVal),taxExempt,taxRate,feeOn:processingFeeOn,feeRate:rates.processingFeeRate,feeFixed:rates.feeFixed,
+    rush:!!pd.rush,rushPct:rates.rushPct,trip:!!pd.trip,tripMiles:nonNeg(pd.tripMiles),tripBase:rates.tripBase,tripPerMile:rates.tripPerMile,tripFreeMiles:rates.tripFreeMiles});
 
   const clients=getClients();
   const client=f.clientId?clients.find(c=>c.id===f.clientId):null;
@@ -7882,7 +8123,7 @@ function savedPDFData(p){
   const minChargeAdj=s.minChargeAdj!=null?n(s.minChargeAdj):Math.max(0,n(s.taxable)-(n(s.sub)-n(s.disc)));
   return{...d,lineData,totalMat:lineData.reduce((a,l)=>a+l.matTotal,0),
     setupTotal:n(s.setupTotal),designTotal:n(s.designTotal),totalInstall:n(s.totalInstall),hardwareTotal:n(s.hardwareTotal),
-    hardwareOnly:s.hardwareOnly!=null?n(s.hardwareOnly):undefined,subsTotal:n(s.subsTotal),
+    hardwareOnly:s.hardwareOnly!=null?n(s.hardwareOnly):undefined,subsTotal:n(s.subsTotal),rushTotal:n(s.rushTotal),rushPct:n(s.rushPct),tripTotal:n(s.tripTotal),
     sub:n(s.sub),dtype:s.dtype||'none',dval:n(s.dval),disc:n(s.disc),taxable:n(s.taxable),tax:n(s.tax),total:n(s.total),
     taxExempt:!!s.taxExempt,minChargeAdj,minChargeApplied:minChargeAdj>0.005,
     processingFee:n(s.processingFee),processingFeeOn:!!s.processingFeeOn};
@@ -8439,6 +8680,8 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
   const hwOnly=d.hardwareOnly!=null?d.hardwareOnly:d.hardwareTotal, subsOnly=d.hardwareOnly!=null?(d.subsTotal||0):0;
   if(hwOnly>0) row('Hardware & Misc',hwOnly);
   if(subsOnly>0) row('Subcontracted Work',subsOnly);
+  if(d.rushTotal>0) row('Rush Fee',d.rushTotal,d.rushPct?'('+d.rushPct+'%)':null);
+  if(d.tripTotal>0) row('Trip Charge',d.tripTotal);
   if(d.disc>0) row('Discount',-d.disc,d.dtype==='pct'?'('+d.dval+'%)':null);
   if(d.minChargeApplied&&d.minChargeAdj>0) row('Minimum Job Charge Adj.',d.minChargeAdj);
   row('Subtotal',d.taxable); // includes the minimum-charge adjustment above, so the rows add up
@@ -8568,8 +8811,20 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
             </label>
             <label class="pricing-toggle">
               <input type="checkbox" id="processingFeeChk" checked onchange="recalc()"/>
-              <span>Processing Fee</span>
+              <span id="processingFeeLabel">Processing Fee</span>
             </label>
+            <label class="pricing-toggle">
+              <input type="checkbox" id="rushChk" onchange="recalc()"/>
+              <span id="rushLabel">Rush</span>
+            </label>
+            <label class="pricing-toggle">
+              <input type="checkbox" id="tripChk" onchange="syncChargeFields();recalc()"/>
+              <span>Trip charge</span>
+            </label>
+          </div>
+          <div class="charge-fields">
+            <span id="tripMilesField" style="display:none">Trip <input type="number" id="tripMiles" min="0" step="1" placeholder="0" oninput="recalc()"/> miles</span>
+            <span>Tax rate <input type="number" id="pricerTaxRate" min="0" max="20" step="0.01" oninput="setPricerTaxRate(this.value)"/> %</span>
           </div>
           <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
             <span style="font-size:11px;color:var(--muted)">Deposit to start</span>
@@ -8769,6 +9024,7 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
         <div class="shop-row"><div><label>Standard</label><small>sqft/hr</small></div><div class="pi"><span>#</span><input id="settingInstallSqftStandard" type="number" step="5" min="1"/></div></div>
         <div class="shop-row"><div><label>Advanced</label><small>sqft/hr</small></div><div class="pi"><span>#</span><input id="settingInstallSqftAdvanced" type="number" step="5" min="1"/></div></div>
       </div>
+      <div id="extraSettings-shop"></div>
     </div>
 
     <!-- BUSINESS TAB -->
@@ -8788,6 +9044,7 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
       <textarea id="settingDefaultNotes" rows="3" style="width:100%;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;box-sizing:border-box;margin:4px 0 12px"></textarea>
       <label style="font-size:11px;color:var(--muted)">Default terms</label>
       <textarea id="settingDefaultTerms" rows="4" placeholder="e.g. {50% deposit to start, balance due at install or pickup. Proofs approved in writing.}" style="width:100%;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;box-sizing:border-box;margin-top:4px"></textarea>
+      <div id="extraSettings-business"></div>
     </div>
     <!-- VINYL TAB -->
     <div class="settings-tab-panel" id="stab-vinyl">
@@ -8880,6 +9137,7 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
           <span style="font-size:12px;color:var(--muted)">days</span>
         </div>
       </div>
+      <div id="extraSettings-reminders"></div>
     </div>
 
     <!-- GOOGLE DRIVE / PROOFS TAB -->

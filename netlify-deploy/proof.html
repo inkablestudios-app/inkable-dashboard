@@ -186,6 +186,8 @@
       // Newer estimates list subcontracted work on its own line.
       (summary.hardwareOnly != null ? summary.hardwareOnly : summary.hardwareTotal) > 0 ? ['Hardware & Misc', summary.hardwareOnly != null ? summary.hardwareOnly : summary.hardwareTotal] : null,
       summary.hardwareOnly != null && summary.subsTotal > 0 ? ['Subcontracted Work', summary.subsTotal] : null,
+      summary.rushTotal > 0 ? ['Rush Fee' + (summary.rushPct ? ' (' + summary.rushPct + '%)' : ''), summary.rushTotal] : null,
+      summary.tripTotal > 0 ? ['Trip Charge', summary.tripTotal] : null,
       summary.disc > 0 ? ['Discount', -summary.disc] : null,
       minAdj > 0.005 ? ['Minimum Job Charge Adjustment', minAdj] : null,
     ].filter(Boolean).map(([lbl,amt]) => `<div class="totrow"><span>${lbl}</span><span>${fmtMoney(amt)}</span></div>`).join('');
