@@ -299,3 +299,41 @@
   which box); a box left empty keeps its value instead of quietly going back to the built-in
   default; "No Laminate" and the "None" substrate can't be removed (removing them made every new
   item start with a laminate and a board), and they come back if an older save lost them.
+- **21 new settings (Oct 26, from SETTINGS_REVIEW_2026-10-26.md).** Every one starts at today's
+  behavior (0, off or the old fixed value), so no price changes until you fill them in. Jobs keep
+  the rates they were priced with; jobs saved before these settings treat the new ones as off.
+  - **Settings → Shop:**
+    - Labor per sq ft: print & trim, cut & weed (added to each item).
+    - Customer's own material: an item ticked "Customer's material" is priced at a print-only or
+      cut-only rate per sq ft instead of the material.
+    - Markup and waste % per material (in each material's row; blank = the shop markup / no waste).
+    - Quantity breaks ("10=5, 50=10" = 10+ pieces 5% off, 50+ pieces 10% off).
+    - Rush fee % (the pricer's "Rush" box), trip charge (base, per mile, free miles; the pricer's
+      "Trip charge" box with the miles).
+    - Card fee fixed part (Stripe's 30¢), and "charge the card fee only when the client pays by
+      card" (then it's added at Stripe checkout as its own line, the estimate total leaves it out,
+      cash/check pay no fee).
+  - **Pricer, per job:** tax rate, payment schedule ("50/40/10"), 0% deposit (accept now, pay at
+    completion).
+  - **Settings → Business:**
+    - New-estimate defaults: setup time, minimum charge (amount, on/off) and the card-fee box.
+    - Invoices due (on receipt / Net 7–60) with a due date on the invoice, and a late payment note
+      under the balance while one is left. The invoice is dated the day the job was marked Done
+      (today until then). Overdue reminders for jobs on net terms wait until the due date.
+    - Payment methods list for the payment window (e.g. add Venmo, Cash App, ACH).
+    - Default payment schedule for big jobs.
+    - Address and website (estimate header, invoice/receipt footer with the phone, client page
+      with a map link).
+    - Numbering: estimate and invoice prefixes and a starting number (e.g. continue CoreBridge's).
+      Saved jobs keep their numbers; Projects sorts by the number across old and new prefixes.
+    - Branding: logo (estimate PDF and client page) and the client page's button/link color.
+  - **Client settings** (client form → "Pricing & billing for this client"): tax-exempt with the
+    certificate #, discount %, deposit %, invoice terms and their own estimate terms. Filled into
+    new estimates for that client with a notice ("Client settings applied: …"); switching the client
+    on a new estimate undoes the previous one's. The certificate # shows on the estimate, invoice
+    and client page. Needs **migration 012** (the clients function also adds the column itself if
+    the migration hasn't run).
+  - **Settings → Reminders:** install coming up (default 1 day before; 0 = off), proof waiting on the
+    client (default 3 days; 0 = off), and sales tax filing monthly / quarterly / yearly for the
+    due-date line.
+  - Fix: reminder messages show client names as plain text.

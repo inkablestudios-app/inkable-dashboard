@@ -56,3 +56,34 @@ Ranked by how often they'd matter and how much money is involved.
 19. Starting number and prefix for estimates/invoices (e.g. continue CoreBridge numbering).
 20. Logo and colors (built in today).
 21. Staged payments (e.g. 50/40/10) for big jobs like monuments — future.
+
+## Status — all 21 added (Oct 26)
+Each new setting starts at today's behavior (0, off or the old fixed value), so nothing changes
+until you fill it in. Jobs keep the rates they were priced with.
+
+| # | Setting | Where |
+|---|---|---|
+| 1 | Labor per sq ft (print & trim, cut & weed) | Settings → Shop |
+| 2 | Customer's material: print-only / cut-only rates | Settings → Shop; "Customer's material" box on each item |
+| 3 | Markup per material | each material's row (Vinyl / Laminate / Substrate tabs) |
+| 4 | Minimum charge default amount, on/off | Settings → Business → New estimate defaults |
+| 5 | Card fee fixed part (30¢); fee only when paying by card | Settings → Shop → Card fee |
+| 6 | Client settings (tax-exempt + cert #, discount, deposit, terms) | client form → "Pricing & billing for this client" |
+| 7 | No deposit (0%) | Settings → Business, the pricer, or per client |
+| 8 | Waste % per material | each material's row |
+| 9 | Tax rate per job | pricer, next to Tax-exempt |
+| 10 | Rush fee % | Settings → Shop; "Rush" box in the pricer |
+| 11 | Trip charge (base, per mile, free miles) | Settings → Shop; "Trip charge" box + miles in the pricer |
+| 12 | Quantity breaks | Settings → Shop |
+| 13 | Invoice terms with due date (+ late payment note) | Settings → Business → Invoices & payments; per client |
+| 14 | Default setup time; card-fee box default | Settings → Business → New estimate defaults |
+| 15 | Payment methods list | Settings → Business → Invoices & payments |
+| 16 | Install coming up; proof waiting reminders | Settings → Reminders (on by default: 1 day / 3 days; 0 = off) |
+| 17 | Sales tax filing monthly / quarterly / yearly | Settings → Reminders |
+| 18 | Address, website (phone now on invoices/receipts too) | Settings → Business → More contact details |
+| 19 | Estimate / invoice prefix and starting number | Settings → Business → Numbering |
+| 20 | Logo and client page color | Settings → Business → Branding |
+| 21 | Payment schedule (e.g. 50/40/10) | Settings → Business (default) and the pricer (per job) |
+
+Tests: group A 38, B 33, C 33, D 48, E 23 checks (tests/pass/new-a … new-e.mjs), all passing,
+plus the 65-project pass, the Settings simulations and the regression suites re-run after each group.

@@ -165,7 +165,9 @@ await setSettings({settingStaleEstimateDays:3,settingOverdueBalanceDays:5});
   rem=E('computeReminders()'); check(rem.some(r=>r.type==='overdue'&&r.projectId===p2.id),'overdue balance (8 days, limit 5) shows in the bell');
   await setSettings({settingOverdueBalanceDays:30}); rem=E('computeReminders()'); check(!rem.some(r=>r.type==='overdue'&&r.projectId===p2.id),'raising the limit clears it');
   const bk=E('computeReminders()').some(r=>/backup/i.test(r.type||r.message||'')); check(bk,'backup reminder shows when no backup was ever downloaded');
-  if(!E("typeof getReminderSettings==='function'&&'installReminderDays' in getReminderSettings()"))note('settings','No reminder for upcoming installs (e.g. the day before) or for a proof the client hasn\'t answered in N days; only quiet estimates, unpaid balances and backups.'); }
+  { const t=new Date(Date.now()+864e5), ymd=t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0');
+    E(`setJobMeta('${p2.id}',{...getJobMeta('${p2.id}'),status:'prod',installDate:'${ymd}'})`); await sleep(20);
+    check(E('computeReminders()').some(r=>r.type==='install'&&r.projectId===p2.id),'install tomorrow shows in the bell (Settings → Reminders, added Oct 26)'); } }
 
 // ── Data ──
 startScenario('ST15','Backup and restore keep Settings','settings');

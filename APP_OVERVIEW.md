@@ -41,6 +41,15 @@ Written after a read-through of v2.38 on 2026-10-16. Keep this updated when the 
   (`seedAmount` remembers what the pricer last put there). Reports count a job's costs in
   proportion to the money received in each period.
 - Status "Cancelled": not owed, payments still count. Refunds are negative payments.
+- Settings added Oct 26 (labor per sq ft, customer's material, markup/waste per material, quantity
+  breaks, rush, trip, card fee fixed part / card-only, numbering, invoice terms, reminders…) live in
+  one table, `EXTRA_SETTINGS`, read with `setting(key)`; Settings draws them from that table. The ones
+  that change prices are saved in each job's rates (`rateSnapshot`); `RATES_ADDED_OFF` makes jobs saved
+  before they existed treat them as off. Per-client settings are `client.prefs` (database column
+  `clients.prefs`, migration 012) and are copied into a new estimate when it's opened
+  (`applyClientDefaults`); the job then keeps its own values (`pd.taxCert`, `pd.payTerms`…).
+- Invoices: dated the day the job was marked Done (today until then), due per the job's terms
+  (client) or Settings → Invoices due (`invoiceTermsFor`, `prepInvoice`).
 - The client page and Stripe charge from a snapshot of the estimate frozen when the job was saved.
   The Dashboard recalculates totals from current rates (see "Known gaps").
 - Stripe: the server works out the amount itself (client can't change it), Stripe hosts the card form,
@@ -71,8 +80,9 @@ Written after a read-through of v2.38 on 2026-10-16. Keep this updated when the 
 - **Client approval vs. Dashboard save**: approving on the client page sets the status on the server;
   a Dashboard tab with an older copy can set it back when saving that job (v2.37 reduced but did not
   remove this).
-- Decided: same price for all payment methods; Processing Fee box ON by default. Payment method is
-  recorded per payment (Cash/Check/Card/Zelle/Other; Stripe = "Card (Stripe)").
+- Decided: same price for all payment methods; Processing Fee box ON by default (Settings can now
+  charge the card fee only at card checkout instead). Payment method is recorded per payment (the
+  list is in Settings → Business; Stripe = "Card (Stripe)").
 - Login has no limit on wrong-password attempts (low risk for now; use a strong password).
 
 ## Parked for later (owner's choice)
@@ -80,7 +90,7 @@ Written after a read-through of v2.38 on 2026-10-16. Keep this updated when the 
   with real numbers instead of the built-in defaults. (Parked Oct 25.)
 - Real past jobs (sizes, materials, what was charged) to compare against the pricer: the owner will
   collect them from the tool later. (Parked Oct 25.)
-- "Customer supplied material" option and a print-only rate in Settings. (On hold since Oct 24.)
+- DONE Oct 26: "Customer's material" per item with print-only / cut-only rates in Settings.
 - Multi-piece signs (e.g. clear acrylic face + vinyl + backer): enter each piece as its own item
   ("＋ Add Item"). For a plain piece with no vinyl, add a material "None (substrate only)" at $0 in
   Settings and untick "Printed on our printer". (A per-item "layers" feature was built and removed

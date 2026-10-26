@@ -14,9 +14,12 @@ Do NOT skip these. Tick each one off before taking real payments.
 - [ ] One real small payment (e.g. $1), check it lands in the Dashboard, then refund it in Stripe.
 - [ ] Everything under "Before going live" in the handoff is done (payment overwrite fix: done;
       localStorage storage error; owner notification; cash/check "remove fee" option decided).
-- [ ] Database migrations 008, 009, 010 and 011 (estimate visual, checkout, status time, client email, estimate acceptance columns) applied: on the test address, saving a
-      job and opening a client link both work. If job saves fail with a server error, the migration
-      didn't run.
+- [ ] Database migrations 008, 009, 010, 011 and 012 (estimate visual, checkout, status time, client email, estimate acceptance, client settings columns) applied: on the test address, saving a
+      job, saving a client and opening a client link all work. If job saves fail with a server error, the migration
+      didn't run. (012 is also added by the clients function on its own if it hasn't run.)
+- [ ] Settings → Shop / Business / Reminders: the new settings (labor per sq ft, customer's material,
+      card fee 30¢ and "only when paying by card", numbering, invoice terms, address/website, logo)
+      filled in with your real numbers, or left at 0/off on purpose.
 - [ ] Turn on Stripe email for successful payments (Settings > Notifications).
 - [ ] Settings → Business: check email, phone, Instagram, deposit %, estimate valid days, tax rate,
       default terms.

@@ -1046,10 +1046,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
             <div class="cf-prefs-title">Pricing &amp; billing for this client <span>(used on new estimates)</span></div>
             <label class="cf-check"><input type="checkbox" id="cf-tax-exempt"/> Tax-exempt</label>
             <div class="cf-grid">
-              <div class="jdc-field"><label>Exemption / resale certificate #</label><input type="text" id="cf-tax-cert" placeholder="optional"/></div>
+              <div class="jdc-field"><label>Certificate #</label><input type="text" id="cf-tax-cert" placeholder="resale / exemption, optional"/></div>
               <div class="jdc-field"><label>Discount %</label><input type="number" id="cf-discount" min="0" max="100" step="1" placeholder="0"/></div>
               <div class="jdc-field"><label>Deposit %</label><input type="number" id="cf-deposit" min="0" max="100" step="5" placeholder="shop default"/></div>
-              <div class="jdc-field"><label>Invoices due</label><select id="cf-pay-terms"><option value="">Shop default</option><option value="receipt">Due on receipt</option><option value="net7">Net 7</option><option value="net15">Net 15</option><option value="net30">Net 30</option><option value="net45">Net 45</option><option value="net60">Net 60</option></select></div>
+              <div class="jdc-field"><label>Invoices due</label><select id="cf-pay-terms" style="width:100%;background:var(--dark);border:1px solid var(--border);border-radius:6px;padding:5px 9px;color:var(--text);font-size:11px;font-family:'DM Sans',sans-serif;outline:none"><option value="">Shop default</option><option value="receipt">Due on receipt</option><option value="net7">Net 7</option><option value="net15">Net 15</option><option value="net30">Net 30</option><option value="net45">Net 45</option><option value="net60">Net 60</option></select></div>
             </div>
             <div class="jdc-field"><label>Estimate terms for this client <span style="font-weight:400;text-transform:none">blank = shop default</span></label><textarea id="cf-terms" rows="2" placeholder="Optional"></textarea></div>
           </div>
@@ -4658,20 +4658,45 @@ function computeReminders(){
     const cl=clients.find(c=>c.id===p.clientId);
     const who=cl?cl.name:(p.estNo||p.name||'This job');
 
-    if(EARLY_STATUSES.includes(meta.status)&&daysOld>=staleEstimateDays){
+    // Settings → Reminders: a proof waiting on the client N days (counted from
+    // when it went to "Awaiting Proof Approval"; replaces the general one below).
+    const proofWait=Math.floor(Number(setting('proofWaitDays'))||0);
+    const proofDays=meta.status==='awaiting'&&Number(meta.statusAt)>0?Math.floor((now-Number(meta.statusAt))/86400000):-1;
+    if(proofWait>0&&proofDays>=proofWait){
+      reminders.push({
+        type:'proof',projectId:p.id,estNo:p.estNo,
+        message:`${who}'s proof has waited ${proofDays} day${proofDays===1?'':'s'} for an answer`,
+      });
+    }else if(EARLY_STATUSES.includes(meta.status)&&daysOld>=staleEstimateDays){
       reminders.push({
         type:'stale',projectId:p.id,estNo:p.estNo,
         message:`${who} has been sitting in "${STATUS_LABELS[meta.status]||meta.status}" for ${daysOld} days`,
       });
     }
 
+    // Settings → Reminders: an install coming up within N days (today included).
+    const inst=installDateOf(meta), instAhead=Math.floor(Number(setting('installReminderDays'))||0);
+    if(inst&&instAhead>0&&meta.status!=='done'&&meta.status!=='cancelled'){
+      const until=Math.round((inst-new Date(now.getFullYear(),now.getMonth(),now.getDate()))/86400000);
+      if(until>=0&&until<=instAhead){
+        const at=meta.installTime?' at '+new Date(meta.installDate+'T'+meta.installTime+':00').toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}):'';
+        reminders.push({
+          type:'install',projectId:p.id,estNo:p.estNo,
+          message:`${who}: install ${until===0?'today':until===1?'tomorrow':'in '+until+' days'} (${inst.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}${at})`,
+        });
+      }
+    }
+
     const total=getProjectAmount(p);
     const balance=Math.max(0,total-getAmountPaid(p.id));
     // On net terms (Net 15/30…): only once the finished job's invoice is past due.
-    let pt=''; try{ pt=JSON.parse(p.state?.form?.pricerData||'{}').payTerms||''; }catch(e){}
-    const t=invoiceTermsFor(p.id,pt);
-    const late=t.days>0?meta.status==='done'&&now>=new Date(t.due.getFullYear(),t.due.getMonth(),t.due.getDate()+1):daysOld>=overdueBalanceDays;
-    if(balance>0.005&&late&&isJobCommitted(p.id)){
+    let t={days:0}, late=false;
+    if(balance>0.005){
+      let pt=''; try{ pt=JSON.parse(p.state?.form?.pricerData||'{}').payTerms||''; }catch(e){}
+      t=invoiceTermsFor(p.id,pt,meta);
+      late=t.days>0?meta.status==='done'&&now>=new Date(t.due.getFullYear(),t.due.getMonth(),t.due.getDate()+1):daysOld>=overdueBalanceDays;
+    }
+    if(late&&isJobCommitted(p.id)){
       reminders.push({
         type:'overdue',projectId:p.id,estNo:p.estNo,
         message:t.days>0?`${who} has a ${fmt(balance)} balance past due since ${t.dueStr} (${t.label})`:`${who} has a ${fmt(balance)} balance outstanding, ${daysOld} days old`,
@@ -4722,10 +4747,10 @@ function toggleNotifDropdown(){
         <div style="font-size:10.5px;color:var(--muted)">${n.estNo||''} · signed "${escapeHtml(n.name)}"</div>
       </div>`).join('');
     const reminderItems=activeReminders.map(r=>{
-      const icon=r.type==='stale'?'⏳':r.type==='backup'?'💾':'💵';
+      const icon={stale:'⏳',backup:'💾',install:'🛠️',proof:'🖼️'}[r.type]||'💵';
       return`<div class="menu-item" style="white-space:normal;line-height:1.4;padding:10px 12px" onclick="openNotifReminder('${r.projectId}')">
-        <div style="font-size:12px;color:var(--text)">${icon} ${r.message}</div>
-        <div style="font-size:10.5px;color:var(--muted)">${r.estNo||''}</div>
+        <div style="font-size:12px;color:var(--text)">${icon} ${escapeHtml(r.message)}</div>
+        <div style="font-size:10.5px;color:var(--muted)">${escapeHtml(r.estNo||'')}</div>
       </div>`;
     }).join('');
     dd.innerHTML=(acceptItems+cardItems+responseItems+reminderItems)||'<div style="padding:16px;font-size:12px;color:var(--muted2);text-align:center">Nothing new</div>';
@@ -4972,10 +4997,10 @@ const EXTRA_SETTINGS=[
   {key:'feeFixed',def:0,kind:'num',tab:'shop',group:'Card fee',label:'Card fee — fixed part',help:'Added to the % above (Stripe charges 2.9% + $0.30). 0 = off.',pre:'$'},
   {key:'feeMode',def:'always',kind:'select',tab:'shop',group:'Card fee',label:'When the card fee is charged',options:[['always','In the estimate total, when the job\'s box is ticked'],['cardOnly','Only when the client pays by card (added at checkout)']]},
   // Business tab
-  {key:'bizAddress',def:'',kind:'text',tab:'business',group:'More contact details',label:'Address',help:'Printed on estimates, invoices and receipts. Blank = left off.'},
+  {key:'bizAddress',def:'',kind:'text',tab:'business',group:'More contact details',label:'Address',help:'On estimates, invoices, receipts and the client page. Blank = left off.'},
   {key:'bizWebsite',def:'',kind:'text',tab:'business',group:'More contact details',label:'Website'},
   {key:'invoiceTerms',def:'receipt',kind:'select',tab:'business',group:'Invoices & payments',label:'Invoices due',options:[['receipt','Due on receipt'],['net7','Net 7'],['net15','Net 15'],['net30','Net 30'],['net45','Net 45'],['net60','Net 60']]},
-  {key:'lateFeeNote',def:'',kind:'text',tab:'business',group:'Invoices & payments',label:'Late payment note',help:'Printed under the invoice total, e.g. "1.5% per month on past-due balances."'},
+  {key:'lateFeeNote',def:'',kind:'text',tab:'business',group:'Invoices & payments',label:'Late payment note',help:'Printed on invoices under the balance due (while one is left), e.g. "1.5% per month on past-due balances."'},
   {key:'paymentMethods',def:'Cash, Check, Card, Zelle, Other',kind:'text',tab:'business',group:'Invoices & payments',label:'Payment methods',help:'Choices when recording a payment, separated by commas.'},
   {key:'paySchedule',def:'',kind:'schedule',tab:'business',group:'Invoices & payments',label:'Payment schedule (big jobs)',help:'Default for new estimates, e.g. "50/40/10" = 3 payments. Blank = deposit, then the balance. Can be changed per job.'},
   {key:'defaultSetupMins',def:15,kind:'select',tab:'business',group:'New estimate defaults (more)',label:'Setup time',options:[[0,'0 min'],[15,'15 min'],[30,'30 min'],[45,'45 min'],[60,'1 hr'],[90,'1 hr 30 min'],[120,'2 hr']]},
@@ -4986,7 +5011,7 @@ const EXTRA_SETTINGS=[
   {key:'invPrefix',def:'INV-',kind:'text',tab:'business',group:'Numbering',label:'Invoice prefix'},
   {key:'startNumber',def:0,kind:'int',tab:'business',group:'Numbering',label:'Next number at least',help:'E.g. 2500 to continue your CoreBridge numbers. 0 = keep counting.'},
   {key:'accentColor',def:'',kind:'color',tab:'business',group:'Branding',label:'Client page color',help:'Buttons and links on the client page, e.g. #00a8e8. Blank = built-in blue.'},
-  {key:'bizLogo',def:'',kind:'logo',tab:'business',group:'Branding',label:'Logo',help:'PNG or JPG, printed on PDFs. Blank = built-in logo.'},
+  {key:'bizLogo',def:'',kind:'logo',tab:'business',group:'Branding',label:'Logo',help:'PNG or JPG, on the estimate PDF and the client page. Blank = built-in logo.'},
   // Reminders tab
   {key:'installReminderDays',def:1,kind:'int',tab:'reminders',group:'More reminders',label:'Upcoming install',help:'Remind me this many days before an install. 0 = off.',post:'days'},
   {key:'proofWaitDays',def:3,kind:'int',tab:'reminders',group:'More reminders',label:'Proof waiting on the client',help:'Remind me when a proof has waited this many days for an answer. 0 = off.',post:'days'},
@@ -5030,7 +5055,7 @@ function renderExtraSettings(){
   });
 }
 function logoCellHtml(v){
-  return `<div style="display:flex;gap:6px;align-items:center">${v?`<img src="${escapeAttr(v)}" alt="logo" style="height:28px;max-width:90px;background:#fff;border-radius:4px;padding:2px"/>`:''}<input id="xs-bizLogo" type="file" accept="image/png,image/jpeg" onchange="readLogoFile(this)" style="font-size:11px;max-width:150px"/>${v?`<button type="button" class="btn btn-ghost" style="padding:4px 8px;font-size:11px" onclick="setLogo('')">Remove</button>`:''}</div>`;
+  return `<div style="display:flex;gap:6px;align-items:center">${v?`<img src="${escapeAttr(v)}" alt="logo" style="height:28px;max-width:90px;background:#fff;border-radius:4px;padding:2px"/>`:''}<input id="xs-bizLogo" type="file" accept="image/png,image/jpeg" onchange="readLogoFile(this)" style="font-size:11px;max-width:150px;color-scheme:dark;color:var(--muted)"/>${v?`<button type="button" class="btn btn-ghost" style="padding:4px 8px;font-size:11px" onclick="setLogo('')">Remove</button>`:''}</div>`;
 }
 function setLogo(v){ settingsDraft.bizLogo=v; const c=document.getElementById('xs-logo-cell'); if(c)c.innerHTML=logoCellHtml(v); }
 // Logo picked in Settings: shrunk to at most 600 px wide and kept with the settings.
@@ -8049,15 +8074,27 @@ function getNextQuarterlyDueDate(){
   return getTaxFilingDueDate('quarter');
 }
 
+// Same idea for monthly and yearly filers: the period that just ended is
+// due on the 20th after it; once that day passes, the current one is next.
+function getNextFilingDueDate(){
+  const f=setting('taxFiling'), now=new Date();
+  if(f!=='monthly'&&f!=='yearly')return getNextQuarterlyDueDate();
+  const prevEnd=f==='monthly'?new Date(now.getFullYear(),now.getMonth(),0):new Date(now.getFullYear(),0,0);
+  const prevDue=new Date(prevEnd.getFullYear(),prevEnd.getMonth()+1,20);
+  if(now<new Date(prevDue.getFullYear(),prevDue.getMonth(),prevDue.getDate()+1))return prevDue;
+  return getTaxFilingDueDate(f==='monthly'?'month':'year');
+}
+
 function renderTaxDueReminder(){
   const el=document.getElementById('tax-due-reminder');
   if(!el)return;
-  const due=getNextQuarterlyDueDate();
+  const due=getNextFilingDueDate();
+  const freq=setting('taxFiling')==='monthly'?'monthly':setting('taxFiling')==='yearly'?'yearly':'quarterly';
   const dueStr=due.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
   const today=new Date(); today.setHours(0,0,0,0);
   const daysLeft=Math.round((due-today)/(1000*60*60*24)); // whole days; 0 on the due date
   const urgent=daysLeft<=14;
-  el.innerHTML=`📅 Next Texas sales tax filing due: <span style="color:${urgent?'var(--red)':'var(--text)'};font-weight:600">${dueStr}</span> <span style="color:var(--muted2)">(${daysLeft===0?'today':daysLeft+' day'+(daysLeft===1?'':'s')} — assumes quarterly filing)</span>`;
+  el.innerHTML=`📅 Next Texas sales tax filing due: <span style="color:${urgent?'var(--red)':'var(--text)'};font-weight:600">${dueStr}</span> <span style="color:var(--muted2)">(${daysLeft===0?'today':daysLeft+' day'+(daysLeft===1?'':'s')} — ${freq} filing, set in Settings → Reminders)</span>`;
 }
 
 // Prints the sales tax summary for whichever period is on screen in
@@ -8608,8 +8645,8 @@ function drawInvoicePDF(doc,W,H,M,d){
 // dated the day the job was marked Done (today until then) and is due that
 // many days later.
 const TERM_DAYS={receipt:0,net7:7,net15:15,net30:30,net45:45,net60:60};
-function invoiceTermsFor(projectId,payTerms){
-  const meta=projectId?getJobMeta(projectId):{};
+function invoiceTermsFor(projectId,payTerms,meta){
+  meta=meta||(projectId?getJobMeta(projectId):{});
   const at=meta.status==='done'&&Number(meta.statusAt)>0?new Date(Number(meta.statusAt)):new Date();
   const terms=TERM_DAYS[payTerms]!=null?payTerms:(TERM_DAYS[setting('invoiceTerms')]!=null?setting('invoiceTerms'):'receipt');
   const days=TERM_DAYS[terms], due=new Date(at.getFullYear(),at.getMonth(),at.getDate()+days);

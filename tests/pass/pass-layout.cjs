@@ -37,6 +37,12 @@ const overflow=()=>{ const vw=innerWidth,out=[]; document.querySelectorAll('body
       ['sales',`switchTab('sales')`],
       ['reports',`switchTab('reports')`],
       ['client-profile',`openClientProfile(getProjects().find(p=>p.id==='${ids.C05}').clientId)`],
+      ['settings-shop',`openSettings();switchSettingsTab('shop',document.querySelectorAll('.settings-tab')[0])`],
+      ['settings-business',`openSettings();switchSettingsTab('business',document.querySelectorAll('.settings-tab')[1])`],
+      ['settings-reminders',`openSettings();switchSettingsTab('reminders',document.querySelectorAll('.settings-tab')[6])`],
+      ['client-form',`openClientForm(getProjects().find(p=>p.id==='${ids.C05}').clientId)`],
+      ['payment-window',`openPaymentModal('${ids.C05}')`],
+      ['pricer-client-settings',`(()=>{const cs=getClients();cs[0].prefs={taxExempt:true,taxCert:'TX-1234567890-RESALE',discountPct:10,depositPct:0,payTerms:'net30',terms:'Net 30 per PO.'};localStorage.setItem(CLIENTS_KEY,JSON.stringify(cs));openPricer(nextProjectNum(),cs[0].id);})()`],
     ];
     for(const [name,js] of scenes){
       await page.goto('https://x.netlify.app/'); await page.waitForTimeout(500);
@@ -44,7 +50,7 @@ const overflow=()=>{ const vw=innerWidth,out=[]; document.querySelectorAll('body
       await page.waitForTimeout(350);
       const o=await page.evaluate(overflow);
       ok(!o.pageWide&&!o.out.length,`${label} ${name}: nothing wider than the screen ${JSON.stringify(o.out)}`);
-      if(['job-page-wrap','pricer-wrap','pricer-3-items','job-page-special-chars'].includes(name)||label==='phone')await page.screenshot({path:`${OUT}/${label}-${name}.png`});
+      if(['job-page-wrap','pricer-wrap','pricer-3-items','job-page-special-chars','settings-shop','settings-business','client-form','pricer-client-settings'].includes(name)||label==='phone')await page.screenshot({path:`${OUT}/${label}-${name}.png`});
     }
     for(const id of ['C05','B05']){
       await page.goto(`https://x.netlify.app/proof.html?token=${pubs[id].token}`); await page.waitForTimeout(600);
