@@ -270,3 +270,28 @@
   - Fix: replacing a proof with the 📎 button in Projects now also sends the client back to
     "Awaiting Proof Approval" with fresh Approve / Request Changes buttons (only the job window
     did this before).
+- Fix pass after the Oct 25 test pass (see TEST_PASS_2026-10-25.md):
+  - **Each job keeps its own rates**: markup, print cost, setup, design/install rates, card fee %,
+    your costs, and each item's material prices are saved with the job. Changing Settings never
+    re-prices an old job. Reopening one whose rates differ shows a notice with a
+    "Use today's rates" button. A material removed from Settings stays usable on jobs that have
+    its price. Copy as New uses today's rates. Jobs saved before this change say the pricer is
+    showing today's rates.
+  - **Cents add up**: every amount is rounded to the cent first (half up) and totals are built from
+    those amounts, so estimate, invoice and client page rows always add up to the total, and the
+    tax line is never 1¢ off. Amounts show commas ($4,976.09).
+  - **Invoice shows payments received and the balance due** (or Paid in Full / credit owed back).
+  - Estimate PDF shows the client's address, phone and email; subcontracted work is its own line.
+  - **Costs follow re-pricing**: the pricer's cost entries update when a job is re-priced (entries
+    you changed by hand are kept, with a notice).
+  - **Reports count a job's costs with its payments** (a 50% deposit brings half the costs into
+    that month).
+  - **Cancelled status**: owes nothing, keeps its payments in Reports, hidden from the main list
+    (Cancelled filter shows it); the client page says it's cancelled and takes no approvals or
+    payments. Jobs with payments can't be deleted anymore (cancel instead, or delete the
+    mistaken payment first).
+  - **Refunds**: Payment window → Type → Refund (recorded as money going back). Paying more than
+    the balance asks first; a credit owed back shows in Sales, the job page and the invoice.
+  - Save asks first when an item has no width/height or a discount takes the job to $0.
+  - Install suggestion never says "0 min" (15 min minimum). Work order: "Katy, TX 77494"; plain
+    boards (material "None…") don't list a media line.

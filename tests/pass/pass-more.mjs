@@ -57,9 +57,14 @@ export default async function more(P){
     const wo=await P.pdfOf(()=>E(`generateWorkOrderPDF('${p.id}')`)); check(wo&&wo.includes('Arlon DPF 4500'),'work order still names the material');
     E(`openJobPage('${p.id}')`); check(/Arlon DPF 4500/.test($('job-page').textContent),'job page still names the material');
     E(`editInPricer('${p.id}')`); await sleep(15);
-    const sel=items()[0].querySelector('.li-vinyl'); check(sel.dataset.missing==='Arlon DPF 4500 Cast Vinyl','reopened: material flagged as removed');
-    const ab=D.alerts.length; $('pricerSaveBtn').click(); await sleep(40);
-    check(D.alerts.length>ab&&/removed from Settings/.test(D.alerts.at(-1)),'save asks to pick a material first',D.alerts.at(-1));
+    const sel=items()[0].querySelector('.li-vinyl'); check(sel.value==='Arlon DPF 4500 Cast Vinyl'&&/job price kept/.test(sel.selectedOptions[0]?.textContent||'')&&!sel.dataset.missing,'reopened: removed material kept at the job\'s price',sel.selectedOptions[0]?.textContent);
+    check(near(E('gatherPricerPDFData().total'),total),'reopened: same price');
+    const cb=D.confirms.length, ab=D.alerts.length; U.type($('pricerNotes'),'reprint'); $('pricerSaveBtn').click(); await sleep(60);
+    check(D.alerts.length===ab,'saving works without re-picking',D.alerts.slice(ab).join());
+    E(`editInPricer('${p.id}')`); await sleep(15); $('pricerRatesNotice').querySelector('button')?.click(); await sleep(10);
+    check(items()[0].querySelector('.li-vinyl').dataset.missing==='Arlon DPF 4500 Cast Vinyl','"Use today\'s rates": the removed material must be picked again');
+    const ab2=D.alerts.length; $('pricerSaveBtn').click(); await sleep(40);
+    check(D.alerts.length>ab2&&/removed from Settings/.test(D.alerts.at(-1)),'…and save asks to pick a material first',D.alerts.at(-1));
     E('pricerCleanState=pricerSnapshot();closePricer()');
     await settings(async()=>{ U.type($('addMatInput_vinyl'),'Arlon DPF 4500 Cast Vinyl'); E("addMaterial('vinyl')"); const row=[...d.querySelectorAll('#vinylCostRows .mat-row')].find(r=>r.dataset.name==='Arlon DPF 4500 Cast Vinyl'); const ci=row.querySelector('input'); ci.value='0.43'; ci.dispatchEvent(new w.Event('change',{bubbles:true})); }); }
 
@@ -104,24 +109,28 @@ export default async function more(P){
     const ck=await checkout(s.token,'deposit'); check(ck.status===400&&!ck.ses,'paying an expired estimate is refused');
     const doc=await P.renderClientPage(s.token); check(/expired/i.test(doc.body.textContent),'client page says it expired'); }
 
-  startScenario('S08','Overpayment and refunds','special');
+  startScenario('S08','Overpayment, credit and refunds','special');
   { const s=sc('B03'); const total=E(`getProjectAmount(getProjects().find(p=>p.id==='${s.pid}'))`);
-    const al=await payUI(s.pid,r2(total+10),'Cash');
-    check(!al.length,'overpaying is accepted (no warning)',al.join());
-    const paid=E(`getAmountPaid('${s.pid}')`); E("switchTab('sales')");
-    const row=[...d.querySelectorAll('#sales-list .sales-row')].find(r=>r.textContent.includes('EST-'+s.num));
-    const txt=row?.textContent||''; const shows=/overpaid|credit|refund/i.test(txt);
-    note('logic',`Overpayment is accepted without a warning and nothing shows the extra ${fmt$(paid-total)}: Sales shows balance $0.00${shows?' (but it is mentioned)':''}. There is no way to record a refund (payments must be above $0); the only option is deleting the payment.`);
-    const al2=await payUI(s.pid,-10,'Cash'); check(al2.length&&/greater than \$0/.test(al2[0]),'negative payment (refund) refused',al2.join());
-    E(`openJobPage('${s.pid}')`); const bal=money($('job-page').querySelectorAll('.cp-stat b')[2]?.textContent); check(near(bal,0),'job page balance shows $0');
-    const dd=await pub(s.token); check(dd.balance===0,'client page balance $0'); }
+    const cb=D.confirms.length; const al=await payUI(s.pid,r2(total+10),'Cash');
+    check(D.confirms.length>cb&&/more than the balance due/.test(D.confirms.at(-1)),'overpaying asks first',D.confirms.at(-1));
+    check(near(E(`getAmountPaid('${s.pid}')`),r2(total+10)),'recorded after saying yes');
+    E("switchTab('sales')"); const row=[...d.querySelectorAll('#sales-list .sales-row')].find(r=>r.textContent.includes('EST-'+s.num));
+    check(/credit/i.test(row?.textContent||''),'Sales shows the $10 credit',row?.textContent.slice(0,0));
+    E(`openJobPage('${s.pid}')`); check(/Credit — owed back/.test($('job-page').textContent),'job page shows the credit owed back');
+    // refund the extra
+    E(`openPaymentModal('${s.pid}')`); U.pick($('pmtType'),'refund'); U.type($('pmtAmount'),10); U.pick($('pmtMethod'),'Cash'); E('submitPayment()'); await sleep(40);
+    check(near(E(`getAmountPaid('${s.pid}')`),r2(total)),'refund of $10 brings paid back to the total');
+    const pays=E(`getPayments('${s.pid}')`); check(pays.some(p=>p.amount===-10&&/Refund/.test(p.method)),'refund recorded as money going back');
+    E(`openJobPage('${s.pid}')`); check(!/Credit — owed back/.test($('job-page').textContent),'credit gone after the refund');
+    E(`openPaymentModal('${s.pid}')`); U.pick($('pmtType'),'refund'); U.type($('pmtAmount'),r2(total+50)); const ab=D.alerts.length; E('submitPayment()'); await sleep(20);
+    check(D.alerts.length>ab&&/at most/.test(D.alerts.at(-1)),'refunding more than was received is refused',D.alerts.at(-1)); E('closePaymentModal()');
+    const dd=await pub(s.token); check(near(dd.paid,r2(total))&&dd.balance===0,'client page: paid = total, nothing owed'); }
 
   startScenario('S09','Install time suggestion on small items','special');
   { const cid=P.clients['Katy Coffee Co']; const n=P.bump(); E(`openPricer(${n},'${cid}')`); await sleep(15); const el=items()[0];
     U.type(el.querySelector('.li-w'),24); U.type(el.querySelector('.li-h'),24); U.tick(el.querySelector('.li-install-chk'),true); E('recalc()');
     const txt=el.querySelector('.li-install-suggest-text')?.textContent||'';
-    if(/~0min/.test(txt))note('logic',`Install suggestion says "${txt}" for a 4 sqft item (100 sqft/hr): "Apply" would set 0 minutes and the install charge to $0. Small items need a minimum (e.g. 15 min).`);
-    check(!/~0min/.test(txt),'suggestion is never "0 min"',txt);
+    check(/~15min/.test(txt),'4 sqft item: suggestion is the 15 min minimum',txt);
     E('pricerCleanState=pricerSnapshot();closePricer()'); }
 
   startScenario('S10','Double-click Save','special');
@@ -133,36 +142,47 @@ export default async function more(P){
     check(E(`getExpenses('${p.id}')`).filter(e=>e.category==='materials').length===1,'costs recorded once');
     const srv=(await S.pg.query("select count(*)::int n from projects where est_no=$1",['EST-'+n])).rows[0].n; check(srv===1,'server has one copy',srv); }
 
-  startScenario('S11','Shop rates change: old jobs stay frozen','special');
+  startScenario('S11','Shop rates change: old jobs keep their own rates','special');
   { const s=sc('B02'); const before=E(`getProjectAmount(getProjects().find(p=>p.id==='${s.pid}'))`);
     await settings(async()=>{ U.type($('settingMarkup'),3); });
     check(near(E(`getProjectAmount(getProjects().find(p=>p.id==='${s.pid}'))`),before),'Sales total of old job unchanged after markup change');
     const est=await P.pdfOf(()=>E(`generateSavedPDF('${s.pid}','estimate')`)); check(near(lineAmount(est,'TOTAL',true),r2(before)),'old estimate PDF unchanged');
-    E(`openJobPage('${s.pid}')`); const jpTotal=money($('job-page').querySelector('.cp-stat b').textContent); check(near(jpTotal,r2(before)),'job page total unchanged');
     E(`editInPricer('${s.pid}')`); await sleep(15); const now=E('gatherPricerPDFData().total');
-    const clean=E('pricerSnapshot()===pricerCleanState');
-    if(now>before+0.01&&clean)note('logic',`Opening an old job after a rate change shows the NEW price in the pricer (${fmt$(now)} instead of the saved ${fmt$(before)}) without saying so; closing doesn't ask, and pressing Save re-prices the job (and asks the client to accept again if they had).`);
-    E('pricerCleanState=pricerSnapshot();closePricer()');
+    check(near(now,before),'reopened old job: still priced at its own rates',`${now} vs ${before}`);
+    const nt=$('pricerRatesNotice'); check(nt.style.display==='block'&&nt.querySelector('button'),'notice with "Use today\'s rates" button',nt.textContent);
+    check(E('pricerSnapshot()===pricerCleanState'),'not marked as changed');
+    E('closePricer()');
     await settings(async()=>{ U.type($('settingMarkup'),2.5); }); }
 
   startScenario('S12','Item with no size typed','special');
   { const cid=P.clients['Katy Coffee Co']; const n=P.bump(); E(`openPricer(${n},'${cid}')`); await sleep(15);
     U.type(items()[0].querySelector('.line-desc'),'Forgot the height'); U.type(items()[0].querySelector('.li-w'),24);
-    const ab=D.alerts.length; $('pricerSaveBtn').click(); await sleep(60);
-    const p=E(`getProjects().find(p=>p.estNo==='EST-${n}')`);
-    if(p&&D.alerts.length===ab)note('logic','An item with a missing width or height saves as a $0.00 item with no warning (e.g. typed the width, forgot the height). Same for a negative size.');
-    check(!p||D.alerts.length>ab,'warns about an item with no size');
-    E('closePricer()'); }
+    const cb=D.confirms.length; w.__confirmAnswer=false; $('pricerSaveBtn').click(); await sleep(60); w.__confirmAnswer=true;
+    check(D.confirms.length>cb&&/no height/.test(D.confirms.at(-1)),'Save asks: item has no height',D.confirms.at(-1));
+    check(!E(`getProjects().some(p=>p.estNo==='EST-${n}')`),'answering "no" keeps it unsaved to fix');
+    E('pricerCleanState=pricerSnapshot();closePricer()'); }
 
-  startScenario('S13','Delete a job that has payments','special');
+  startScenario('S13','A job with payments is cancelled, not deleted','special');
   { const s=sc('R15'); E(`addPayment('${s.pid}',100,'Cash','${today}')`); await sleep(40);
     const repBefore=E("computeReportsData('month',0).revenueCollected");
+    const ab=D.alerts.length; E(`deleteProjectConfirm('${s.pid}')`); await sleep(30);
+    check(D.alerts.length>ab&&/can't be deleted/.test(D.alerts.at(-1)),'delete refused with an explanation',D.alerts.at(-1));
+    check(E(`getProjects().some(p=>p.id==='${s.pid}')`),'job still there');
+    E(`openJobPage('${s.pid}')`); U.pick($('job-page').querySelector('select'),'cancelled'); await sleep(40);
+    check(meta(s.pid).status==='cancelled','status set to Cancelled from the job page');
+    check(!E(`isJobCommitted('${s.pid}')`),'cancelled: nothing owed');
+    check(near(E("computeReportsData('month',0).revenueCollected"),repBefore),'the $100 received stays in Reports');
+    E("switchTab('projects')"); check(![...d.querySelectorAll('#projects-list .job-row')].some(r=>r.textContent.includes('EST-'+s.num)),'hidden from the main Projects list');
+    E("setStatusFilter('cancelled',document.querySelector('.filter-pill[data-status=\"cancelled\"]'))"); check([...d.querySelectorAll('#projects-list .job-row')].some(r=>r.textContent.includes('EST-'+s.num)),'shown under the Cancelled filter');
+    E("setStatusFilter('all',document.querySelector('.filter-pill[data-status=\"all\"]'))");
+    const doc=await P.renderClientPage(s.token); const card=doc.getElementById('mainCard')?.textContent||'';
+    check(/was cancelled/i.test(card)&&!/Accept|Pay |Approve/.test(card),'client page: says cancelled, no accept/pay/approve',card.replace(/\s+/g,' ').slice(0,160));
+    const ck=await checkout(s.token,'full'); check(ck.status===400&&!ck.ses,'card payment refused for a cancelled job');
+    const ac=await post(s.token,{action:'accept-estimate',name:'X Y',total:1}); check(ac.status===400,'accepting refused');
+    const ap=await post(s.token,{response:'approved'}); const st=(await dbMeta(s.pid)).status; check(st==='cancelled','a late proof approval doesn\'t revive it',st);
+    E(`setJobMeta('${s.pid}',{...getJobMeta('${s.pid}'),payments:[],removedPaymentIds:getPayments('${s.pid}').map(p=>p.id)})`); await sleep(40);
     const cb=D.confirms.length; E(`deleteProjectConfirm('${s.pid}')`); await sleep(60);
-    check(D.confirms.length>cb&&/\$100\.00 in recorded payments/.test(D.confirms.at(-1)),'delete warns about the recorded payments',D.confirms.at(-1));
-    const repAfter=E("computeReportsData('month',0).revenueCollected");
-    if(repAfter<repBefore-0.01)note('logic',`Deleting a job also deletes its payments, so money already collected disappears from Reports and the sales-tax report (collected this month dropped ${fmt$(repBefore-repAfter)}). An "archive/cancel" option would keep the history.`);
-    const srv=(await S.pg.query('select count(*)::int n from projects where id=$1',[s.pid])).rows[0].n; check(srv===0,'job removed from the server');
-    const tok=await pub(s.token); check(tok.error&&/isn't valid/.test(tok.error),'client link stops working',JSON.stringify(tok).slice(0,80)); }
+    check(D.confirms.length>cb&&!E(`getProjects().some(p=>p.id==='${s.pid}')`),'with the mistaken payment removed, delete works'); }
 
   startScenario('S14','Pricer: mark an item done, remove an item','special');
   { const cid=P.clients['Katy Coffee Co']; const n=P.bump(); E(`openPricer(${n},'${cid}')`); await sleep(15);
@@ -187,14 +207,13 @@ export default async function more(P){
     U.type($('pricerDate'),last.toISOString().slice(0,10));
     $('pricerSaveBtn').click(); await sleep(90); E('closePricer()');
     const p=E(`getProjects().find(p=>p.estNo==='EST-${n}')`); const total=E(`getProjectAmount(getProjects().find(x=>x.id==='${p.id}'))`);
+    const cost=E(`getJobFinancials(getProjects().find(x=>x.id==='${p.id}')).cost.total`);
     const mBefore=E("computeReportsData('month',0)"), lBefore=E("computeReportsData('month',1)");
-    E(`addPayment('${p.id}',${r2(total)},'Zelle','${today}')`); await sleep(40);
+    E(`addPayment('${p.id}',${r2(total/2)},'Zelle','${today}')`); await sleep(40);
     const mAfter=E("computeReportsData('month',0)"), lAfter=E("computeReportsData('month',1)");
     const costThis=mAfter.expenses.total-mBefore.expenses.total, costLast=lAfter.expenses.total-lBefore.expenses.total;
-    const revThis=mAfter.revenueCollected-mBefore.revenueCollected;
-    check(near(revThis,r2(total),0.011),'payment counts this month');
-    if(costLast>0.01&&costThis<0.01)note('logic',`Reports count a job's costs in the month it was PRICED but its money in the month it was PAID: EST-${n} priced last month, paid today → this month shows ${fmt$(revThis)} income with $0 cost, last month shows ${fmt$(costLast)} cost with no income. Monthly profit is off for any job that spans two months.`);
-  }
+    check(near(mAfter.revenueCollected-mBefore.revenueCollected,r2(total/2),0.011),'half paid this month: income this month');
+    check(near(costThis,cost/2,0.011)&&near(costLast,0,0.011),'half the job\'s costs counted this month, none last month',`this ${costThis.toFixed(2)} last ${costLast.toFixed(2)} (cost ${cost})`); }
 
   // ─────────────────────────── full job life ───────────────────────────
   startScenario('L1','ACM sign: accept → card deposit → proof → approve → cash balance → done','life');
@@ -224,7 +243,7 @@ export default async function more(P){
     const rc=await P.pdfOf(()=>E(`generateReceiptPDF('${id}')`));
     check(rc&&/PAID IN FULL/.test(rc)&&near(lineAmount(rc,'Total Paid'),r2(exp.deposit+bal)),'receipt: both payments, PAID IN FULL',rc&&lineAmount(rc,'Total Paid'));
     const inv=await P.pdfOf(()=>E(`generateSavedPDF('${id}','invoice')`));
-    if(inv&&!/Paid|Balance/i.test(inv))note('logic','The invoice PDF never shows payments or the balance due: after a deposit (or when fully paid) it still shows only the full total. Only the receipt shows what was paid. Clients usually expect "Amount paid / Balance due" on the invoice.');
+    check(inv&&/PAYMENTS RECEIVED/.test(inv)&&/PAID IN FULL/.test(inv),'invoice lists the payments and says PAID IN FULL');
     const srvM=await dbMeta(id); check((srvM.payments||[]).length===2&&srvM.status==='done','server has both payments and Done'); }
 
   startScenario('L2','2-piece acrylic sign: accept & pay in full by card','life');
@@ -260,7 +279,7 @@ export default async function more(P){
     await S.stripe.pay(ck.ses); await pull();
     check(near(E(`getAmountPaid('${id}')`),r2(newTotal),0.011),'paid in full at the new total');
     const exAfter=E(`getExpenses('${id}')`).filter(e=>e.category==='materials').reduce((a,e)=>a+e.amount,0);
-    if(near(exAfter,s.exp.costs.materials,0.011))note('logic',`C05 (L3): after adding the spare-tire cover the job's material cost is still the first-save amount (${fmt$(exAfter)}), same issue as S02.`); }
+    check(exAfter>s.exp.costs.materials+0.5,'material cost grew with the added item',`${s.exp.costs.materials} → ${exAfter}`); }
 
   startScenario('L4','Wholesale tax-exempt job paid cash','life');
   { const s=sc('C09'); const al=await payUI(s.pid,175,'Check'); check(!al.length,'check payment entered');
@@ -279,7 +298,7 @@ export default async function more(P){
     check(D.confirms.length>cb&&/refund would be due/.test(D.confirms.at(-1)),'Save says a refund would be due',D.confirms.at(-1));
     const dd=await pub(s.token); check(dd.balance===0,'client page: nothing owed');
     E(`openJobPage('${s.pid}')`); const t=$('job-page').textContent;
-    if(!/refund|overpaid|credit/i.test(t))note('logic',`After lowering a paid job's price, nothing in the Dashboard shows the ${fmt$(E(`getAmountPaid('${s.pid}')`)-E(`getProjectAmount(getProjects().find(p=>p.id==='${s.pid}'))`))} you owe back (job page, Sales and Reports just show $0 balance).`); }
+    check(/Credit — owed back/.test(t),'job page shows the credit owed back after lowering the price'); }
 
   // ─────────────────────────── Reports ───────────────────────────
   startScenario('RP','Reports and sales-tax summary match the jobs','reports');

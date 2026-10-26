@@ -31,7 +31,16 @@ Written after a read-through of v2.38 on 2026-10-16. Keep this updated when the 
 
 ## Money
 - Job total = items + setup + hardware - discount, + 8.25% tax (unless tax-exempt),
-  + card processing fee if that box is ticked.
+  + card processing fee if that box is ticked. One routine (`priceJob`) does this for the pricer,
+  saved jobs, PDFs and the client page: each amount is rounded to the cent first (half up), then
+  totals are built from the rounded amounts.
+- Each job keeps the rates it was priced with (`pricerData.rates`) and each item its material
+  prices (`vinylCost/lamCost/subCost`). Settings changes only affect new estimates or jobs where
+  "Use today's rates" is pressed.
+- Pricer cost entries (Materials, Design Labor…) follow re-pricing unless edited by hand
+  (`seedAmount` remembers what the pricer last put there). Reports count a job's costs in
+  proportion to the money received in each period.
+- Status "Cancelled": not owed, payments still count. Refunds are negative payments.
 - The client page and Stripe charge from a snapshot of the estimate frozen when the job was saved.
   The Dashboard recalculates totals from current rates (see "Known gaps").
 - Stripe: the server works out the amount itself (client can't change it), Stripe hosts the card form,

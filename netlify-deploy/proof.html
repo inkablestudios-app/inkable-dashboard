@@ -159,7 +159,7 @@
           ${data.requestedDate ? `<div><div class="lbl">Requested</div><div class="val">${fmtDate(data.requestedDate)}</div></div>` : ''}
           ${data.installDate ? `<div><div class="lbl">Est. install</div><div class="val">${fmtDate(data.installDate)}</div></div>` : ''}
           ${data.estimateSummary ? `<div><div class="lbl">Total</div><div class="val">${fmtMoney(data.estimateSummary.total)}</div></div>` : ''}
-          ${data.validUntil && !data.estimateAccepted && !((data.paid||0) > 0.005) ? `<div><div class="lbl">${data.expired ? 'Expired' : 'Valid through'}</div><div class="val" style="${data.expired ? 'color:#e8a33d' : ''}">${fmtDate(data.validUntil)}</div></div>` : ''}
+          ${data.validUntil && data.status !== 'cancelled' && !data.estimateAccepted && !((data.paid||0) > 0.005) ? `<div><div class="lbl">${data.expired ? 'Expired' : 'Valid through'}</div><div class="val" style="${data.expired ? 'color:#e8a33d' : ''}">${fmtDate(data.validUntil)}</div></div>` : ''}
         </div>
       </div>`;
   }

@@ -1,0 +1,66 @@
+import * as L from './pass-lib.mjs';
+const {check,sleep,near,startScenario,R}=L;
+const S=await L.bootServer(); const D=await L.bootDashboard(S); const {E,d,$,w}=D; const U=L.ui(D);
+const items=()=>[...d.querySelectorAll('#lineItemsContainer .line-item')];
+const settings=async fn=>{ E('openSettings()'); await sleep(20); await fn(); E('saveSettings()'); await sleep(40); E('closeSettings()'); };
+startScenario('RATES','per-job rates','fix');
+E("addClient({name:'Rate Test Co'})"); await sleep(40); const cid=E('getClients()[0].id');
+E(`openPricer(5001,'${cid}')`); await sleep(15);
+U.pick(items()[0].querySelector('.li-vinyl'),'Arlon DPF 4500 Cast Vinyl'); U.type(items()[0].querySelector('.li-w'),48); U.type(items()[0].querySelector('.li-h'),24);
+U.pick(items()[0].querySelector('.li-sub'),'ACM');
+const t0=E('gatherPricerPDFData().total');
+$('pricerSaveBtn').click(); await sleep(90); E('closePricer()');
+const p=E("getProjects().find(p=>p.estNo==='EST-5001')"); const pd=JSON.parse(p.state.form.pricerData);
+check(pd.rates&&pd.rates.markup===2.5&&pd.rates.setupRate===40,'rates saved with the job',JSON.stringify(pd.rates).slice(0,80));
+check(pd.lines[0].vinylCost===0.43&&pd.lines[0].subCost===2.75&&pd.lines[0].lamCost===0,'item prices saved with the item',JSON.stringify([pd.lines[0].vinylCost,pd.lines[0].lamCost,pd.lines[0].subCost]));
+// Settings change: markup 3, ACM 3.10, Arlon 0.60
+await settings(async()=>{ U.type($('settingMarkup'),3);
+  for(const [cat,name,val] of [['vinyl','Arlon DPF 4500 Cast Vinyl',0.6],['substrate','ACM',3.1]]){ const row=[...d.querySelectorAll(`#${cat}CostRows .mat-row`)].find(r=>r.dataset.name===name); const i=row.querySelector('input'); i.value=String(val); i.dispatchEvent(new w.Event('change',{bubbles:true})); } });
+check(E('getRates().markup')===3&&E('getSubstrate().ACM')===3.1,'Settings changed');
+check(near(E(`getProjectAmount(getProjects().find(p=>p.id==='${p.id}'))`),t0),'Sales total of the old job unchanged');
+E(`editInPricer('${p.id}')`); await sleep(20);
+const t1=E('gatherPricerPDFData().total');
+check(near(t1,t0),'reopened: priced at its own rates (same total)',`${t0} vs ${t1}`);
+check(E('pricerSnapshot()===pricerCleanState'),'reopened: not marked as changed');
+const note=$('pricerRatesNotice'); check(note.style.display==='block'&&/keeps the rates/.test(note.textContent)&&note.querySelector('button'),'notice: keeps its rates + "Use today\'s rates" button',note.textContent);
+// a new item added to the old job: job's markup, today's material price
+d.querySelector('.add-line-btn').click(); U.pick(items()[1].querySelector('.li-vinyl'),'Arlon DPF 4500 Cast Vinyl'); U.type(items()[1].querySelector('.li-w'),12); U.type(items()[1].querySelector('.li-h'),12);
+check(near(E('calcLine(document.querySelectorAll(".line-item")[1]).matTotal'),(0.6+0.15)*1*2.5),'new item on an old job: job markup (2.5) × today\'s material price');
+items()[1].querySelector('.line-del').click(); await sleep(5);
+check(E('pricerSnapshot()===pricerCleanState'),'removing it again: back to unchanged');
+note.querySelector('button').click(); await sleep(10);
+const t2=E('gatherPricerPDFData().total');
+const exp2=L.r2(((0.6+0.15)*8+3.1*8)*3+10); const exp2t=L.r2(L.r2(exp2+L.r2(exp2*0.0825))+L.r2((exp2+L.r2(exp2*0.0825))*0.029));
+check(near(t2,exp2t,0.011),`"Use today's rates": re-priced at markup 3 and today's prices (${exp2t})`,t2);
+check(note.style.display==='block'&&/Using today's rates/.test(note.textContent)&&!note.querySelector('button'),'notice now says it uses today\'s rates',note.textContent);
+check(!E('pricerSnapshot()===pricerCleanState'),'now counts as a change (asks before closing)');
+$('pricerSaveBtn').click(); await sleep(90); E('closePricer()');
+const p2=E(`getProjects().find(p=>p.id==='${p.id}')`); const pd2=JSON.parse(p2.state.form.pricerData);
+check(near(+p2.state.form.estimateSummary.total,t2)&&pd2.rates.markup===3&&pd2.lines[0].subCost===3.1,'saved at today\'s rates');
+// material removed from Settings: the job keeps it at its price
+await settings(async()=>{ const row=[...d.querySelectorAll('#substrateCostRows .mat-row')].find(r=>r.dataset.name==='ACM'); row.querySelector('button').click(); });
+check(!('ACM' in E('getSubstrate()')),'ACM removed from Settings');
+E(`editInPricer('${p.id}')`); await sleep(20);
+const sel=items()[0].querySelector('.li-sub');
+check(sel.value==='ACM'&&/job price kept/.test(sel.selectedOptions[0].textContent)&&!sel.dataset.missing,'reopened: removed ACM still selected, price kept',sel.selectedOptions[0]?.textContent);
+check(near(E('gatherPricerPDFData().total'),t2),'reopened: same total');
+const ab=D.alerts.length; U.type($('pricerNotes'),'note'); $('pricerSaveBtn').click(); await sleep(80);
+check(D.alerts.length===ab,'save allowed (no "pick a substrate")',D.alerts.slice(ab).join());
+E(`editInPricer('${p.id}')`); await sleep(20);
+$('pricerRatesNotice').querySelector('button')?.click(); await sleep(10);
+const sel2=items()[0].querySelector('.li-sub'); check(sel2.dataset.missing==='ACM','"Use today\'s rates" on it: ACM flagged as removed',sel2.dataset.missing);
+const ab2=D.alerts.length; $('pricerSaveBtn').click(); await sleep(40); check(D.alerts.length>ab2&&/removed from Settings/.test(D.alerts.at(-1)),'…and save asks to pick one',D.alerts.at(-1));
+E('pricerCleanState=pricerSnapshot();closePricer()');
+// copy as new: today's rates, no notice
+E(`copyJobToNewEstimate('${p.id}')`); await sleep(20);
+check($('pricerRatesNotice').style.display==='none','copy: no rates notice');
+check(items()[0].querySelector('.li-sub').dataset.missing==='ACM','copy: removed material must be picked again (new estimate = today\'s list)');
+E('pricerCleanState=pricerSnapshot();closePricer()');
+// a job saved before this change (no rates, no item prices)
+const old=JSON.parse(JSON.stringify(p2)); old.id='proj_old_1'; old.estNo='EST-4999'; const opd=JSON.parse(old.state.form.pricerData); delete opd.rates; opd.lines.forEach(l=>{delete l.vinylCost;delete l.lamCost;delete l.subCost;}); opd.lines[0].sub='Coroplast'; old.state.form.pricerData=JSON.stringify(opd);
+E(`(()=>{const l=JSON.parse(localStorage.getItem(SAVED_KEY)||'[]'); l.unshift(${JSON.stringify(old)}); localStorage.setItem(SAVED_KEY,JSON.stringify(l));})()`);
+E(`editInPricer('proj_old_1')`); await sleep(20);
+const nt=$('pricerRatesNotice'); check(nt.style.display==='block'&&/saved before rates were kept/.test(nt.textContent)&&!nt.querySelector('button'),'old job: notice says it shows today\'s rates',nt.textContent);
+E('pricerCleanState=pricerSnapshot();closePricer()');
+console.log(`CHECKS ${R.checks} FAILED ${R.fails.length}`); console.log('errors',D.errs.slice(0,3));
+process.exit();

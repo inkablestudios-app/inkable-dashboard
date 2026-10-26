@@ -175,6 +175,7 @@ export function fillJob(D,job={}){
 }
 
 // ── the expected price, worked out independently from the scenario ────
+export const cent=n=>{ n=Number(n); if(!isFinite(n)||Math.abs(n)<1e-6)return 0; const v=Number(Math.round(Math.abs(n)+'e2')+'e-2'); return n<0?-v:v; };
 export function expected(sc,rates,mats){
   const inches=(v,ft)=>Math.max(0,+v||0)*(ft?12:1);
   const qtyOf=v=>{ const q=parseFloat(v); return q>=1?q:1; };
@@ -195,20 +196,23 @@ export function expected(sc,rates,mats){
     if(it.design){ const h=(+it.design.hrs||0)+(+it.design.mins||0)/60; dsg=h*rates.design[it.design.level||'standard']; designBasis+=h*rates.myCostDesign; }
     if(it.install){ if(it.install.flat!=null){ ins=+it.install.flat||0; installBasis+=+it.install.cost||0; }
       else { const h=(+it.install.hrs||0)+(+it.install.mins||0)/60; ins=h*rates.install[it.install.level||'standard']; installBasis+=h*rates.myCostInstall; } }
-    items+=price; design+=dsg; install+=ins; raw+=cost; lines.push({price,sqft,cost,design:dsg,install:ins});
+    items+=cent(price); design+=dsg; install+=ins; raw+=cost; lines.push({price:cent(price),priceRaw:price,sqft,cost,design:dsg,install:ins});
   }
+  // Business rule: every shown amount is rounded to the cent first (half up),
+  // and the totals are built from those rounded amounts.
   const j=sc.job||{};
   const setupH=(j.setupHrs!=null?+j.setupHrs:0)+(j.setupMins!=null?+j.setupMins:15)/60;
-  const setup=setupH*rates.setupRate, setupBasis=setupH*rates.myCostSetup;
-  const hardware=Math.max(0,+j.hardware||0)+Math.max(0,+j.subs||0), hardwareBasis=Math.max(0,+j.hardwareCost||0)+Math.max(0,+j.subsCost||0);
-  const sub=items+design+install+setup+hardware;
-  let disc=0; if(j.disc){ const v=Math.max(0,+j.disc.val||0); disc=j.disc.type==='pct'?sub*Math.min(100,v)/100:j.disc.type==='flat'?Math.min(v,sub):0; }
-  let taxable=sub-disc, minAdj=0;
-  if(j.minCharge!=null&&taxable<+j.minCharge){ minAdj=+j.minCharge-taxable; taxable=+j.minCharge; }
+  const setup=cent(setupH*rates.setupRate), setupBasis=setupH*rates.myCostSetup;
+  const hardware=cent(cent(Math.max(0,+j.hardware||0))+cent(Math.max(0,+j.subs||0))), hardwareBasis=Math.max(0,+j.hardwareCost||0)+Math.max(0,+j.subsCost||0);
+  items=cent(items); design=cent(design); install=cent(install);
+  const sub=cent(items+design+install+setup+hardware);
+  let disc=0; if(j.disc){ const v=Math.max(0,+j.disc.val||0); disc=cent(j.disc.type==='pct'?sub*Math.min(100,v)/100:j.disc.type==='flat'?Math.min(v,sub):0); }
+  let taxable=cent(sub-disc), minAdj=0;
+  if(j.minCharge!=null&&taxable<+j.minCharge){ minAdj=cent(+j.minCharge-taxable); taxable=cent(taxable+minAdj); }
   const taxRate=sc.taxRate??rates.taxRate;
-  const tax=j.taxExempt?0:taxable*taxRate/100;
-  const fee=j.fee===false?0:(taxable+tax)*rates.feeRate/100;
-  const total=taxable+tax+fee;
+  const tax=j.taxExempt?0:cent(taxable*taxRate/100);
+  const fee=j.fee===false?0:cent((taxable+tax)*rates.feeRate/100);
+  const total=cent(taxable+tax+fee);
   const depPct=j.depositPct!=null?Math.min(100,+j.depositPct):rates.depositPct;
   const toCents=n=>Number(Math.round(Number(n)+'e2')+'e-2');
   return {lines,items,design,install,setup,hardware,sub,disc,minAdj,taxable,tax,fee,total,

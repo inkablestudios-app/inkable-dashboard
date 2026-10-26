@@ -196,7 +196,7 @@ async function runPricing(sc,num){
   check(near(rows['Total'],r2(exp.total)),'client page shows the total',rows['Total']);
   if(exp.total>0){
     const lineSum=[...cp.querySelectorAll('.lineitem .price')].reduce((s,x)=>s+money(x.textContent),0);
-    const extras=['Setup','Design & Prep','Installation','Hardware & Misc','Discount','Minimum Job Charge Adjustment'].reduce((s,k)=>s+(rows[k]||0),0);
+    const extras=['Setup','Design & Prep','Installation','Hardware & Misc','Subcontracted Work','Discount','Minimum Job Charge Adjustment'].reduce((s,k)=>s+(rows[k]||0),0);
     check(near(r2(lineSum+extras),rows['Subtotal'],0.001),'client page: rows add up to the subtotal (to the cent)',`${r2(lineSum+extras)} vs ${rows['Subtotal']}`);
     const taxK=Object.keys(rows).find(k=>k.startsWith('Sales Tax'));
     check(near(r2(rows['Subtotal']+(rows[taxK]||0)+(rows['Card Processing Fee']||0)),rows['Total'],0.001),'client page: subtotal + tax + fee = total (to the cent)');

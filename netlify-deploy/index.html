@@ -867,7 +867,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
           <div id="pmtList" style="display:none;margin-bottom:14px"></div>
           <div class="jdc-field" style="margin-bottom:10px">
             <label>Type</label>
-            <select id="pmtType" style="width:100%;background:var(--dark);border:1px solid var(--border);border-radius:6px;padding:7px 9px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;outline:none">
+            <select id="pmtType" onchange="document.getElementById('pmtSaveBtn').textContent=this.value==='refund'?'Save Refund':'Save Payment'" style="width:100%;background:var(--dark);border:1px solid var(--border);border-radius:6px;padding:7px 9px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;outline:none">
               <option value="payment">Payment received</option><option value="refund">Refund (money given back)</option>
             </select>
           </div>
@@ -894,7 +894,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
           </div>
           <div style="display:flex;gap:8px;justify-content:flex-end">
             <button class="btn btn-ghost" onclick="closePaymentModal()">Cancel</button>
-            <button class="btn btn-primary" onclick="submitPayment()">Save Payment</button>
+            <button class="btn btn-primary" id="pmtSaveBtn" onclick="submitPayment()">Save Payment</button>
           </div>
         </div>
       </div>
@@ -2123,6 +2123,7 @@ function openPaymentModal(projectId){
   document.getElementById('pmtPercent').value='';
   document.getElementById('pmtMethod').value='Cash';
   document.getElementById('pmtType').value='payment';
+  document.getElementById('pmtSaveBtn').textContent='Save Payment';
   document.getElementById('pmtDate').value=storedDateToInput();
   showPaymentBalance(projectId);
   document.getElementById('paymentModal').classList.add('open');
