@@ -54,7 +54,7 @@
   .actions button:hover{filter:brightness(1.08)}
   .btn-approve{background:var(--green); color:#08210a}
   .btn-changes{background:var(--panel2); color:var(--text); border:1px solid var(--border) !important}
-  .btn-primary{background:var(--blue); color:#04162b}
+  .btn-primary{background:var(--blue); color:var(--on-blue,#04162b)}
   .btn-ghost{background:none; color:var(--muted); border:1px solid var(--border)}
   textarea{
     width:100%; min-height:70px; margin-top:10px; padding:10px; border-radius:8px;
@@ -594,6 +594,9 @@
     const email = biz.email || 'inkablestudios@gmail.com';
     const phone = biz.phone || '';
     const ig = (biz.instagram || '').replace(/^@/, '');
+    const addr = biz.address || '';
+    const web = (biz.website || '').replace(/^https?:\/\//i, '').replace(/\/$/, '');
+    const webUrl = 'https://' + web;
     return `
       <section>
         <div class="sectiontitle">Questions about this job?</div>
@@ -602,12 +605,30 @@
             <a href="mailto:${esc(email)}" style="color:var(--blue);text-decoration:none;font-weight:600">✉ ${esc(email)}</a>
             ${phone ? `<div style="margin-top:8px"><a href="tel:${esc(phone.replace(/[^0-9+]/g,''))}" style="color:var(--blue);text-decoration:none;font-weight:600">📞 ${esc(phone)}</a> &nbsp;·&nbsp; <a href="sms:${esc(phone.replace(/[^0-9+]/g,''))}" style="color:var(--blue);text-decoration:none;font-weight:600">💬 Text us</a></div>` : ''}
             ${ig ? `<div style="margin-top:8px"><a href="https://instagram.com/${esc(ig)}" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:none;font-weight:600">📷 @${esc(ig)}</a></div>` : ''}
+            ${web ? `<div style="margin-top:8px"><a href="${esc(webUrl)}" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:none;font-weight:600">🌐 ${esc(web)}</a></div>` : ''}
+            ${addr ? `<div style="margin-top:8px"><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:none;font-weight:600">📍 ${esc(addr)}</a></div>` : ''}
           </div>
         </div>
       </section>`;
   }
 
+  // Settings → Branding: the shop's own logo and button color (blank = built-in).
+  function applyBranding(biz){
+    biz = biz || {};
+    if(/^data:image\/(png|jpeg);base64,/.test(biz.logo || '')){ const img = document.querySelector('header img'); if(img) img.src = biz.logo; }
+    if(/^#[0-9a-f]{6}$/i.test(biz.accent || '')){
+      const n = parseInt(biz.accent.slice(1), 16);
+      const lin = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+      const lum = 0.2126 * lin(n >> 16) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+      const root = document.documentElement.style;
+      root.setProperty('--blue', biz.accent);
+      // button text: dark or white, whichever reads better on that color
+      root.setProperty('--on-blue', (lum + 0.05) / 0.058 >= 1.05 / (lum + 0.05) ? '#04162b' : '#ffffff');
+    }
+  }
+
   function render(data){
+    applyBranding(data.business);
     // A cancelled job: the estimate stays readable, nothing to approve or pay.
     if(data.status === 'cancelled'){
       card.innerHTML = jobHeadHtml(data) + `<section><div class="sectionsub">This job was cancelled. If you have questions, please get in touch.</div></section>` + estimateHtml(data.estimateSummary) + contactSectionHtml(data.business);

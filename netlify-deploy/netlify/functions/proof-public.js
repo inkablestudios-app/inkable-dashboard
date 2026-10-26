@@ -148,6 +148,11 @@ export default async (req) => {
           email: settings.bizEmail ?? "inkablestudios@gmail.com",
           phone: settings.bizPhone ?? "",
           instagram: settings.bizInstagram ?? "@inkablehtx",
+          address: String(settings.bizAddress || "").slice(0, 200),
+          website: String(settings.bizWebsite || "").slice(0, 200),
+          // Settings → Branding (blank = the built-in look)
+          accent: /^#[0-9a-f]{6}$/i.test(settings.accentColor || "") ? settings.accentColor : "",
+          logo: /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(settings.bizLogo || "") ? settings.bizLogo : "",
         },
       });
     }

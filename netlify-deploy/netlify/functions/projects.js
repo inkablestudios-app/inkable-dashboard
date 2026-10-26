@@ -98,9 +98,10 @@ export default async (req) => {
               const all = await db.sql`SELECT est_no, project_num FROM projects`;
               let hi = Math.max(0, (parseInt(p.minNextNum, 10) || 0) - 1);
               for (const r of all) hi = Math.max(hi, numberIn(r.est_no), numberIn(r.project_num));
-              projectNum = String(hi + 1); estNo = "EST-" + projectNum;
+              // same prefix as the number it replaces (Settings → Numbering)
+              projectNum = String(hi + 1); estNo = (prefixOf(est) || "EST-") + projectNum;
             }
-            const invNo = "INV-" + (numberIn(estNo) || projectNum);
+            const invNo = (prefixOf(p.state?.form?.invNo) || "INV-") + (numberIn(estNo) || projectNum);
             renumbered = { from: est, estNo, projectNum, invNo, kept: !!cur };
             p.estNo = estNo; p.projectNum = projectNum;
             if (p.state && p.state.form) Object.assign(p.state.form, { estNo, projectNum, invNo });
@@ -157,6 +158,10 @@ function numberIn(s) {
   const m = /(\d+)\s*$/.exec(String(s || ""));
   const n = m ? parseInt(m[1], 10) : 0;
   return n < 1e9 ? n : 0;
+}
+// What comes before that number ("IS-2500" → "IS-").
+function prefixOf(s) {
+  return String(s || "").trim().replace(/\d+\s*$/, "");
 }
 
 export const config = { path: "/api/projects" };

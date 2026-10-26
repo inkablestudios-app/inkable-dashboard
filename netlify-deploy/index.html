@@ -1954,7 +1954,7 @@ function getFilteredSortedProjects(){
       const cb=clients.find(c=>c.id===b.clientId)?.name||(b.state?.form?.billingName||'');
       cmp=ca.localeCompare(cb);
     } else if(sortCol==='jobnum'){
-      cmp=(a.estNo||'').localeCompare(b.estNo||'',undefined,{numeric:true}); // EST-999 before EST-1000
+      cmp=estDigits(a.estNo)-estDigits(b.estNo)||(a.estNo||'').localeCompare(b.estNo||'',undefined,{numeric:true}); // EST-999 before EST-1000 (and old EST- / new prefix by number)
     } else if(sortCol==='status'){
       cmp=(statusOrder[ma.status]||0)-(statusOrder[mb.status]||0);
     } else {
@@ -2141,11 +2141,17 @@ function renderSales(){
 }
 
 let paymentModalProjectId=null;
+function paymentMethodList(){
+  const l=[...new Set(String(setting('paymentMethods')||'').split(',').map(x=>x.trim().slice(0,40)).filter(Boolean))];
+  return l.length?l:['Cash','Check','Card','Zelle','Other'];
+}
 function openPaymentModal(projectId){
   paymentModalProjectId=projectId;
   document.getElementById('pmtAmount').value='';
   document.getElementById('pmtPercent').value='';
-  document.getElementById('pmtMethod').value='Cash';
+  const methods=paymentMethodList(), sel=document.getElementById('pmtMethod');
+  sel.innerHTML=methods.map(m=>`<option>${escapeHtml(m)}</option>`).join('');
+  sel.value=methods[0];
   document.getElementById('pmtType').value='payment';
   document.getElementById('pmtSaveBtn').textContent='Save Payment';
   document.getElementById('pmtDate').value=storedDateToInput();
@@ -3939,8 +3945,8 @@ function copyJobToNewEstimate(id){
   const projNum=nextProjectNum();
   pricerState.editingId=null;
   pricerState.projectNum=String(projNum);
-  pricerState.estNo='EST-'+projNum;
-  pricerState.invNo='INV-'+projNum;
+  pricerState.estNo=estNoFor(projNum);
+  pricerState.invNo=invNoFor(projNum);
   pricerState.taxRate=getRates().taxRate;
   pricerState.date=new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
   document.getElementById('pricerTaxRate').value=pricerState.taxRate;
@@ -4661,10 +4667,14 @@ function computeReminders(){
 
     const total=getProjectAmount(p);
     const balance=Math.max(0,total-getAmountPaid(p.id));
-    if(balance>0.005&&daysOld>=overdueBalanceDays&&isJobCommitted(p.id)){
+    // On net terms (Net 15/30…): only once the finished job's invoice is past due.
+    let pt=''; try{ pt=JSON.parse(p.state?.form?.pricerData||'{}').payTerms||''; }catch(e){}
+    const t=invoiceTermsFor(p.id,pt);
+    const late=t.days>0?meta.status==='done'&&now>=new Date(t.due.getFullYear(),t.due.getMonth(),t.due.getDate()+1):daysOld>=overdueBalanceDays;
+    if(balance>0.005&&late&&isJobCommitted(p.id)){
       reminders.push({
         type:'overdue',projectId:p.id,estNo:p.estNo,
-        message:`${who} has a ${fmt(balance)} balance outstanding, ${daysOld} days old`,
+        message:t.days>0?`${who} has a ${fmt(balance)} balance past due since ${t.dueStr} (${t.label})`:`${who} has a ${fmt(balance)} balance outstanding, ${daysOld} days old`,
       });
     }
   });
@@ -5008,7 +5018,7 @@ function renderExtraSettings(){
       let input;
       if(e.kind==='select')input=`<select id="${id}" class="xs-input">${e.options.map(([o,l])=>`<option value="${escapeAttr(String(o))}"${String(o)===String(v)?' selected':''}>${escapeHtml(l)}</option>`).join('')}</select>`;
       else if(e.kind==='bool')input=`<input id="${id}" type="checkbox"${v?' checked':''} style="width:18px;height:18px"/>`;
-      else if(e.kind==='logo')input=`<div style="display:flex;gap:6px;align-items:center">${v?`<img src="${escapeAttr(v)}" alt="logo" style="height:28px;max-width:90px;background:#fff;border-radius:4px;padding:2px"/>`:''}<input id="${id}" type="file" accept="image/png,image/jpeg" onchange="readLogoFile(this)" style="font-size:11px;max-width:150px"/>${v?`<button type="button" class="btn btn-ghost" style="padding:4px 8px;font-size:11px" onclick="settingsDraft.bizLogo='';renderExtraSettings()">Remove</button>`:''}</div>`;
+      else if(e.kind==='logo')input=`<div id="xs-logo-cell">${logoCellHtml(v)}</div>`;
       else{
         const val=e.kind==='breaks'?qtyBreaksText(v):(v??'');
         const type=(e.kind==='num'||e.kind==='int')?'number':'text';
@@ -5019,6 +5029,10 @@ function renderExtraSettings(){
     box.innerHTML=html;
   });
 }
+function logoCellHtml(v){
+  return `<div style="display:flex;gap:6px;align-items:center">${v?`<img src="${escapeAttr(v)}" alt="logo" style="height:28px;max-width:90px;background:#fff;border-radius:4px;padding:2px"/>`:''}<input id="xs-bizLogo" type="file" accept="image/png,image/jpeg" onchange="readLogoFile(this)" style="font-size:11px;max-width:150px"/>${v?`<button type="button" class="btn btn-ghost" style="padding:4px 8px;font-size:11px" onclick="setLogo('')">Remove</button>`:''}</div>`;
+}
+function setLogo(v){ settingsDraft.bizLogo=v; const c=document.getElementById('xs-logo-cell'); if(c)c.innerHTML=logoCellHtml(v); }
 // Logo picked in Settings: shrunk to at most 600 px wide and kept with the settings.
 function readLogoFile(input){
   const f=input.files&&input.files[0]; if(!f)return;
@@ -5031,9 +5045,8 @@ function readLogoFile(input){
         const scale=Math.min(1,600/img.width), c=document.createElement('canvas');
         c.width=Math.round(img.width*scale); c.height=Math.round(img.height*scale);
         const ctx=c.getContext('2d'); if(!ctx)throw new Error('no canvas');
-        ctx.drawImage(img,0,0,c.width,c.height); settingsDraft.bizLogo=c.toDataURL('image/png');
-      }catch(e){ if(src.length>400000){ alert('That logo is too large. Use a PNG or JPG under 300 KB.'); return; } settingsDraft.bizLogo=src; }
-      renderExtraSettings();
+        ctx.drawImage(img,0,0,c.width,c.height); setLogo(c.toDataURL('image/png'));
+      }catch(e){ if(src.length>400000){ alert('That logo is too large. Use a PNG or JPG under 300 KB.'); return; } setLogo(src); }
     };
     img.onerror=()=>alert('That file could not be read as an image.');
     img.src=src;
@@ -6263,13 +6276,17 @@ function estDigits(s){ const m=/(\d+)\s*$/.exec(String(s||'')); return m?parseIn
 function nextProjectNum(){
   let hi=0; try{ hi=parseInt(localStorage.getItem(LAST_NUM_KEY))||0; }catch(e){}
   getProjects().forEach(p=>{ hi=Math.max(hi,parseInt(p.projectNum)||0,estDigits(p.estNo)); });
-  return hi?hi+1:1000;
+  // Settings → Numbering: "next number at least" (e.g. to continue CoreBridge's)
+  return Math.max(hi?hi+1:1000,Math.floor(Number(setting('startNumber'))||0));
 }
+// New Est #s and Invoice #s use the prefixes in Settings → Numbering (saved jobs keep theirs).
+function estNoFor(n){ return (setting('estPrefix')||'EST-')+n; }
+function invNoFor(n){ return (setting('invPrefix')||'INV-')+n; }
 function noteIssuedNum(...nums){
   try{ const cur=parseInt(localStorage.getItem(LAST_NUM_KEY))||0, hi=Math.max(cur,...nums.map(n=>parseInt(n)||0)); if(hi>cur)localStorage.setItem(LAST_NUM_KEY,String(hi)); }catch(e){}
 }
 // Invoice # follows the Est # (EST-1006 → INV-1006), also when the Est # was typed in.
-function invNoForEst(estNo,projNum){ const m=/(\d+)\s*$/.exec(String(estNo||'')); return 'INV-'+(m?m[1]:projNum); }
+function invNoForEst(estNo,projNum){ const m=/(\d+)\s*$/.exec(String(estNo||'')); return invNoFor(m?m[1]:projNum); }
 // The server took the next free Est # because this one was already used by a
 // job saved on another device (both made the same number before syncing), or
 // kept the job's own number when it was renamed into one that's taken.
@@ -6383,8 +6400,8 @@ function openPricer(projNum, clientId){
     designHrs:0,designMins:0,
     discType:'none',discVal:0,
     jobName:'',
-    estNo:'EST-'+projNum,
-    invNo:'INV-'+projNum,
+    estNo:estNoFor(projNum),
+    invNo:invNoFor(projNum),
     date:new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}),
     notes:'',
   };
@@ -7588,7 +7605,7 @@ const lastProjectPush={};
 
 function savePricerProject(){
   const projNum=pricerState.projectNum;
-  const estNo=document.getElementById('pricerEstNo').value||('EST-'+projNum);
+  const estNo=document.getElementById('pricerEstNo').value||estNoFor(projNum);
   const jobName=document.getElementById('pricerJobName').value||'Unnamed Job';
   const list=getProjects();
   // A by-material item whose material was removed from Settings: pick one first.
@@ -8125,7 +8142,7 @@ function gatherPricerPDFData(){
   const terms=(document.getElementById('pricerTerms')?.value||'').trim();
   const jobDesc=(document.getElementById('pricerJobDesc')?.value||'').trim();
   const date=inputDateToStored(document.getElementById('pricerDate')?.value); // date picker "2026-10-18" → "Oct 18, 2026"
-  const estNo=document.getElementById('pricerEstNo')?.value||('EST-'+pricerState.projectNum);
+  const estNo=document.getElementById('pricerEstNo')?.value||estNoFor(pricerState.projectNum);
   const invNo=invNoForEst(estNo,pricerState.projectNum);
 
   const clients=getClients();
@@ -8138,7 +8155,7 @@ function gatherPricerPDFData(){
 
   return{...m,dtype,dval,taxExempt,minChargeApplied:minChargeOn,processingFeeOn:processingFeeOn&&feeMode!=='cardOnly',taxRate,
     cardFeeOnCard:processingFeeOn&&feeMode==='cardOnly',cardFeePct:rates.processingFeeRate,cardFeeFixed:rates.feeFixed,
-    taxCert:taxExempt?(pricerState.taxCert||''):'',
+    taxCert:taxExempt?(pricerState.taxCert||''):'',payTerms:pricerState.payTerms||'',
     validUntil:'',validDays:0,
     jobName,jobDesc,notes,terms,date,estNo,invNo,clientName,clientAddr,clientCityLine,clientPhone,clientEmail};
 }
@@ -8192,7 +8209,7 @@ function gatherPricerPDFDataFromSaved(p){
 
   return{...m,dtype,dval,taxExempt,minChargeApplied:minCharge,processingFeeOn:processingFeeOn&&pd.feeMode!=='cardOnly',taxRate,
     cardFeeOnCard:processingFeeOn&&pd.feeMode==='cardOnly',cardFeePct:rates.processingFeeRate,cardFeeFixed:rates.feeFixed,
-    taxCert:taxExempt?(pd.taxCert||''):'',
+    taxCert:taxExempt?(pd.taxCert||''):'',payTerms:pd.payTerms||'',
     validUntil,validDays,
     jobName:f.jobName||'Untitled Job',
     jobDesc:f.jobDesc||'',
@@ -8271,6 +8288,7 @@ async function generateSavedPDF(projectId,type){
     const W=612,H=792,M=40;
     const d=savedPDFData(p); // the saved (frozen) numbers
     d.payments=getPayments(projectId);
+    if(type==='invoice')prepInvoice(d,projectId);
 
     if(type==='invoice') drawInvoicePDF(doc,W,H,M,d);
     else drawEstimatePDF(doc,W,H,M,d);
@@ -8291,6 +8309,7 @@ function generatePricerPDF(type){
     const W=612,H=792,M=40;
     const d=gatherPricerPDFData();
     d.payments=pricerState.editingId?getPayments(pricerState.editingId):[];
+    if(type==='invoice')prepInvoice(d,pricerState.editingId);
 
     if(type==='invoice') drawInvoicePDF(doc,W,H,M,d);
     else drawEstimatePDF(doc,W,H,M,d);
@@ -8330,6 +8349,30 @@ function drawLinesPaged(doc,lines,x,y,lineH,bottom,onNewPage,style,opts){
   return y;
 }
 
+// Address / phone / website from Settings, for documents (blank parts left off).
+function bizContact(){ return {addr:String(setting('bizAddress')||'').trim(),web:String(setting('bizWebsite')||'').trim(),phone:String(getBusinessInfo().bizPhone||'').trim()}; }
+// The logo from Settings → Branding (fitted in the box), else the built-in one.
+function drawLogo(doc,x,y,w,h){
+  const src=String(setting('bizLogo')||'');
+  if(/^data:image\/(png|jpeg);base64,/.test(src)){
+    try{
+      const pr=doc.getImageProperties(src), k=Math.min(w/pr.width,h/pr.height);
+      doc.addImage(src,src.startsWith('data:image/jpeg')?'JPEG':'PNG',x,y+(h-pr.height*k)/2,pr.width*k,pr.height*k);
+      return;
+    }catch(e){ console.warn('Logo could not be drawn — using the built-in one.',e); }
+  }
+  doc.addImage('data:image/png;base64,'+LOGO_B64,'PNG',x,y,w,h);
+}
+// Address and phone · website, on the right of the black footer band
+// (invoices and receipts), next to the QR code.
+function drawFooterContact(doc,W,M,footY,FOOT_H,QR_SZ){
+  const c=bizContact(), lines=[c.addr,[c.phone,c.web].filter(Boolean).join('  ·  ')].filter(Boolean);
+  if(!lines.length)return;
+  doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(255,255,255);doc.setCharSpace(0);
+  const x=W-M-QR_SZ-12, maxW=W/2-M-QR_SZ, mid=footY+FOOT_H/2;
+  (lines.length===2?[mid-3,mid+9]:[mid+3]).forEach((yy,i)=>doc.text(doc.splitTextToSize(lines[i],maxW)[0],x,yy,{align:'right'}));
+}
+
 // ── ESTIMATE PDF (bordered, watermark, light footer) ────────────────────
 // Chrome (border/watermark/logo/title/client header) is a function so it
 // can be redrawn identically on every continuation page, not just page 1.
@@ -8344,7 +8387,10 @@ function drawEstimateChrome(doc,W,H,M,d){
   doc.setDrawColor(0);doc.setLineWidth(1.5);
   doc.rect(BRD,BRD,W-2*BRD,H-2*BRD);
 
-  doc.addImage('data:image/png;base64,'+LOGO_B64,'PNG',M,M,168,72);
+  drawLogo(doc,M,M,168,72);
+  // Business address · website under the logo (Settings → Business)
+  { const c=bizContact(), t=[c.addr,c.web].filter(Boolean).join('  ·  ');
+    if(t){ doc.setFont('helvetica','normal');doc.setFontSize(7.5);doc.setTextColor(90);doc.text(doc.splitTextToSize(t,W-2*M)[0],M,M+86);doc.setTextColor(0); } }
 
   doc.setFont('helvetica','bold');doc.setFontSize(34);doc.setTextColor(0);
   doc.text('ESTIMATE',W-M,M+30,{align:'right'});
@@ -8457,6 +8503,7 @@ function drawInvoiceChrome(doc,W,H,M,d,titleLabel,numLabel,numValue){
   doc.text(numValue,W-M,M+38,{align:'right'});
   doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(70);
   doc.text('Date: '+d.date,W-M,M+52,{align:'right'});
+  if(d.dueLine&&titleLabel==='INVOICE'){ doc.setFont('helvetica','bold');doc.setTextColor(0);doc.text(d.dueLine,W-M,M+64,{align:'right'}); }
 
   let y=M+BOX_H+22;
   doc.setFontSize(12);doc.setTextColor(0);doc.setCharSpace(2);
@@ -8506,6 +8553,12 @@ function drawInvoicePDF(doc,W,H,M,d){
   y=drawLineItemsTable(doc,W,M,y,footY-170,d,newPage);
   y=drawTotalsBlock(doc,W,M,y,d,newPage);
   y=drawPaymentsBlock(doc,W,M,y,d,newPage);
+  // Settings → Late payment note, under the balance (only while one is left)
+  if(d.lateFeeNote){
+    const TX=W-M-220, ls=(doc.setFont('helvetica','normal'),doc.setFontSize(8),doc.splitTextToSize(d.lateFeeNote,220));
+    if(y+ls.length*10>footY-20){ doc.addPage(); y=newPage(doc); }
+    doc.setTextColor(90); ls.forEach(l=>{ doc.text(l,TX,y); y+=10; }); doc.setTextColor(0); y+=8;
+  }
 
   // Terms & Conditions — separate from Notes
   if(d.terms){
@@ -8547,7 +8600,30 @@ function drawInvoicePDF(doc,W,H,M,d){
   doc.setCharSpace(0);
 
   const QR_SZ=42;
+  drawFooterContact(doc,W,M,footY,FOOT_H,QR_SZ);
   doc.addImage('data:image/png;base64,'+QR_B64,'PNG',W-M-QR_SZ,footY+(FOOT_H-QR_SZ)/2,QR_SZ,QR_SZ);
+}
+
+// Invoice terms (Settings → Invoices due, or the client's own). An invoice is
+// dated the day the job was marked Done (today until then) and is due that
+// many days later.
+const TERM_DAYS={receipt:0,net7:7,net15:15,net30:30,net45:45,net60:60};
+function invoiceTermsFor(projectId,payTerms){
+  const meta=projectId?getJobMeta(projectId):{};
+  const at=meta.status==='done'&&Number(meta.statusAt)>0?new Date(Number(meta.statusAt)):new Date();
+  const terms=TERM_DAYS[payTerms]!=null?payTerms:(TERM_DAYS[setting('invoiceTerms')]!=null?setting('invoiceTerms'):'receipt');
+  const days=TERM_DAYS[terms], due=new Date(at.getFullYear(),at.getMonth(),at.getDate()+days);
+  const f=x=>x.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  return {terms,days,dated:at,due,invDate:f(at),dueStr:f(due),label:INVOICE_TERMS[terms]};
+}
+// Dates the invoice and adds its "Due" line (and the late payment note while a balance is left).
+function prepInvoice(d,projectId){
+  const t=invoiceTermsFor(projectId,d.payTerms);
+  const paid=(d.payments||[]).reduce((a,x)=>a+(Number(x.amount)||0),0), bal=cents((Number(d.total)||0)-paid);
+  d.date=t.invDate;
+  d.dueLine=d.total>0&&bal<=0.005?'Paid in full':t.days?'Due: '+t.dueStr+' ('+t.label+')':'Due on receipt';
+  d.lateFeeNote=bal>0.005?String(setting('lateFeeNote')||'').trim():'';
+  return d;
 }
 
 // ── RECEIPT PDF — reuses the invoice's chrome/footer, shows payments
@@ -8632,6 +8708,7 @@ function drawReceiptPDF(doc,W,H,M,d){
   doc.text(getBusinessInfo().bizInstagram,textX,H-FOOT_H+FOOT_H/2-2);
   doc.text(getBusinessInfo().bizEmail,textX,H-FOOT_H+FOOT_H/2+10);
   doc.setCharSpace(0);
+  drawFooterContact(doc,W,M,H-FOOT_H,FOOT_H,QR_SZ);
   doc.addImage('data:image/png;base64,'+QR_B64,'PNG',W-M-QR_SZ,H-FOOT_H+(FOOT_H-QR_SZ)/2,QR_SZ,QR_SZ);
 }
 
