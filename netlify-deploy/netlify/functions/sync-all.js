@@ -45,7 +45,7 @@ export default async (req) => {
     const clients = clientRows.map(r => ({
       id: r.id, name: r.name, phone: r.phone, email: r.email || "", addr: r.addr, city: r.city,
       state: r.state, zip: r.zip, notes: r.notes, log: r.log,
-      leadSource: r.lead_source,
+      leadSource: r.lead_source, prefs: r.prefs || {},
     }));
 
     const projects = projectRows.map(r => ({

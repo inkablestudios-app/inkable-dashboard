@@ -416,6 +416,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 .xs-input{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text);font-size:12px;max-width:230px}
 .charge-fields{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:11px;color:var(--muted);margin:8px 0}
 .charge-fields input{width:64px;background:var(--dark);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:4px 6px;font-size:11px}
+.cf-prefs{border-top:1px solid var(--border);padding-top:12px;margin:4px 0 14px}
+.cf-prefs-title{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}.cf-prefs-title span{font-weight:400;text-transform:none;letter-spacing:0}
+.cf-check{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text);margin-bottom:8px;cursor:pointer}
+.cf-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 10px}
+.cp-badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.cp-badges span{font-size:11px;background:#3b82f61f;color:var(--blue);border-radius:10px;padding:3px 9px}
 .rates-notice{background:#3b82f61a;border:1px solid #3b82f655;border-radius:8px;padding:9px 12px;margin:0 0 14px;font-size:12px;color:var(--text);line-height:1.5}
 .rates-notice-btn{margin-left:6px;background:var(--blue);border:none;border-radius:5px;color:#fff;font-size:11px;font-weight:700;padding:4px 10px;cursor:pointer;font-family:'DM Sans',sans-serif}
 .jp-layers{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px}
@@ -1036,6 +1041,17 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
           <div class="jdc-field" style="margin-bottom:16px">
             <label>Notes</label>
             <textarea id="cf-notes" placeholder="Optional"></textarea>
+          </div>
+          <div class="cf-prefs">
+            <div class="cf-prefs-title">Pricing &amp; billing for this client <span>(used on new estimates)</span></div>
+            <label class="cf-check"><input type="checkbox" id="cf-tax-exempt"/> Tax-exempt</label>
+            <div class="cf-grid">
+              <div class="jdc-field"><label>Exemption / resale certificate #</label><input type="text" id="cf-tax-cert" placeholder="optional"/></div>
+              <div class="jdc-field"><label>Discount %</label><input type="number" id="cf-discount" min="0" max="100" step="1" placeholder="0"/></div>
+              <div class="jdc-field"><label>Deposit %</label><input type="number" id="cf-deposit" min="0" max="100" step="5" placeholder="shop default"/></div>
+              <div class="jdc-field"><label>Invoices due</label><select id="cf-pay-terms"><option value="">Shop default</option><option value="receipt">Due on receipt</option><option value="net7">Net 7</option><option value="net15">Net 15</option><option value="net30">Net 30</option><option value="net45">Net 45</option><option value="net60">Net 60</option></select></div>
+            </div>
+            <div class="jdc-field"><label>Estimate terms for this client <span style="font-weight:400;text-transform:none">blank = shop default</span></label><textarea id="cf-terms" rows="2" placeholder="Optional"></textarea></div>
           </div>
           <div style="display:flex;gap:8px;justify-content:flex-end">
             <button class="btn btn-ghost" onclick="closeClientForm()">Cancel</button>
@@ -1772,6 +1788,7 @@ function addClient(data){
     zip:(data.zip||'').trim(),
     notes:(data.notes||'').trim(),
     leadSource:(data.leadSource||'').trim(),
+    prefs:data.prefs||{},
   };
   clients.push(client);
   localStorage.setItem(CLIENTS_KEY,JSON.stringify(clients));
@@ -1883,6 +1900,7 @@ function changeClientInPricer(){
     pricerState.clientName=cl?cl.name:'';
     document.getElementById('pricerClientName').textContent=cl?cl.name:'No Client';
     syncJobIdentity();
+    if(!pricerState.editingId)applyClientDefaults(cl); // a new estimate takes the new client's settings
     recalc();
   });
 }
@@ -2573,9 +2591,11 @@ function openClientForm(clientId){
     document.getElementById('cf-zip').value=client.zip||'';
     document.getElementById('cf-lead-source').value=client.leadSource||'';
     document.getElementById('cf-notes').value=client.notes||'';
+    fillClientPrefs(client.prefs||{});
   }else{
     title.textContent='New Client';
     ['cf-name','cf-phone','cf-email','cf-addr','cf-city','cf-state','cf-zip','cf-lead-source','cf-notes'].forEach(id=>{document.getElementById(id).value='';});
+    fillClientPrefs({});
   }
   document.getElementById('clientFormModal').classList.add('open');
 }
@@ -2585,9 +2605,53 @@ function closeClientForm(){
   if(clientProfileVisible())renderClientProfile();
   if(jobPageVisible())renderJobPage();
 }
+// Per-client pricing and billing (tax-exempt, discount, deposit, terms).
+function fillClientPrefs(p){
+  const $=id=>document.getElementById(id);
+  $('cf-tax-exempt').checked=!!p.taxExempt; $('cf-tax-cert').value=p.taxCert||'';
+  $('cf-discount').value=p.discountPct>0?p.discountPct:''; $('cf-deposit').value=p.depositPct!=null&&p.depositPct!==''?p.depositPct:'';
+  $('cf-pay-terms').value=p.payTerms||''; $('cf-terms').value=p.terms||'';
+}
+function readClientPrefs(){
+  const $=id=>document.getElementById(id), num=v=>v===''?null:parseFloat(v);
+  const disc=num($('cf-discount').value), dep=num($('cf-deposit').value);
+  if(disc!=null&&!(disc>=0&&disc<100))return 'Discount: a % from 0 to 99.';
+  if(dep!=null&&!(dep>=0&&dep<=100))return 'Deposit: a % from 0 to 100, or blank for the shop default.';
+  const p={};
+  if($('cf-tax-exempt').checked){ p.taxExempt=true; const c=$('cf-tax-cert').value.trim(); if(c)p.taxCert=c; }
+  if(disc>0)p.discountPct=disc; if(dep!=null)p.depositPct=dep;
+  if($('cf-pay-terms').value)p.payTerms=$('cf-pay-terms').value;
+  const t=$('cf-terms').value.trim(); if(t)p.terms=t;
+  return p;
+}
+// A new estimate for a client with settings: filled in for you (still editable).
+function applyClientDefaults(cl){
+  const p=cl?.prefs||{}, applied=[], $=id=>document.getElementById(id);
+  // Switching clients on a new estimate: first undo what the last client's
+  // settings filled in (anything you changed by hand since stays).
+  const was=pricerState.clientApplied||{}, now={};
+  if(was.tax)$('taxExemptChk').checked=false;
+  if(was.disc!=null&&$('discType').value==='pct'&&parseFloat($('discVal').value)===was.disc){ $('discType').value='none'; $('discVal').value='0'; }
+  if(was.dep!=null&&parseFloat($('depositPctInput').value)===was.dep){ $('depositPctInput').value=getRates().depositPct; if(!$('paySchedule').value)$('paySchedule').value=setting('paySchedule')||''; }
+  if(was.terms!=null&&$('pricerTerms').value===was.terms)$('pricerTerms').value=getBusinessInfo().defaultTerms||'';
+  pricerState.taxCert=p.taxExempt?(p.taxCert||''):'';
+  pricerState.payTerms=p.payTerms||'';
+  if(p.taxExempt){ $('taxExemptChk').checked=now.tax=true; applied.push('tax-exempt'+(p.taxCert?' (cert #'+p.taxCert+')':'')); }
+  if(p.discountPct>0){ $('discType').value='pct'; $('discVal').value=now.disc=Number(p.discountPct); applied.push(p.discountPct+'% discount'); }
+  // the client's deposit replaces the shop's default payment schedule
+  if(p.depositPct!=null&&p.depositPct!==''){ $('depositPctInput').value=now.dep=Number(p.depositPct); $('paySchedule').value=''; applied.push(Number(p.depositPct)===0?'no deposit':p.depositPct+'% deposit'); }
+  if(p.terms){ $('pricerTerms').value=now.terms=p.terms; applied.push('their terms'); }
+  if(p.payTerms)applied.push('invoices '+(INVOICE_TERMS[p.payTerms]||p.payTerms).toLowerCase());
+  pricerState.clientApplied=now;
+  const box=$('pricerClientNotice');
+  if(box){ box.textContent=applied.length?'👤 Client settings applied: '+applied.join(', ')+'.':''; box.style.display=applied.length?'block':'none'; }
+}
+const INVOICE_TERMS={receipt:'Due on receipt',net7:'Net 7',net15:'Net 15',net30:'Net 30',net45:'Net 45',net60:'Net 60'};
 function saveClientForm(){
   const name=document.getElementById('cf-name').value.trim();
   if(!name){ alert('Enter a customer name.'); return; }
+  const prefs=readClientPrefs();
+  if(typeof prefs==='string'){ alert(prefs); return; }
   const data={
     name,
     phone:document.getElementById('cf-phone').value,
@@ -2598,6 +2662,7 @@ function saveClientForm(){
     zip:document.getElementById('cf-zip').value,
     leadSource:document.getElementById('cf-lead-source').value,
     notes:document.getElementById('cf-notes').value,
+    prefs,
   };
   if(clientFormEditingId){
     // Editing in place — keep the same id so every project already
@@ -2609,7 +2674,7 @@ function saveClientForm(){
       clients[idx]={...clients[idx],
         name:data.name.trim(),phone:data.phone.trim(),email:(data.email||'').trim(),addr:data.addr.trim(),
         city:data.city.trim(),state:data.state.trim(),zip:data.zip.trim(),
-        leadSource:data.leadSource.trim(),notes:data.notes.trim()};
+        leadSource:data.leadSource.trim(),notes:data.notes.trim(),prefs:data.prefs};
       localStorage.setItem(CLIENTS_KEY,JSON.stringify(clients));
       syncClientToServer(clients[idx],before);
     }
@@ -2720,6 +2785,13 @@ function renderClientProfile(){
           <span style="color:${daysAgo!==null&&daysAgo>21?'var(--amber)':'var(--muted)'}">${lastContact?'Last contact: '+escapeHtml(lastContact)+(daysAgo!==null?' ('+(daysAgo===0?'today':daysAgo+'d ago')+')':''):'No contact logged yet'}</span>
         </div>
         ${client.notes?`<div style="font-size:12px;color:var(--muted);background:var(--dark);border-radius:6px;padding:8px 10px;margin-top:10px;white-space:pre-wrap">${escapeHtml(client.notes)}</div>`:''}
+        ${(()=>{ const p=client.prefs||{}, b=[];
+          if(p.taxExempt)b.push('Tax-exempt'+(p.taxCert?' · cert #'+p.taxCert:''));
+          if(p.discountPct>0)b.push(p.discountPct+'% discount');
+          if(p.depositPct!=null&&p.depositPct!=='')b.push(Number(p.depositPct)===0?'No deposit':p.depositPct+'% deposit');
+          if(p.payTerms)b.push('Invoices '+(INVOICE_TERMS[p.payTerms]||p.payTerms));
+          if(p.terms)b.push('Own terms');
+          return b.length?`<div class="cp-badges">${b.map(x=>`<span>${escapeHtml(x)}</span>`).join('')}</div>`:''; })()}
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-primary" onclick="newEstimate(null,'${escapeHtml(id)}')">＋ New Estimate</button>
@@ -4253,6 +4325,7 @@ const CLIENT_FIELDS=['name','phone','email','addr','city','state','zip','notes',
 function clientPatch(before,after){
   const patch={id:after.id,patch:true};
   CLIENT_FIELDS.forEach(k=>{ if((before[k]??'')!==(after[k]??''))patch[k]=after[k]??''; });
+  if(JSON.stringify(before.prefs||{})!==JSON.stringify(after.prefs||{}))patch.prefs=after.prefs||{};
   const old=new Map((before.log||[]).filter(e=>e&&e.id).map(e=>[e.id,JSON.stringify(e)]));
   const now=(after.log||[]).filter(e=>e&&e.id);
   const ups=now.filter(e=>old.get(e.id)!==JSON.stringify(e));
@@ -4266,6 +4339,7 @@ function applyClientChange(cur,b){
   if(!b.patch)return {...(cur||{}),...b};
   const out={...(cur||{})};
   CLIENT_FIELDS.forEach(k=>{ if(k in b)out[k]=b[k]; });
+  if('prefs' in b)out.prefs=b.prefs;
   const ups=(b.logUpsert||[]).filter(e=>e&&e.id), drop=new Set([...ups.map(e=>e.id),...(b.removedLogIds||[])]);
   if(drop.size)out.log=[...ups,...(out.log||[]).filter(e=>!drop.has(e&&e.id))];
   return out;
@@ -6352,6 +6426,7 @@ function openPricer(projNum, clientId){
   document.getElementById('tripMiles').value='';
   document.getElementById('pricerTaxRate').value=pricerState.taxRate;
   syncChargeFields();
+  applyClientDefaults(cl);
 
   // Open overlay first, then populate
   document.getElementById('pricerOverlay').classList.add('open');
@@ -6417,6 +6492,8 @@ function loadPricerFromSaved(project){
   // The job is priced at the rates it was saved with (none for jobs saved
   // before rates were kept per job: those use today's, and say so).
   pricerState.rates=pd.rates||null; pricerState.switchedToToday=false;
+  pricerState.taxCert=pd.taxCert||''; pricerState.payTerms=pd.payTerms||'';
+  { const nb=document.getElementById('pricerClientNotice'); if(nb)nb.style.display='none'; }
   pricerState.quotedTotal=parseFloat(f.estimateSummary?.total);
 
   document.getElementById('setupHrs').value=pd.setupHrs||'0';
@@ -7476,6 +7553,8 @@ function collectPricerData(){
       taxRate:pricerState.taxRate??getRates().taxRate,
       depositPct:(()=>{ const v=parseFloat(document.getElementById('depositPctInput')?.value); return v>=0?Math.min(100,v):getRates().depositPct; })(),
       paySchedule:parseSchedule(document.getElementById('paySchedule')?.value)||[],
+      taxCert:document.getElementById('taxExemptChk').checked?(pricerState.taxCert||''):'',
+      payTerms:pricerState.payTerms||'',
       feeMode:pricerState.feeMode||setting('feeMode'),
   };
 }
@@ -7588,7 +7667,7 @@ function savePricerProject(){
       minChargeAdj:d.minChargeAdj||0,
       depositPct:JSON.parse(state.form.pricerData).depositPct,
       paySchedule:JSON.parse(state.form.pricerData).paySchedule||[],
-      cardFeeOnCard:!!d.cardFeeOnCard,cardFeePct:d.cardFeePct,cardFeeFixed:d.cardFeeFixed,
+      cardFeeOnCard:!!d.cardFeeOnCard,cardFeePct:d.cardFeePct,cardFeeFixed:d.cardFeeFixed,taxCert:d.taxCert||'',
       quotedAt:JSON.parse(state.form.pricerData).quotedAt,
       validDays:JSON.parse(state.form.pricerData).validDays,
     };
@@ -8059,6 +8138,7 @@ function gatherPricerPDFData(){
 
   return{...m,dtype,dval,taxExempt,minChargeApplied:minChargeOn,processingFeeOn:processingFeeOn&&feeMode!=='cardOnly',taxRate,
     cardFeeOnCard:processingFeeOn&&feeMode==='cardOnly',cardFeePct:rates.processingFeeRate,cardFeeFixed:rates.feeFixed,
+    taxCert:taxExempt?(pricerState.taxCert||''):'',
     validUntil:'',validDays:0,
     jobName,jobDesc,notes,terms,date,estNo,invNo,clientName,clientAddr,clientCityLine,clientPhone,clientEmail};
 }
@@ -8112,6 +8192,7 @@ function gatherPricerPDFDataFromSaved(p){
 
   return{...m,dtype,dval,taxExempt,minChargeApplied:minCharge,processingFeeOn:processingFeeOn&&pd.feeMode!=='cardOnly',taxRate,
     cardFeeOnCard:processingFeeOn&&pd.feeMode==='cardOnly',cardFeePct:rates.processingFeeRate,cardFeeFixed:rates.feeFixed,
+    taxCert:taxExempt?(pd.taxCert||''):'',
     validUntil,validDays,
     jobName:f.jobName||'Untitled Job',
     jobDesc:f.jobDesc||'',
@@ -8138,7 +8219,7 @@ function savedPDFData(p){
   return{...d,lineData,totalMat:lineData.reduce((a,l)=>a+l.matTotal,0),
     setupTotal:n(s.setupTotal),designTotal:n(s.designTotal),totalInstall:n(s.totalInstall),hardwareTotal:n(s.hardwareTotal),
     hardwareOnly:s.hardwareOnly!=null?n(s.hardwareOnly):undefined,subsTotal:n(s.subsTotal),rushTotal:n(s.rushTotal),rushPct:n(s.rushPct),tripTotal:n(s.tripTotal),
-    cardFeeOnCard:!!s.cardFeeOnCard,cardFeePct:n(s.cardFeePct),cardFeeFixed:n(s.cardFeeFixed),paySchedule:s.paySchedule||[],
+    cardFeeOnCard:!!s.cardFeeOnCard,cardFeePct:n(s.cardFeePct),cardFeeFixed:n(s.cardFeeFixed),paySchedule:s.paySchedule||[],taxCert:s.taxCert||d.taxCert||'',
     sub:n(s.sub),dtype:s.dtype||'none',dval:n(s.dval),disc:n(s.disc),taxable:n(s.taxable),tax:n(s.tax),total:n(s.total),
     taxExempt:!!s.taxExempt,minChargeAdj,minChargeApplied:minChargeAdj>0.005,
     processingFee:n(s.processingFee),processingFeeOn:!!s.processingFeeOn};
@@ -8700,7 +8781,7 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
   if(d.disc>0) row('Discount',-d.disc,d.dtype==='pct'?'('+d.dval+'%)':null);
   if(d.minChargeApplied&&d.minChargeAdj>0) row('Minimum Job Charge Adj.',d.minChargeAdj);
   row('Subtotal',d.taxable); // includes the minimum-charge adjustment above, so the rows add up
-  row(d.taxExempt?'Sales Tax (Exempt)':'Sales Tax',d.tax,d.taxExempt?null:'('+(d.taxRate??8.25)+'%)');
+  row(d.taxExempt?'Sales Tax (Exempt)':'Sales Tax',d.tax,d.taxExempt?(d.taxCert?'Certificate #'+d.taxCert:null):'('+(d.taxRate??8.25)+'%)');
   if(d.processingFeeOn&&d.processingFee>0) row('Card Processing Fee',d.processingFee);
 
   y+=4;
@@ -8773,6 +8854,7 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
       </div>
 
       <div id="pricerRatesNotice" class="rates-notice" style="display:none"></div>
+      <div id="pricerClientNotice" class="rates-notice" style="display:none"></div>
       <!-- Regular line items -->
       <div id="regularLines">
         <div class="line-items" id="lineItemsContainer"></div>
