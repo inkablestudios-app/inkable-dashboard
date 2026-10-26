@@ -295,3 +295,7 @@
   - Save asks first when an item has no width/height or a discount takes the job to $0.
   - Install suggestion never says "0 min" (15 min minimum). Work order: "Katy, TX 77494"; plain
     boards (material "None…") don't list a media line.
+- Settings checks (Oct 26): a markup below 1 or a negative rate is refused (nothing saved, says
+  which box); a box left empty keeps its value instead of quietly going back to the built-in
+  default; "No Laminate" and the "None" substrate can't be removed (removing them made every new
+  item start with a laminate and a board), and they come back if an older save lost them.

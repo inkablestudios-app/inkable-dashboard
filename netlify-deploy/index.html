@@ -5748,6 +5748,9 @@ function addMaterial(category){
 
 function removeMaterial(category,name){
   if(!settingsDraft)return;
+  if((category==='laminate'&&name==='No Laminate')||(category==='substrate'&&name==='None')){
+    alert(`"${name}" is how an item says it has no ${category}, so it can't be removed.`); return;
+  }
   if(Object.keys(settingsDraft[category]).length<=1){alert('Need at least one option.');return;}
   if(!confirm('Remove "'+name+'" from your '+category+' list? This also removes it from every dropdown.'))return;
   delete settingsDraft[category][name];
@@ -5765,31 +5768,39 @@ function resetMatCategory(category){
 function saveSettings(){
   if(!settingsDraft)return;
   const s=settingsDraft;
-  // 0 is a real value (e.g. no print cost, no card fee) — only an empty or
-  // unreadable box falls back to the default.
+  // 0 is a real value (e.g. no print cost, no card fee). An empty or
+  // unreadable box keeps what was there before (it used to put back the
+  // built-in default without saying so).
   const num=(id,fallback)=>{ const v=parseFloat(document.getElementById(id)?.value); return isNaN(v)?fallback:v; };
-  s.markup=num('settingMarkup',2.5);
-  s.printCost=num('settingPrintCost',0.15);
-  s.designBasic=num('settingDesignBasic',40);
-  s.designStandard=num('settingDesignStandard',65);
-  s.designAdvanced=num('settingDesignAdvanced',85);
-  s.installBasic=num('settingInstallBasic',40);
-  s.installStandard=num('settingInstallStandard',65);
-  s.installAdvanced=num('settingInstallAdvanced',85);
-  s.myCostDesign=num('settingMyCostDesign',20);
-  s.myCostInstall=num('settingMyCostInstall',25);
-  s.myCostSetup=num('settingMyCostSetup',20);
-  s.setupRate=num('settingSetupRate',40);
-  s.installSqftBasic=num('settingInstallSqftBasic',50);
-  s.installSqftStandard=num('settingInstallSqftStandard',100);
-  s.installSqftAdvanced=num('settingInstallSqftAdvanced',20);
-  s.staleEstimateDays=num('settingStaleEstimateDays',7);
-  s.overdueBalanceDays=num('settingOverdueBalanceDays',14);
-  s.backupReminderDays=Math.max(1,num('settingBackupReminderDays',30));
-  s.processingFeeRate=num('settingProcessingFeeRate',2.9);
-  s.taxRate=num('settingTaxRate',8.25);
-  s.depositPct=Math.min(100,Math.max(1,num('settingDepositPct',50)));
-  s.estimateValidDays=Math.max(1,Math.round(num('settingEstimateValidDays',30)));
+  s.markup=num('settingMarkup',s.markup??2.5);
+  s.printCost=num('settingPrintCost',s.printCost??0.15);
+  s.designBasic=num('settingDesignBasic',s.designBasic??40);
+  s.designStandard=num('settingDesignStandard',s.designStandard??65);
+  s.designAdvanced=num('settingDesignAdvanced',s.designAdvanced??85);
+  s.installBasic=num('settingInstallBasic',s.installBasic??40);
+  s.installStandard=num('settingInstallStandard',s.installStandard??65);
+  s.installAdvanced=num('settingInstallAdvanced',s.installAdvanced??85);
+  s.myCostDesign=num('settingMyCostDesign',s.myCostDesign??20);
+  s.myCostInstall=num('settingMyCostInstall',s.myCostInstall??25);
+  s.myCostSetup=num('settingMyCostSetup',s.myCostSetup??20);
+  s.setupRate=num('settingSetupRate',s.setupRate??40);
+  s.installSqftBasic=num('settingInstallSqftBasic',s.installSqftBasic??50);
+  s.installSqftStandard=num('settingInstallSqftStandard',s.installSqftStandard??100);
+  s.installSqftAdvanced=num('settingInstallSqftAdvanced',s.installSqftAdvanced??20);
+  s.staleEstimateDays=num('settingStaleEstimateDays',s.staleEstimateDays??7);
+  s.overdueBalanceDays=num('settingOverdueBalanceDays',s.overdueBalanceDays??14);
+  s.backupReminderDays=Math.max(1,num('settingBackupReminderDays',s.backupReminderDays??30));
+  s.processingFeeRate=num('settingProcessingFeeRate',s.processingFeeRate??2.9);
+  s.taxRate=num('settingTaxRate',s.taxRate??8.25);
+  s.depositPct=Math.min(100,Math.max(1,num('settingDepositPct',s.depositPct??50)));
+  s.estimateValidDays=Math.max(1,Math.round(num('settingEstimateValidDays',s.estimateValidDays??30)));
+  const labels={markup:'Markup',printCost:'Print cost',designBasic:'Design rate (basic)',designStandard:'Design rate (standard)',designAdvanced:'Design rate (advanced)',
+    installBasic:'Install rate (basic)',installStandard:'Install rate (standard)',installAdvanced:'Install rate (advanced)',myCostDesign:'My design cost',myCostInstall:'My install cost',
+    myCostSetup:'My setup cost',setupRate:'Setup rate',processingFeeRate:'Card processing fee',taxRate:'Sales tax rate',installSqftBasic:'Install speed (basic)',
+    installSqftStandard:'Install speed (standard)',installSqftAdvanced:'Install speed (advanced)'};
+  const negative=Object.keys(labels).filter(k=>Number(s[k])<0).map(k=>labels[k]);
+  if(negative.length){ alert('These can\'t be below 0: '+negative.join(', ')+'.\nNothing was saved.'); return; }
+  if(Number(s.markup)<1){ alert('The markup multiplier must be at least 1 (1 = selling materials at your cost).\nNothing was saved.'); return; }
   const txt=id=>(document.getElementById(id)?.value||'').trim();
   s.bizEmail=txt('settingBizEmail');
   s.bizPhone=txt('settingBizPhone');
@@ -5934,8 +5945,9 @@ function getProjectAmount(p){
   }
 }
 function getVinyl(){const pd=getPricingData();return pd.vinyl||DEFAULT_VINYL;}
-function getLaminate(){const pd=getPricingData();return pd.laminate||DEFAULT_LAMINATE;}
-function getSubstrate(){const pd=getPricingData();return pd.substrate||DEFAULT_SUBSTRATE;}
+// "No Laminate" / "None" always exist (an older save may have removed them).
+function getLaminate(){const pd=getPricingData();const l=pd.laminate||DEFAULT_LAMINATE;return 'No Laminate' in l?l:{'No Laminate':0,...l};}
+function getSubstrate(){const pd=getPricingData();const s=pd.substrate||DEFAULT_SUBSTRATE;return 'None' in s?s:{'None':0,...s};}
 function getQQPresets(){const pd=getPricingData();return pd.qqPresets||DEFAULT_QQ_PRESETS;}
 
 // ── Input guards (live pricer and saved jobs use the same rules) ────────
