@@ -92,13 +92,15 @@ export default async (req) => {
         && session.payment_status === "paid") {
       const projectId = session.metadata?.project_id;
       const description = session.metadata?.description || "Payment";
-      const amount = (session.amount_total || 0) / 100;
+      // A card fee added at checkout is money in, but not part of the job's price.
+      const cardFee = Math.max(0, Number(session.metadata?.card_fee) || 0);
+      const amount = Math.round((session.amount_total || 0) - cardFee * 100) / 100;
 
       if (projectId && amount > 0) {
         // The shop's date (Houston), not the server's UTC date: an evening
         // payment belongs to that day, month and tax quarter.
         const today = new Date().toLocaleDateString("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", year: "numeric" });
-        const { fee, exact } = await getStripeFee(session, amount);
+        const { fee, exact } = await getStripeFee(session, amount + cardFee);
         // Recorded as a regular job expense so Sales/Reports profit reflects
         // what actually reaches the bank. Editable/deletable like any other.
         const feeExpense = {
@@ -115,6 +117,7 @@ export default async (req) => {
           method: "Card (Stripe) — " + description,
           date: today,
           stripeSessionId: session.id,
+          ...(cardFee > 0 ? { cardFee } : {}),
         };
         // One atomic statement: append to whatever is in the database at
         // this instant (no read-then-write gap a Dashboard save could slip

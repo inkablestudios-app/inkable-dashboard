@@ -1,5 +1,5 @@
 import { getDatabase } from "@netlify/database";
-import { jobDepositPct, depositAmount, paidSoFar, needsAcceptance, STRIPE_MIN, toCents } from "./_shared/pay.js";
+import { jobDepositPct, depositAmount, paidSoFar, needsAcceptance, nextPayment, cardFeeFor, STRIPE_MIN, toCents } from "./_shared/pay.js";
 
 const db = getDatabase();
 
@@ -49,8 +49,8 @@ export default async (req) => {
   try {
     const { token, amountType } = await req.json();
     if (!token) return Response.json({ error: "Missing token" }, { status: 400 });
-    if (!["deposit", "full"].includes(amountType)) {
-      return Response.json({ error: "amountType must be 'deposit' or 'full'" }, { status: 400 });
+    if (!["deposit", "next", "full"].includes(amountType)) {
+      return Response.json({ error: "amountType must be 'deposit', 'next' or 'full'" }, { status: 400 });
     }
 
     const rows = await db.sql`
@@ -109,17 +109,17 @@ export default async (req) => {
     if (typeof settings === "string") { try { settings = JSON.parse(settings); } catch { settings = {}; } }
     const depositPct = jobDepositPct(summary, settings);
 
+    // "deposit"/"next": the next stage of a payment schedule, the deposit
+    // before anything is paid, or what's left. "full": everything left.
     let amount, description;
-    if (paid > 0.005) {
-      amount = toCents(balance);
-      description = "Remaining balance";
-    } else if (amountType === "deposit") {
-      amount = depositAmount(summary, depositPct);
-      description = depositPct + "% deposit";
-    } else {
-      amount = toCents(summary.total);
-      description = "Full payment";
+    const next = amountType === "full" ? null : nextPayment(summary, settings, paid);
+    if (amountType !== "full" && !next) {
+      return Response.json({ error: "No deposit is needed for this job." }, { status: 400 });
     }
+    if (next) { amount = next.amount; description = next.label; }
+    else if (paid > 0.005) { amount = toCents(balance); description = "Remaining balance"; }
+    else { amount = toCents(summary.total); description = "Full payment"; }
+    const cardFee = cardFeeFor(summary, amount);
     if (amount < STRIPE_MIN) {
       return Response.json({ error: `The amount left ($${amount.toFixed(2)}) is too small to pay by card. Please contact us to settle it.` }, { status: 400 });
     }
@@ -158,6 +158,14 @@ export default async (req) => {
       "line_items[0][price_data][product_data][name]": productName,
       "line_items[0][price_data][unit_amount]": String(Math.round(amount * 100)),
       "line_items[0][quantity]": "1",
+      // Jobs that add the card fee only when paying by card: a second line.
+      ...(cardFee > 0 ? {
+        "line_items[1][price_data][currency]": "usd",
+        "line_items[1][price_data][product_data][name]": "Card processing fee",
+        "line_items[1][price_data][unit_amount]": String(Math.round(cardFee * 100)),
+        "line_items[1][quantity]": "1",
+        "metadata[card_fee]": cardFee.toFixed(2),
+      } : {}),
       "metadata[project_id]": r.project_id,
       "metadata[token]": token,
       "metadata[description]": description,

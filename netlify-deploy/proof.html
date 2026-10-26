@@ -362,17 +362,20 @@
     // explained by the notice under the estimate.
     if(!mustAccept(data) || data.expired) return '';
     const paid = data.paid || 0;
-    const dep = data.depositPct || 50;
-    const depAmt = data.depositAmount != null ? data.depositAmount : summary.total*dep/100;
     const balance = data.balance != null ? data.balance : Math.max(0, summary.total - paid);
     const min = data.minCardAmount || 0.5;
+    const next = nextOf(data);
     // Re-priced after a payment: accept the new total, then pay what's left.
     const buttons = paid > 0.005
       ? (balance >= min
-        ? `<button class="btn-primary" style="flex:1" id="acceptPayRestBtn">Accept &amp; Pay Remaining Balance — ${fmtMoney(balance)}</button>`
+        ? `<button class="btn-primary" style="flex:1" id="acceptPayRestBtn">Accept &amp; Pay Remaining Balance — ${payAmt(data, balance)}</button>`
         : `<button class="btn-primary" style="flex:1" id="acceptOnlyBtn">Accept the Updated Estimate</button>`)
-      : `<button class="btn-primary" style="flex:1" id="acceptPayDepositBtn">Accept &amp; Pay ${dep}% Deposit — ${fmtMoney(depAmt)}</button>
-              <button class="btn-ghost" style="flex:1" id="acceptPayFullBtn">Accept &amp; Pay in Full — ${fmtMoney(summary.total)}</button>`;
+      : next
+        ? `<button class="btn-primary" style="flex:1" id="acceptPayDepositBtn">Accept &amp; Pay ${esc(nextLabel(next))} — ${payAmt(data, next.amount)}</button>
+              <button class="btn-ghost" style="flex:1" id="acceptPayFullBtn">Accept &amp; Pay in Full — ${payAmt(data, summary.total)}</button>`
+        // No deposit: accepting is enough to start; paying in full is optional.
+        : `<button class="btn-primary" style="flex:1" id="acceptOnlyBtn">Accept Estimate — pay when it's done</button>
+              <button class="btn-ghost" style="flex:1" id="acceptPayFullBtn">Accept &amp; Pay in Full — ${payAmt(data, summary.total)}</button>`;
     return `
       <section>
         <div class="estimate">
@@ -388,7 +391,8 @@
             <div class="actions" style="margin-top:0">
               ${buttons}
             </div>
-            ${paid > 0.005 && balance < min ? '' : `<div style="text-align:center;margin-top:10px"><a href="#" id="acceptLaterLink" style="font-size:12px;color:var(--muted)">Accept now, pay later (cash or check)</a></div>`}
+            ${(paid > 0.005 && balance < min) || (!next && paid <= 0.005) ? '' : `<div style="text-align:center;margin-top:10px"><a href="#" id="acceptLaterLink" style="font-size:12px;color:var(--muted)">Accept now, pay later (cash or check)</a></div>`}
+            ${cardFeeNote(data)}
             <div id="acceptError" style="display:none;color:#e55;font-size:11.5px;margin-top:8px"></div>
           </div>
         </div>
@@ -488,10 +492,9 @@
         </section>`;
     }
     const paid = data.paid || 0;
-    const dep = data.depositPct || 50;
-    const depAmt = data.depositAmount != null ? data.depositAmount : summary.total*dep/100;
     const balance = data.balance != null ? data.balance : Math.max(0, summary.total - paid);
     const min = data.minCardAmount || 0.5;
+    const next = nextOf(data);
 
     let body;
     if(balance <= 0.005){
@@ -500,19 +503,33 @@
       // Stripe can't take a card payment this small.
       body = `<div style="padding:0 16px 14px;font-size:12px;color:var(--muted)">Paid so far: ${fmtMoney(paid)} of ${fmtMoney(summary.total)}. The remaining ${fmtMoney(balance)} is too small to pay by card — please contact us to settle it.</div>`;
     }else if(paid > 0.005){
+      // Paid in stages: the next stage, and paying off everything is always an option.
+      const staged = next && next.stage && Math.abs(next.amount - balance) > 0.005;
       body = `
         <div style="padding:0 16px 14px">
           <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px">Paid so far: ${fmtMoney(paid)} of ${fmtMoney(summary.total)}</div>
-          <button class="btn-primary" style="width:100%;font-family:inherit;font-size:13.5px;font-weight:700;padding:11px 14px;border-radius:9px;border:none;cursor:pointer" id="payRemainingBtn">Pay Remaining Balance — ${fmtMoney(balance)}</button>
+          ${staged ? `<div class="actions" style="margin-top:0;margin-bottom:8px"><button class="btn-primary" style="flex:1" id="payNextBtn">Pay ${esc(nextLabel(next))} — ${payAmt(data, next.amount)}</button></div>` : ''}
+          <button class="${staged ? 'btn-ghost' : 'btn-primary'}" style="width:100%;font-family:inherit;font-size:13.5px;font-weight:700;padding:11px 14px;border-radius:9px;${staged ? '' : 'border:none;'}cursor:pointer" id="payRemainingBtn">Pay Remaining Balance — ${payAmt(data, balance)}</button>
+          ${cardFeeNote(data)}
+          <div id="paymentError" style="display:none;color:#e55;font-size:11.5px;margin-top:8px"></div>
+        </div>`;
+    }else if(!next){
+      // No deposit on this job: the client pays when it's done (or in full now).
+      body = `
+        <div style="padding:0 16px 14px">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:10px">No deposit needed — you can pay when the job is done.</div>
+          <button class="btn-ghost" style="width:100%;font-family:inherit;font-size:13.5px;font-weight:700;padding:11px 14px;border-radius:9px;cursor:pointer" id="payFullBtn">Pay in Full Now — ${payAmt(data, summary.total)}</button>
+          ${cardFeeNote(data)}
           <div id="paymentError" style="display:none;color:#e55;font-size:11.5px;margin-top:8px"></div>
         </div>`;
     }else{
       body = `
         <div style="padding:0 16px 14px">
           <div class="actions" style="margin-top:0">
-            <button class="btn-primary" style="flex:1" id="payDepositBtn">Pay ${dep}% Deposit — ${fmtMoney(depAmt)}</button>
-            <button class="btn-ghost" style="flex:1" id="payFullBtn">Pay in Full — ${fmtMoney(summary.total)}</button>
+            <button class="btn-primary" style="flex:1" id="payDepositBtn">Pay ${esc(nextLabel(next))} — ${payAmt(data, next.amount)}</button>
+            <button class="btn-ghost" style="flex:1" id="payFullBtn">Pay in Full — ${payAmt(data, summary.total)}</button>
           </div>
+          ${cardFeeNote(data)}
           <div id="paymentError" style="display:none;color:#e55;font-size:11.5px;margin-top:8px"></div>
         </div>`;
     }
@@ -526,8 +543,34 @@
       </section>`;
   }
 
+  // The next payment the server worked out; older answers without it: the deposit.
+  function nextOf(data){
+    if(data.nextPayment !== undefined) return data.nextPayment;
+    const s = data.estimateSummary, dep = data.depositPct != null ? data.depositPct : 50;
+    if(!s || !(dep > 0)) return null;
+    return { amount: data.depositAmount != null ? data.depositAmount : s.total * dep / 100, label: dep + '% deposit' };
+  }
+  // "50% Deposit", "Payment 2 of 3 (40%)", "Remaining Balance"
+  function nextLabel(next){
+    const l = next.label || '';
+    return /deposit$/.test(l) ? l.replace(/deposit$/, 'Deposit') : l;
+  }
+  // The card fee, for jobs that add it only when paying by card.
+  function cardFeeOf(data, amount){
+    if(!data.cardFee) return 0;
+    return Number(Math.round(Math.abs(amount * data.cardFee.pct / 100 + data.cardFee.fixed) + 'e2') + 'e-2');
+  }
+  function payAmt(data, amount){
+    const f = cardFeeOf(data, amount);
+    return fmtMoney(amount) + (f > 0 ? ` + ${fmtMoney(f)} card fee` : '');
+  }
+  function cardFeeNote(data){
+    if(!data.cardFee) return '';
+    return `<div style="font-size:11px;color:var(--muted);margin-top:8px">Paying by card adds a ${data.cardFee.pct}%${data.cardFee.fixed > 0 ? ' + ' + fmtMoney(data.cardFee.fixed) : ''} card processing fee. No fee for cash, check or Zelle.</div>`;
+  }
+
   async function startCheckout(amountType){
-    const btns = [document.getElementById('payDepositBtn'), document.getElementById('payFullBtn'), document.getElementById('payRemainingBtn')].filter(Boolean);
+    const btns = [document.getElementById('payDepositBtn'), document.getElementById('payNextBtn'), document.getElementById('payFullBtn'), document.getElementById('payRemainingBtn')].filter(Boolean);
     const errEl = document.getElementById('paymentError');
     btns.forEach(b=>{ b.disabled = true; b.style.opacity = '0.6'; });
     if(errEl) errEl.style.display = 'none';
@@ -585,6 +628,8 @@
     if(fullBtn) fullBtn.onclick = () => startCheckout('full');
     const remainingBtn = document.getElementById('payRemainingBtn');
     if(remainingBtn) remainingBtn.onclick = () => startCheckout('full');
+    const nextBtn = document.getElementById('payNextBtn');
+    if(nextBtn) nextBtn.onclick = () => startCheckout('next');
   }
 
   // Back from Stripe: Stripe sends the client here the moment they pay,

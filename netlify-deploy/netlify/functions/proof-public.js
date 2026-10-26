@@ -1,5 +1,5 @@
 import { getDatabase } from "@netlify/database";
-import { jobDepositPct, depositAmount, paidSoFar, needsAcceptance, STRIPE_MIN } from "./_shared/pay.js";
+import { jobDepositPct, depositAmount, paidSoFar, needsAcceptance, nextPayment, cardFeeFor, STRIPE_MIN } from "./_shared/pay.js";
 
 const db = getDatabase();
 
@@ -137,6 +137,12 @@ export default async (req) => {
         // the exact amount Stripe would charge for it.
         depositPct,
         depositAmount: estimateSummary ? depositAmount(estimateSummary, depositPct) : 0,
+        // What the next payment button asks for (a schedule's next stage, the
+        // deposit, or what's left); null = nothing due until completion.
+        nextPayment: estimateSummary ? nextPayment(estimateSummary, settings, paid) : null,
+        paySchedule: estimateSummary?.paySchedule || null,
+        // Jobs set to add the card fee only when paying by card.
+        cardFee: estimateSummary?.cardFeeOnCard ? { pct: Number(estimateSummary.cardFeePct) || 0, fixed: Number(estimateSummary.cardFeeFixed) || 0 } : null,
         minCardAmount: STRIPE_MIN,
         business: {
           email: settings.bizEmail ?? "inkablestudios@gmail.com",

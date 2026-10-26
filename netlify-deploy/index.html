@@ -1660,7 +1660,9 @@ function estimateValidUntil(quotedAt,days){
   return new Date(y,m-1,dd+Number(days)).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
 }
 function getJobDepositPct(p){
-  try{ const v=JSON.parse(p?.state?.form?.pricerData||'{}').depositPct; if(v>0)return v; }catch(e){}
+  try{ const pd=JSON.parse(p?.state?.form?.pricerData||'{}');
+    if(Array.isArray(pd.paySchedule)&&pd.paySchedule.length>1)return Number(pd.paySchedule[0]); // paid in stages: the first one starts the job
+    const v=pd.depositPct; if(v!=null&&v!==''&&Number(v)>=0)return Number(v); }catch(e){} // 0 = no deposit
   return getRates().depositPct;
 }
 // A cancelled job owes nothing (money already received still counts in Reports).
@@ -2836,7 +2838,7 @@ function renderJobPage(){
   ].join(''):sumRow('Total',fmt(total));
 
   const payments=getPayments(id);
-  const payHtml=payments.length?payments.map(pm=>`<div class="cp-row"><span style="color:var(--muted)">${escapeHtml(pm.date||'—')}<br><span style="color:var(--text)">${escapeHtml(pm.method||'')}</span></span><b style="color:var(--green);font-family:'DM Mono',monospace;white-space:nowrap">${fmt(pm.amount)}</b></div>`).join('')
+  const payHtml=payments.length?payments.map(pm=>`<div class="cp-row"><span style="color:var(--muted)">${escapeHtml(pm.date||'—')}<br><span style="color:var(--text)">${escapeHtml(pm.method||'')}${pm.cardFee>0?` <span style="color:var(--muted)">(+ ${fmt(pm.cardFee)} card fee)</span>`:''}</span></span><b style="color:var(--green);font-family:'DM Mono',monospace;white-space:nowrap">${fmt(pm.amount)}</b></div>`).join('')
     :'<div style="font-size:12px;color:var(--muted2)">No payments yet.</div>';
   const keep=fin.revenue-fin.tax;
   const profitHtml=[sumRow('Price (before tax)',fmt(keep)),sumRow('Costs (expenses)',fmt(fin.cost.total)),
@@ -3580,7 +3582,7 @@ function computeReportsDataForRange(range){
     const taxableRatio=fin.revenue>0&&!fin.taxExempt?(Number(fin.taxable)||0)/fin.revenue:0;
     getPayments(p.id).forEach(pmt=>{
       if(dateInRange(pmt.date,range)){
-        revenueCollected+=pmt.amount;
+        revenueCollected+=pmt.amount+(Number(pmt.cardFee)||0); // a card fee paid at checkout is money in too (not taxed)
         taxCollected+=pmt.amount*taxRatio;
         taxableCollected+=pmt.amount*taxableRatio;
       }
@@ -5953,7 +5955,7 @@ function saveSettings(){
   s.backupReminderDays=Math.max(1,num('settingBackupReminderDays',s.backupReminderDays??30));
   s.processingFeeRate=num('settingProcessingFeeRate',s.processingFeeRate??2.9);
   s.taxRate=num('settingTaxRate',s.taxRate??8.25);
-  s.depositPct=Math.min(100,Math.max(1,num('settingDepositPct',s.depositPct??50)));
+  s.depositPct=Math.min(100,Math.max(0,num('settingDepositPct',s.depositPct??50))); // 0 = no deposit, pay at completion
   s.estimateValidDays=Math.max(1,Math.round(num('settingEstimateValidDays',s.estimateValidDays??30)));
   const labels={markup:'Markup',printCost:'Print cost',designBasic:'Design rate (basic)',designStandard:'Design rate (standard)',designAdvanced:'Design rate (advanced)',
     installBasic:'Install rate (basic)',installStandard:'Install rate (standard)',installAdvanced:'Install rate (advanced)',myCostDesign:'My design cost',myCostInstall:'My install cost',
@@ -6344,6 +6346,8 @@ function openPricer(projNum, clientId){
   document.getElementById('processingFeeChk').checked=!!setting('feeBoxDefault');
   document.getElementById('depositPctInput').value=getRates().depositPct;
   document.getElementById('rushChk').checked=false;
+  document.getElementById('paySchedule').value=setting('paySchedule')||'';
+  pricerState.feeMode=setting('feeMode');
   document.getElementById('tripChk').checked=false;
   document.getElementById('tripMiles').value='';
   document.getElementById('pricerTaxRate').value=pricerState.taxRate;
@@ -6432,6 +6436,8 @@ function loadPricerFromSaved(project){
   document.getElementById('processingFeeChk').checked=!!pd.processingFeeOn;
   document.getElementById('depositPctInput').value=pd.depositPct!=null?pd.depositPct:getRates().depositPct;
   document.getElementById('rushChk').checked=!!pd.rush;
+  document.getElementById('paySchedule').value=(pd.paySchedule||[]).join('/');
+  pricerState.feeMode=pd.feeMode||'always';
   document.getElementById('tripChk').checked=!!pd.trip;
   document.getElementById('tripMiles').value=pd.tripMiles||'';
   document.getElementById('pricerTaxRate').value=pricerState.taxRate;
@@ -6854,7 +6860,7 @@ function syncChargeFields(){
   const r=pricerRates();
   const rl=document.getElementById('rushLabel'); if(rl)rl.textContent=r.rushPct>0?`Rush (+${r.rushPct}%)`:'Rush (set % in Settings)';
   const tf=document.getElementById('tripMilesField'); if(tf)tf.style.display=document.getElementById('tripChk')?.checked?'':'none';
-  const fl=document.getElementById('processingFeeLabel'); if(fl)fl.textContent=setting('feeMode')==='cardOnly'?'Card fee if paid by card':'Processing Fee';
+  const fl=document.getElementById('processingFeeLabel'); if(fl)fl.textContent=(pricerState.feeMode||setting('feeMode'))==='cardOnly'?'Card fee if paid by card':'Processing Fee';
 }
 // Tax rate for this job only (e.g. an install where the rate is different).
 function setPricerTaxRate(v){ const n=parseFloat(v); if(!isNaN(n)&&n>=0&&n<=20){ pricerState.taxRate=n; recalc(); } }
@@ -7468,7 +7474,9 @@ function collectPricerData(){
       minChargeVal:document.getElementById('minChargeVal').value,
       processingFeeOn:document.getElementById('processingFeeChk')?.checked!==false,
       taxRate:pricerState.taxRate??getRates().taxRate,
-      depositPct:(()=>{ const v=parseFloat(document.getElementById('depositPctInput')?.value); return v>0?Math.min(100,v):getRates().depositPct; })(),
+      depositPct:(()=>{ const v=parseFloat(document.getElementById('depositPctInput')?.value); return v>=0?Math.min(100,v):getRates().depositPct; })(),
+      paySchedule:parseSchedule(document.getElementById('paySchedule')?.value)||[],
+      feeMode:pricerState.feeMode||setting('feeMode'),
   };
 }
 
@@ -7507,6 +7515,7 @@ function savePricerProject(){
   // A by-material item whose material was removed from Settings: pick one first.
   const missingMat=missingMaterialMessage();
   if(missingMat){ alert(missingMat); return false; }
+  if(parseSchedule(document.getElementById('paySchedule')?.value)===null){ alert('Payment schedule: write it like "50/40/10" — at least 2 payments that add up to 100 — or leave it blank.'); return false; }
   const oops=priceWarnings();
   if(oops&&!confirm(oops+'\n\nSave anyway?'))return false;
   // The job's date comes from the pricer's Date picker (which shows the
@@ -7578,6 +7587,8 @@ function savePricerProject(){
       processingFee:d.processingFee,processingFeeOn:d.processingFeeOn,
       minChargeAdj:d.minChargeAdj||0,
       depositPct:JSON.parse(state.form.pricerData).depositPct,
+      paySchedule:JSON.parse(state.form.pricerData).paySchedule||[],
+      cardFeeOnCard:!!d.cardFeeOnCard,cardFeePct:d.cardFeePct,cardFeeFixed:d.cardFeeFixed,
       quotedAt:JSON.parse(state.form.pricerData).quotedAt,
       validDays:JSON.parse(state.form.pricerData).validDays,
     };
@@ -8021,10 +8032,11 @@ function gatherPricerPDFData(){
   // Card processing fee — opt-in per job (checked by default), charged on
   // top of taxable + tax: it's what actually gets run through the card.
   const processingFeeOn=!!document.getElementById('processingFeeChk')?.checked;
+  const feeMode=pricerState.feeMode||setting('feeMode');
   const m=priceJob(lineData,{setupTotal:setupHrsTotal*rates.setupRate,
     hardware:nonNeg(document.getElementById('pricerHardware')?.value),subs:nonNeg(document.getElementById('pricerSubs')?.value),
     dtype,dval,minCharge:minChargeOn,minChargeVal:nonNeg(document.getElementById('minChargeVal')?.value),
-    taxExempt,taxRate,feeOn:processingFeeOn,feeRate:rates.processingFeeRate,feeFixed:rates.feeFixed,
+    taxExempt,taxRate,feeOn:processingFeeOn&&feeMode!=='cardOnly',feeRate:rates.processingFeeRate,feeFixed:rates.feeFixed,
     rush:!!document.getElementById('rushChk')?.checked,rushPct:rates.rushPct,
     trip:!!document.getElementById('tripChk')?.checked,tripMiles:nonNeg(document.getElementById('tripMiles')?.value),
     tripBase:rates.tripBase,tripPerMile:rates.tripPerMile,tripFreeMiles:rates.tripFreeMiles});
@@ -8045,7 +8057,8 @@ function gatherPricerPDFData(){
   const clientCityLine=client?[[client.city,client.state].filter(Boolean).join(', '),client.zip].filter(Boolean).join(' '):'';
   const clientPhone=client?client.phone||'':'';
 
-  return{...m,dtype,dval,taxExempt,minChargeApplied:minChargeOn,processingFeeOn,taxRate,
+  return{...m,dtype,dval,taxExempt,minChargeApplied:minChargeOn,processingFeeOn:processingFeeOn&&feeMode!=='cardOnly',taxRate,
+    cardFeeOnCard:processingFeeOn&&feeMode==='cardOnly',cardFeePct:rates.processingFeeRate,cardFeeFixed:rates.feeFixed,
     validUntil:'',validDays:0,
     jobName,jobDesc,notes,terms,date,estNo,invNo,clientName,clientAddr,clientCityLine,clientPhone,clientEmail};
 }
@@ -8086,7 +8099,7 @@ function gatherPricerPDFDataFromSaved(p){
   // never silently add a fee to a job that was priced without it.
   const processingFeeOn=!!pd.processingFeeOn, taxExempt=!!pd.taxExempt, minCharge=!!pd.minCharge;
   const m=priceJob(lineData,{setupTotal:setupHrsTotal*rates.setupRate,hardware:nonNeg(pd.hardware),subs:nonNeg(pd.subs),
-    dtype,dval,minCharge,minChargeVal:nonNeg(pd.minChargeVal),taxExempt,taxRate,feeOn:processingFeeOn,feeRate:rates.processingFeeRate,feeFixed:rates.feeFixed,
+    dtype,dval,minCharge,minChargeVal:nonNeg(pd.minChargeVal),taxExempt,taxRate,feeOn:processingFeeOn&&pd.feeMode!=='cardOnly',feeRate:rates.processingFeeRate,feeFixed:rates.feeFixed,
     rush:!!pd.rush,rushPct:rates.rushPct,trip:!!pd.trip,tripMiles:nonNeg(pd.tripMiles),tripBase:rates.tripBase,tripPerMile:rates.tripPerMile,tripFreeMiles:rates.tripFreeMiles});
 
   const clients=getClients();
@@ -8097,7 +8110,8 @@ function gatherPricerPDFDataFromSaved(p){
   const clientCityLine=client?[[client.city,client.state].filter(Boolean).join(', '),client.zip].filter(Boolean).join(' '):'';
   const clientPhone=client?client.phone||'':'';
 
-  return{...m,dtype,dval,taxExempt,minChargeApplied:minCharge,processingFeeOn,taxRate,
+  return{...m,dtype,dval,taxExempt,minChargeApplied:minCharge,processingFeeOn:processingFeeOn&&pd.feeMode!=='cardOnly',taxRate,
+    cardFeeOnCard:processingFeeOn&&pd.feeMode==='cardOnly',cardFeePct:rates.processingFeeRate,cardFeeFixed:rates.feeFixed,
     validUntil,validDays,
     jobName:f.jobName||'Untitled Job',
     jobDesc:f.jobDesc||'',
@@ -8124,6 +8138,7 @@ function savedPDFData(p){
   return{...d,lineData,totalMat:lineData.reduce((a,l)=>a+l.matTotal,0),
     setupTotal:n(s.setupTotal),designTotal:n(s.designTotal),totalInstall:n(s.totalInstall),hardwareTotal:n(s.hardwareTotal),
     hardwareOnly:s.hardwareOnly!=null?n(s.hardwareOnly):undefined,subsTotal:n(s.subsTotal),rushTotal:n(s.rushTotal),rushPct:n(s.rushPct),tripTotal:n(s.tripTotal),
+    cardFeeOnCard:!!s.cardFeeOnCard,cardFeePct:n(s.cardFeePct),cardFeeFixed:n(s.cardFeeFixed),paySchedule:s.paySchedule||[],
     sub:n(s.sub),dtype:s.dtype||'none',dval:n(s.dval),disc:n(s.disc),taxable:n(s.taxable),tax:n(s.tax),total:n(s.total),
     taxExempt:!!s.taxExempt,minChargeAdj,minChargeApplied:minChargeAdj>0.005,
     processingFee:n(s.processingFee),processingFeeOn:!!s.processingFeeOn};
@@ -8546,7 +8561,7 @@ function gatherReceiptData(project){
   const clientEmail=client?client.email||'':'';
   const clientName=client?client.name:(f.billingName||'');
   const jobTotal=getProjectAmount(project);
-  const payments=getPayments(project.id).map(p=>({date:p.date,method:p.method,amount:p.amount}));
+  const payments=getPayments(project.id).map(p=>({date:p.date,method:p.method+(p.cardFee>0?` (+ ${fmt(p.cardFee)} card fee)`:''),amount:p.amount}));
   const totalPaid=payments.reduce((s,p)=>s+p.amount,0);
   return{
     clientName,jobName:f.jobName||'Untitled Job',
@@ -8692,10 +8707,15 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
   const BAR_H=30;
   doc.setFillColor(0,0,0);
   doc.rect(TX,y,TOTALS_W,BAR_H,'F');
+  const afterBar=[];
+  if(d.cardFeeOnCard)afterBar.push(`Paying by card adds a ${d.cardFeePct}%${d.cardFeeFixed>0?' + '+fmt(d.cardFeeFixed):''} card fee.`);
+  if(Array.isArray(d.paySchedule)&&d.paySchedule.length>1)afterBar.push('Payments: '+d.paySchedule.map((p,i)=>`${p}% (${fmt(cents(d.total*p/100))})`).join(' · '));
   doc.setFont('helvetica','bold');doc.setFontSize(13);doc.setTextColor(255,255,255);
   doc.text('TOTAL',TX+10,y+BAR_H/2+4);
   doc.text(fmt(d.total),W-M-8,y+BAR_H/2+4,{align:'right'});
   y+=BAR_H+14;
+  afterBar.forEach(t=>{ doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(90); doc.splitTextToSize(t,TOTALS_W).forEach(l=>{ doc.text(l,TX,y); y+=10; }); });
+  if(afterBar.length){ doc.setTextColor(0); y+=4; }
   return y;
 }
 
@@ -8825,10 +8845,11 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
           <div class="charge-fields">
             <span id="tripMilesField" style="display:none">Trip <input type="number" id="tripMiles" min="0" step="1" placeholder="0" oninput="recalc()"/> miles</span>
             <span>Tax rate <input type="number" id="pricerTaxRate" min="0" max="20" step="0.01" oninput="setPricerTaxRate(this.value)"/> %</span>
+            <span title="Big jobs paid in stages, e.g. 50/40/10. Blank = deposit, then the balance.">Payment schedule <input type="text" id="paySchedule" placeholder="e.g. 50/40/10" style="width:90px" oninput="recalc()"/></span>
           </div>
           <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
             <span style="font-size:11px;color:var(--muted)">Deposit to start</span>
-            <div class="pi" style="width:90px"><input type="number" id="depositPctInput" min="1" max="100" step="5" style="flex:1;background:none;border:none;color:var(--text);font-size:12px;font-family:'DM Mono',monospace;outline:none;padding:7px 0"/><span>%</span></div>
+            <div class="pi" style="width:90px"><input type="number" id="depositPctInput" min="0" max="100" step="5" style="flex:1;background:none;border:none;color:var(--text);font-size:12px;font-family:'DM Mono',monospace;outline:none;padding:7px 0"/><span>%</span></div>
             <span style="font-size:10px;color:var(--muted2)">this job only</span>
           </div>
           <div class="pi" id="minChargeField" style="display:none;margin-top:8px">
@@ -9035,7 +9056,7 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
       <div class="shop-row"><div><label>Phone</label><small>Call or text. Leave blank to keep it off PDFs and the client page.</small></div><input id="settingBizPhone" type="tel" style="width:100%;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;box-sizing:border-box;max-width:260px"/></div>
       <div class="shop-row"><div><label>Instagram</label></div><input id="settingBizInstagram" type="text" style="width:100%;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;box-sizing:border-box;max-width:260px"/></div>
       <div class="settings-section-title" style="margin-top:20px">Money</div>
-      <div class="shop-row"><div><label>Deposit</label><small>% of the total a client pays to start (client page "Pay Deposit" button and the "deposit paid" alert)</small></div><div class="pi"><span>%</span><input id="settingDepositPct" type="number" step="5" min="1" max="100"/></div></div>
+      <div class="shop-row"><div><label>Deposit</label><small>% of the total a client pays to start (client page "Pay Deposit" button and the "deposit paid" alert)</small></div><div class="pi"><span>%</span><input id="settingDepositPct" type="number" step="5" min="0" max="100"/></div></div>
       <div class="shop-row"><div><label>Estimates valid for</label><small>Days a price is good for. Shown on the estimate PDF and client page; after that the client can't accept or pay until you re-save (re-quote) the job.</small></div><div class="pi"><input id="settingEstimateValidDays" type="number" step="1" min="1"/><span>days</span></div></div>
       <div class="shop-row"><div><label>Sales tax rate</label><small>For NEW estimates. Saved jobs keep the rate they were priced with.</small></div><div class="pi"><span>%</span><input id="settingTaxRate" type="number" step="0.01" min="0"/></div></div>
       <div class="settings-section-title" style="margin-top:20px">New estimate defaults</div>

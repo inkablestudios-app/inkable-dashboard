@@ -56,7 +56,8 @@ export async function bootServer(){
     m=/checkout\/sessions\/([^/?]+)$/.exec(url);
     if(m&&!opts.method){ const s=S[m[1]]; if(!s)return new Response('{}',{status:404}); return new Response(JSON.stringify({id:s.id,status:s.status,payment_status:s.paid?'paid':'unpaid'})); }
     if(url.endsWith('/checkout/sessions')){ const p=new URLSearchParams(opts.body); const id='cs_'+(++n);
-      S[id]={id,status:'open',paid:false,p,amount:+p.get('line_items[0][price_data][unit_amount]'),project:p.get('metadata[project_id]'),desc:p.get('metadata[description]'),name:p.get('line_items[0][price_data][product_data][name]'),email:p.get('customer_email')};
+      let amount=0; for(let i=0;p.has(`line_items[${i}][price_data][unit_amount]`);i++)amount+=+p.get(`line_items[${i}][price_data][unit_amount]`)*(+p.get(`line_items[${i}][quantity]`)||1);
+      S[id]={id,status:'open',paid:false,p,amount,base:+p.get('line_items[0][price_data][unit_amount]'),cardFee:p.get('metadata[card_fee]'),lines:[...p.keys()].filter(k=>/unit_amount/.test(k)).length,project:p.get('metadata[project_id]'),desc:p.get('metadata[description]'),name:p.get('line_items[0][price_data][product_data][name]'),email:p.get('customer_email')};
       created.push(S[id]); return new Response(JSON.stringify({id,url:'https://checkout.stripe.com/'+id})); }
     if(url.includes('/payment_intents/')){ const sid=(/pi_(cs_\d+)/.exec(url)||[])[1]; const s=S[sid]; const fee=s?Math.round(s.amount*0.029+30):300; return new Response(JSON.stringify({latest_charge:{balance_transaction:{fee}}})); }
     return new Response('{}',{status:404});
@@ -64,7 +65,7 @@ export async function bootServer(){
   const stripe={S,created,
     // the client finishes paying on Stripe's page, then Stripe calls the webhook
     async pay(session){ session.paid=true; session.status='complete';
-      const body=JSON.stringify({type:'checkout.session.completed',data:{object:{id:session.id,payment_intent:'pi_'+session.id,amount_total:session.amount,payment_status:'paid',metadata:{project_id:session.project,description:session.desc}}}});
+      const body=JSON.stringify({type:'checkout.session.completed',data:{object:{id:session.id,payment_intent:'pi_'+session.id,amount_total:session.amount,payment_status:'paid',metadata:{project_id:session.project,description:session.desc,...(session.cardFee?{card_fee:session.cardFee}:{})}}}});
       const t=Math.floor(Date.now()/1000); const sig=crypto.createHmac('sha256','whsec_t').update(t+'.'+body).digest('hex');
       const r=await H['stripe-webhook'](new Request('https://x/api/stripe-webhook',{method:'POST',headers:{'stripe-signature':'t='+t+',v1='+sig},body}));
       return r.status; }};
