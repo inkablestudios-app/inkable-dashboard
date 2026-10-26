@@ -411,6 +411,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--black);color:var(--text);
 .cp-box{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:18px}
 .cp-row{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:6px 0;border-bottom:1px solid var(--border)}
 .cp-row:last-child{border-bottom:none}
+.rates-notice{background:#3b82f61a;border:1px solid #3b82f655;border-radius:8px;padding:9px 12px;margin:0 0 14px;font-size:12px;color:var(--text);line-height:1.5}
+.rates-notice-btn{margin-left:6px;background:var(--blue);border:none;border-radius:5px;color:#fff;font-size:11px;font-weight:700;padding:4px 10px;cursor:pointer;font-family:'DM Sans',sans-serif}
 .jp-layers{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px}
 .jp-layers th{text-align:left;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:4px 8px 4px 0;border-bottom:1px solid var(--border)}
 .jp-layers td{padding:6px 8px 6px 0;border-bottom:1px solid var(--border);color:var(--text);vertical-align:top}
@@ -2697,7 +2699,7 @@ function renderJobPage(){
   const clientName=cl?cl.name:(f.billingName||'—');
   let pd={}; try{ pd=JSON.parse(f.pricerData||'{}'); }catch(e){}
   const lines=pd.lines||[];
-  const rates=getRates(), vinyl=getVinyl(), laminate=getLaminate(), substrate=getSubstrate();
+  const rates=jobRates(pd), vinyl=getVinyl(), laminate=getLaminate(), substrate=getSubstrate();
   // Money: the estimate frozen at save time (what the client sees and Stripe
   // charges); older jobs are recalculated from their items.
   let s=f.estimateSummary&&!isNaN(parseFloat(f.estimateSummary.total))?f.estimateSummary:null;
@@ -3774,6 +3776,8 @@ function copyJobToNewEstimate(id){
   if(!p)return;
   if(!pricerCanLeave())return;
   loadPricerFromSaved(p);
+  useTodaysRates(true); // a new estimate is priced at today's rates
+  pricerState.quotedTotal=NaN;
   const projNum=nextProjectNum();
   pricerState.editingId=null;
   pricerState.projectNum=String(projNum);
@@ -3801,7 +3805,7 @@ function generateWorkOrderPDF(id){
     const f=p.state?.form||{}, meta=getJobMeta(id);
     const cl=getClients().find(c=>c.id===p.clientId);
     let pd={}; try{ pd=JSON.parse(f.pricerData||'{}'); }catch(e){}
-    const rates=getRates(), vinyl=getVinyl(), laminate=getLaminate(), substrate=getSubstrate();
+    const rates=jobRates(pd), vinyl=getVinyl(), laminate=getLaminate(), substrate=getSubstrate();
     const {jsPDF}=window.jspdf; const doc=new jsPDF({unit:'pt',format:'letter'});
     const W=612,H=792,M=40; let y=M;
     const line=(x1,y1,x2,y2)=>{doc.setDrawColor(180);doc.setLineWidth(0.5);doc.line(x1,y1,x2,y2);};
@@ -4752,8 +4756,8 @@ let lineCounter=0;
 function getPricingData(){
   try{return JSON.parse(localStorage.getItem(PRICING_KEY)||'null')||{};}catch(e){return{};}
 }
-function getRates(){
-  const pd=getPricingData();
+function getRates(src){
+  const pd=src||getPricingData();
   return{
     designLevels:{
       basic:{rate:pd.designBasic??40},
@@ -4776,6 +4780,28 @@ function getRates(){
     depositPct:pd.depositPct??50,
     estimateValidDays:pd.estimateValidDays??30,
   };
+}
+// Each job keeps the rates it was priced with (saved in its pricer data), so
+// changing Settings later never quietly re-prices an old job. Material
+// prices travel with each item the same way (vinylCost / lamCost / subCost).
+function rateSnapshot(r){
+  r=r||getRates();
+  return {markup:r.markup,printCost:r.printCost,setupRate:r.setupRate,
+    designBasic:r.designLevels.basic.rate,designStandard:r.designLevels.standard.rate,designAdvanced:r.designLevels.advanced.rate,
+    installBasic:r.installLevels.basic.rate,installStandard:r.installLevels.standard.rate,installAdvanced:r.installLevels.advanced.rate,
+    installSqftBasic:r.installLevels.basic.sqftPerHr,installSqftStandard:r.installLevels.standard.sqftPerHr,installSqftAdvanced:r.installLevels.advanced.sqftPerHr,
+    processingFeeRate:r.processingFeeRate,myCostDesign:r.myCostDesign,myCostInstall:r.myCostInstall,myCostSetup:r.myCostSetup};
+}
+// A saved job's own rates. Jobs saved before rates were kept per job use today's.
+function jobRates(pd){ return pd&&pd.rates?getRates({...getPricingData(),...pd.rates}):getRates(); }
+// The rates the open pricer works with: the job's own while editing a saved job.
+function pricerRates(){ return (typeof pricerState!=='undefined'&&pricerState&&pricerState.rates)?getRates({...getPricingData(),...pricerState.rates}):getRates(); }
+// Money rounded to the cent the way people do it (10.725 → 10.73), the same
+// rule the server uses for card charges.
+function cents(n){
+  n=Number(n); if(!isFinite(n)||Math.abs(n)<0.000001)return 0;
+  const v=Number(Math.round(Math.abs(n)+'e2')+'e-2');
+  return n<0?-v:v;
 }
 // Business details and estimate defaults — shown on PDFs, the client page
 // and new estimates. Edited in Settings → Business.
@@ -5716,9 +5742,10 @@ function refreshOpenPricerAfterSettingsSave(){
   // A choice that was just removed from Settings stays flagged as removed
   // (it used to quietly switch to another material and change the price).
   document.querySelectorAll('.line-item').forEach(el=>{
-    [['.li-vinyl',vinyl],['.li-lam',laminate],['.li-sub',substrate]].forEach(([cls,obj])=>{
+    [['.li-vinyl',vinyl,'v'],['.li-lam',laminate,'l'],['.li-sub',substrate,'s']].forEach(([cls,obj,k])=>{
       const sel=el.querySelector(cls);
-      if(sel)setMaterialSelect(sel,obj,sel.value||sel.dataset.missing||'');
+      const name=sel?(sel.value||sel.dataset.missing||''):'';
+      if(sel)setMaterialSelect(sel,obj,name,el.dataset[k+'cost']!==undefined&&el.dataset[k+'name']===name);
     });
   });
   recalc();
@@ -5757,9 +5784,11 @@ function calcSavedLine(line, fallbackJobType, rates, vinyl, laminate, substrate)
       subSqft=(swFinal*shFinal/144)*qty;
     }
 
-    const vCost=vinyl[line.vinyl]||0;
-    const lCost=laminate[line.lam]||0;
-    const sCost=(line.sub&&line.sub!=='None')?(substrate[line.sub]||0):0;
+    // The price saved with the item (what it was quoted at), else today's.
+    const own=(c,list,name)=>(c!=null&&c!==''&&!isNaN(Number(c)))?Number(c):(Number(list[name])||0);
+    const vCost=own(line.vinylCost,vinyl,line.vinyl);
+    const lCost=own(line.lamCost,laminate,line.lam);
+    const sCost=(line.sub&&line.sub!=='None')?own(line.subCost,substrate,line.sub):0;
     // Printed is an explicit saved flag now, not a material-name guess.
     // Older saved projects (pre-this-change) won't have it — fall back to
     // the old material-name heuristic just for those.
@@ -5809,30 +5838,9 @@ function getProjectAmount(p){
     const frozen=parseFloat(f.estimateSummary?.total);
     if(frozen>0)return frozen;
 
-    // New multi-line pricer format
+    // New multi-line pricer format: same routine as the pricer and the PDFs.
     if(f.pricerData){
-      const pd=JSON.parse(f.pricerData);
-      const rates=getRates(), vinyl=getVinyl(), laminate=getLaminate(), substrate=getSubstrate();
-      const matDesignInstall=(pd.lines||[]).reduce((s,l)=>{
-        const {matTotal,designCost,installCost}=calcSavedLine(l,pd.jobType,rates,vinyl,laminate,substrate);
-        return s+matTotal+designCost+installCost;
-      },0);
-      const hardwareTotal=(parseFloat(pd.hardware)||0)+(parseFloat(pd.subs)||0);
-      const setupHrsTotal=(parseFloat(pd.setupHrs)||0)+(parseFloat(pd.setupMins)||0)/60;
-      const setupTotal=setupHrsTotal*rates.setupRate;
-      const sub=matDesignInstall+setupTotal+hardwareTotal;
-      const dtype=pd.discType||'none';
-      const dval=parseFloat(pd.discVal)||0;
-      let disc=0;
-      if(dtype==='pct')disc=sub*dval/100;
-      if(dtype==='flat')disc=Math.min(dval,sub);
-      let taxable=sub-disc;
-      if(pd.minCharge&&taxable<(parseFloat(pd.minChargeVal)||0))taxable=parseFloat(pd.minChargeVal)||0;
-      const withTax=pd.taxExempt?taxable:taxable+taxable*(pd.taxRate!=null?pd.taxRate:8.25)/100;
-      // Same rule as the Estimate PDF and the client page: the card fee is
-      // charged on top of taxable + tax. Leaving it out made Sales show a
-      // lower total than the client actually pays through Stripe.
-      return pd.processingFeeOn?withTax*(1+rates.processingFeeRate/100):withTax;
+      return gatherPricerPDFDataFromSaved(p).total;
     }
 
     // Legacy single-item tool format
@@ -5863,6 +5871,28 @@ function discountAmount(dtype,dval,sub){
   return 0;
 }
 function shownDiscountVal(dtype,dval){ const v=nonNeg(dval); return dtype==='pct'?Math.min(100,v):v; }
+// Every total in the app comes from here (pricer, saved jobs, PDFs, client
+// page, card charges): each item is rounded to the cent first, then the
+// subtotal, discount, minimum charge, tax and card fee are worked out from
+// those rounded amounts, so the rows on every document add up exactly.
+function priceJob(lineData,o){
+  lineData.forEach(l=>{ l.matTotal=cents(l.matTotal); });
+  const add=a=>cents(a.reduce((s,v)=>s+(Number(v)||0),0));
+  const totalMat=add(lineData.map(l=>l.matTotal));
+  const designTotal=cents(lineData.reduce((s,l)=>s+(l.designCost||0),0));
+  const totalInstall=cents(lineData.reduce((s,l)=>s+(l.installCost||0),0));
+  const setupTotal=cents(o.setupTotal);
+  const hardwareOnly=cents(o.hardware), subsTotal=cents(o.subs);
+  const hardwareTotal=add([hardwareOnly,subsTotal]);
+  const sub=add([totalMat,designTotal,totalInstall,setupTotal,hardwareTotal]);
+  const disc=cents(discountAmount(o.dtype,o.dval,sub));
+  let taxable=cents(sub-disc), minChargeAdj=0;
+  if(o.minCharge&&taxable<nonNeg(o.minChargeVal)){ minChargeAdj=cents(nonNeg(o.minChargeVal)-taxable); taxable=add([taxable,minChargeAdj]); }
+  const tax=o.taxExempt?0:cents(taxable*o.taxRate/100);
+  const processingFee=o.feeOn?cents((taxable+tax)*o.feeRate/100):0;
+  const total=add([taxable,tax,processingFee]);
+  return {lineData,totalMat,designTotal,totalInstall,setupTotal,hardwareOnly,subsTotal,hardwareTotal,sub,disc,taxable,minChargeAdj,tax,processingFee,total};
+}
 // Leaving a number box in the pricer: negatives become 0, qty below 1
 // becomes 1 and a % discount over 100 becomes 100, so the box shows what is
 // actually charged.
@@ -5923,9 +5953,16 @@ function escapeAttr(s){ return escapeHtml(s).replace(/"/g,'&quot;').replace(/'/g
 // choice that's no longer in Settings stays on screen as removed and must be
 // picked again before saving: it used to quietly become another material, so
 // the price on screen and the saved price were different.
-function setMaterialSelect(sel,obj,name){
+function setMaterialSelect(sel,obj,name,keptPrice){
   if(!sel)return;
   const missing=!Object.prototype.hasOwnProperty.call(obj,name);
+  // Removed from Settings, but this job has its own price for it: stays usable here.
+  if(missing&&keptPrice&&name){
+    sel.innerHTML=`<option value="${escapeAttr(name)}" selected>${escapeHtml(name)} (removed from Settings — job price kept)</option>`+
+      Object.keys(obj).map(k=>`<option value="${escapeAttr(k)}">${escapeHtml(k)}</option>`).join('');
+    sel.value=name; sel.dataset.missing=''; sel.style.borderColor='';
+    return;
+  }
   sel.innerHTML=(missing?`<option value="" disabled selected>⚠ ${name?escapeHtml(name)+' was removed from Settings':'Nothing picked'} — pick one</option>`:'')+
     Object.keys(obj).map(k=>`<option value="${escapeAttr(k)}"${!missing&&k===name?' selected':''}>${escapeHtml(k)}</option>`).join('');
   if(missing)sel.selectedIndex=0;
@@ -5942,6 +5979,8 @@ function missingMaterialMessage(){
     for(const [cls,obj,what] of lists){
       const sel=el.querySelector(cls);
       if(!sel||Object.prototype.hasOwnProperty.call(obj,sel.value))continue;
+      const k={'.li-vinyl':'v','.li-lam':'l','.li-sub':'s'}[cls];
+      if(sel.value&&el.dataset[k+'name']===sel.value&&el.dataset[k+'cost']!==undefined)continue; // priced on this job
       const item=(el.querySelector('.line-num')?.textContent||'this item').replace(/^Item/,'item');
       return `Pick ${what} for ${item}`+(sel.dataset.missing?` — ${sel.dataset.missing} was removed from Settings.`:'.');
     }
@@ -6081,6 +6120,10 @@ function loadPricerFromSaved(project){
 
   let pd={};
   try{ pd=f.pricerData?JSON.parse(f.pricerData):{}; }catch(e){ pd={}; }
+  // The job is priced at the rates it was saved with (none for jobs saved
+  // before rates were kept per job: those use today's, and say so).
+  pricerState.rates=pd.rates||null; pricerState.switchedToToday=false;
+  pricerState.quotedTotal=parseFloat(f.estimateSummary?.total);
 
   document.getElementById('setupHrs').value=pd.setupHrs||'0';
   document.getElementById('setupMins').value=pd.setupMins||'0';
@@ -6128,9 +6171,14 @@ function addLineItemFromSaved(line){
   // by-material item, a choice that's no longer in Settings shows as removed
   // and has to be picked again before saving.
   const byMaterial=line.pricingMode!=='flat';
-  [['.li-vinyl',getVinyl(),line.vinyl],['.li-lam',getLaminate(),line.lam||'No Laminate'],['.li-sub',getSubstrate(),line.sub||'None']].forEach(([cls,obj,name])=>{
+  // The prices this item was quoted at stay with it, even if Settings change
+  // or the material is removed from Settings later.
+  if(line.vinylCost!=null){ el.dataset.vname=line.vinyl||''; el.dataset.vcost=line.vinylCost; }
+  if(line.lamCost!=null){ el.dataset.lname=line.lam||'No Laminate'; el.dataset.lcost=line.lamCost; }
+  if(line.subCost!=null){ el.dataset.sname=line.sub||'None'; el.dataset.scost=line.subCost; }
+  [['.li-vinyl',getVinyl(),line.vinyl,'v'],['.li-lam',getLaminate(),line.lam||'No Laminate','l'],['.li-sub',getSubstrate(),line.sub||'None','s']].forEach(([cls,obj,name,k])=>{
     const sel=el.querySelector(cls);
-    if(byMaterial)setMaterialSelect(sel,obj,name);
+    if(byMaterial)setMaterialSelect(sel,obj,name,el.dataset[k+'cost']!==undefined&&el.dataset[k+'name']===name);
     else if(Object.prototype.hasOwnProperty.call(obj,name))sel.value=name;
   });
   el.querySelector('.li-w').value=line.w||'';
@@ -6466,6 +6514,39 @@ function markItemActive(id){
   recalc();
 }
 
+// Says when a saved job is priced at its own (older) rates, with a button to
+// switch to today's; and, for a job saved before rates were kept per job,
+// that the pricer is showing today's rates instead of the quoted price.
+function totalAtTodaysRates(){
+  const keep=pricerState.rates; pricerState.rates=null; ignoreKeptPrices=true;
+  try{ return gatherPricerPDFData().total; } finally { pricerState.rates=keep; ignoreKeptPrices=false; }
+}
+function updateRatesNotice(d){
+  const box=document.getElementById('pricerRatesNotice'); if(!box)return;
+  let html='';
+  const kept=pricerState.rates||document.querySelector('.line-item[data-vcost],.line-item[data-lcost],.line-item[data-scost]');
+  if(pricerState.editingId&&kept){
+    const today=totalAtTodaysRates();
+    if(Math.abs(today-d.total)>=0.005)html=`🔒 This job keeps the rates it was quoted with (${fmt(d.total)}). With today's Settings it would be ${fmt(today)}. <button type="button" class="rates-notice-btn" onclick="useTodaysRates()">Use today's rates</button>`;
+  }else if(pricerState.editingId&&pricerState.switchedToToday&&pricerState.quotedTotal>0&&Math.abs(pricerState.quotedTotal-d.total)>=0.005){
+    html=`🔄 Using today's rates: ${fmt(d.total)} (it was quoted at ${fmt(pricerState.quotedTotal)}). Press Save to re-price the job, or close without saving to keep it as it was.`;
+  }else if(pricerState.editingId&&pricerState.quotedTotal>0&&Math.abs(pricerState.quotedTotal-d.total)>=0.005){
+    html=`ℹ️ Quoted at ${fmt(pricerState.quotedTotal)}. This job was saved before rates were kept with each job, so the pricer shows today's rates (${fmt(d.total)}). Saving will use today's rates.`;
+  }
+  box.innerHTML=html; box.style.display=html?'block':'none';
+}
+function useTodaysRates(silent){
+  pricerState.rates=null; pricerState.switchedToToday=true;
+  document.querySelectorAll('.line-item').forEach(el=>{
+    ['vname','vcost','lname','lcost','sname','scost'].forEach(k=>{ delete el.dataset[k]; });
+    if((el.dataset.pricingMode||'material')==='flat')return;
+    [['.li-vinyl',getVinyl()],['.li-lam',getLaminate()],['.li-sub',getSubstrate()]].forEach(([cls,obj])=>{
+      const sel=el.querySelector(cls); if(sel)setMaterialSelect(sel,obj,sel.value||sel.dataset.missing||'');
+    });
+  });
+  recalc();
+  if(!silent)showToast('🔄','Using today\'s rates','The pricer now shows this job at today\'s Settings. Nothing changes until you press Save.',{color:'var(--blue)',duration:7000});
+}
 function updateDoneColumn(){
   const doneEls=document.querySelectorAll('#doneItemsContainer .line-item');
   const countEl=document.getElementById('doneCount');
@@ -6682,11 +6763,18 @@ function getDimIn(input, lineEl, dim){
   return isFt?v*12:v;
 }
 
+// Material price for one item in the open pricer: the price it was quoted
+// with (kept on the item when a saved job is opened), else today's price.
+let ignoreKeptPrices=false;
+function lineMatCost(el,k,name,list){
+  if(!ignoreKeptPrices&&el.dataset[k+'name']===name&&el.dataset[k+'cost']!==undefined&&el.dataset[k+'cost']!=='')return Number(el.dataset[k+'cost'])||0;
+  return Number(list[name])||0;
+}
 function calcLine(el){
   const vinyl=getVinyl();
   const laminate=getLaminate();
   const substrate=getSubstrate();
-  const rates=getRates();
+  const rates=pricerRates();
 
   const qty=lineQty(el.querySelector('.li-qty')?.value); // below 1 counts as 1, same as saved jobs
   const pricingMode=el.dataset.pricingMode||'material';
@@ -6734,9 +6822,9 @@ function calcLine(el){
     }
     subThickness=(el.querySelector('.li-sub-thickness')?.value||'').trim();
 
-    const vCost=vinyl[vinylName]||0;
-    const lCost=(laminate[lamName]||0);
-    const sCost=subName!=='None'?(substrate[subName]||0):0;
+    const vCost=lineMatCost(el,'v',vinylName,vinyl);
+    const lCost=lineMatCost(el,'l',lamName,laminate);
+    const sCost=subName!=='None'?lineMatCost(el,'s',subName,substrate):0;
     // Print cost is an explicit fact you set per item — whether it's
     // actually going through your printer — not a guess based on material
     // name or a job-type label.
@@ -6784,7 +6872,7 @@ function calcLine(el){
 
 function recalc(){
   try{
-  const rates=getRates();
+  const rates=pricerRates();
   const lines=document.querySelectorAll('.line-item');
   let totalMat=0,totalInstall=0,totalDesign=0,totalRawMat=0,totalInstallHrs=0,totalDesignHrs=0,totalInstallCostBasis=0;
   const summaryRows=[];
@@ -6844,48 +6932,20 @@ function recalc(){
 
   // Setup Time — always included (trimming, file prep, printer setup).
   // One per job, not optional, not per item.
-  const setupHrsField=nonNeg(document.getElementById('setupHrs')?.value);
-  const setupMinsField=nonNeg(document.getElementById('setupMins')?.value);
-  const setupHrsTotal=setupHrsField+setupMinsField/60;
-  const setupTotal=setupHrsTotal*rates.setupRate;
-
+  const setupHrsTotal=nonNeg(document.getElementById('setupHrs')?.value)+nonNeg(document.getElementById('setupMins')?.value)/60;
   // Hardware & Misc — flat pass-through, no markup. Charge and "my cost" are
-  // tracked separately now so margin doesn't assume you sell these at cost.
-  const hardware=nonNeg(document.getElementById('pricerHardware')?.value);
-  const subs=nonNeg(document.getElementById('pricerSubs')?.value);
-  const hardwareTotal=hardware+subs;
-  const hardwareCost=nonNeg(document.getElementById('pricerHardwareCost')?.value);
-  const subsCost=nonNeg(document.getElementById('pricerSubsCost')?.value);
-  const hardwareCostBasis=hardwareCost+subsCost;
-
-  // Totals
-  const sub=totalMat+totalDesign+totalInstall+setupTotal+hardwareTotal;
-  const dtype=document.getElementById('discType')?.value||'none';
-  const dval=document.getElementById('discVal')?.value;
-  const disc=discountAmount(dtype,dval,sub);
-  let taxable=sub-disc;
-
-  // Minimum charge — floor applied to the pre-tax subtotal, after
-  // discount. Simple on/off toggle, one number for the whole job.
-  const minChargeOn=document.getElementById('minChargeChk')?.checked;
-  const minChargeVal=nonNeg(document.getElementById('minChargeVal')?.value);
-  if(minChargeOn&&taxable<minChargeVal)taxable=minChargeVal;
-
-  // Tax exempt — zeroes tax entirely for this job
-  const taxExempt=document.getElementById('taxExemptChk')?.checked;
-  const taxRate=pricerState.taxRate??getRates().taxRate;
-  const tax=taxExempt?0:taxable*taxRate/100;
-  // Same total as the live preview, PDF, client page and Stripe: includes
-  // the card fee when it's ticked (it used to be left out here).
-  const feeOn=document.getElementById('processingFeeChk')?.checked;
-  const processingFee=feeOn?(taxable+tax)*(rates.processingFeeRate/100):0;
-  const total=taxable+tax+processingFee;
+  // tracked separately so margin doesn't assume you sell these at cost.
+  const hardwareCostBasis=nonNeg(document.getElementById('pricerHardwareCost')?.value)+nonNeg(document.getElementById('pricerSubsCost')?.value);
+  // Every amount shown below comes from the same routine (and rounding) as the
+  // PDFs, the client page and the card charge.
+  const d=gatherPricerPDFData();
+  const {sub,disc,taxable,tax,total,taxRate,hardwareTotal}=d;
   ['strip-tax-label','mp-tax-label'].forEach(id=>{const e=document.getElementById(id); if(e)e.textContent='Tax '+taxRate+'%';});
 
   // Update right panel
-  document.getElementById('t-materials').textContent='$'+totalMat.toFixed(2);
-  document.getElementById('t-design').textContent='$'+totalDesign.toFixed(2);
-  document.getElementById('t-install').textContent='$'+totalInstall.toFixed(2);
+  document.getElementById('t-materials').textContent=fmt(d.totalMat);
+  document.getElementById('t-design').textContent=fmt(d.designTotal);
+  document.getElementById('t-install').textContent=fmt(d.totalInstall);
   const hwEl=document.getElementById('t-hardware'), hwRow=document.getElementById('t-hardware-row');
   if(hwEl)hwEl.textContent='$'+hardwareTotal.toFixed(2);
   if(hwRow)hwRow.style.display=hardwareTotal>0?'flex':'none';
@@ -6930,7 +6990,7 @@ function recalc(){
   if(sumEl){
     sumEl.innerHTML=summaryRows.map(r=>`
       <div class="line-preview-row">
-        <div class="line-preview-desc">${r.desc}<br><span style="font-size:10px;color:var(--muted2)">${r.sqft} sqft</span></div>
+        <div class="line-preview-desc">${escapeHtml(r.desc)}<br><span style="font-size:10px;color:var(--muted2)">${r.sqft} sqft</span></div>
         <div class="line-preview-val">$${(r.mat+r.inst).toFixed(2)}</div>
       </div>`).join('');
   }
@@ -6949,7 +7009,8 @@ function recalc(){
 
   // Live Preview card — mirrors gatherPricerPDFData() so what you see here
   // is exactly what the generated PDF will show.
-  renderLivePreview(gatherPricerPDFData());
+  renderLivePreview(d);
+  updateRatesNotice(d);
   updateDoneColumn();
 
   }catch(err){console.error('recalc error:',err.message,err.stack);}
@@ -7051,7 +7112,12 @@ function collectPricerData(){
         subWFt:el.querySelector('.li-subw-unit[data-unit="ft"]')?.classList.contains('active'),
         subHFt:el.querySelector('.li-subh-unit[data-unit="ft"]')?.classList.contains('active'),
         subThickness:el.querySelector('.li-sub-thickness')?.value||'',
+        // The material prices this item is quoted at (kept if Settings change later).
+        vinylCost:lineMatCost(el,'v',el.querySelector('.li-vinyl').value,getVinyl()),
+        lamCost:lineMatCost(el,'l',el.querySelector('.li-lam').value,getLaminate()),
+        subCost:el.querySelector('.li-sub').value==='None'?0:lineMatCost(el,'s',el.querySelector('.li-sub').value,getSubstrate()),
       })),
+      rates:pricerState.rates||rateSnapshot(),
       setupHrs:document.getElementById('setupHrs').value,
       setupMins:document.getElementById('setupMins').value,
       hardware:document.getElementById('pricerHardware').value,
@@ -7194,6 +7260,13 @@ function savePricerProject(){
   if(dropPdfs.length){ entry.exportedPdfs={...entry.exportedPdfs}; dropPdfs.forEach(t=>delete entry.exportedPdfs[t]); }
 
   pricerState.editingId=id;
+  // From now on this job is priced at the rates it was just saved with.
+  try{
+    const spd=JSON.parse(state.form.pricerData);
+    pricerState.rates=spd.rates; pricerState.quotedTotal=newTotal; pricerState.switchedToToday=false;
+    document.querySelectorAll('.line-item').forEach((el,i)=>{ const l=spd.lines[i]; if(!l)return;
+      el.dataset.vname=l.vinyl||''; el.dataset.vcost=l.vinylCost; el.dataset.lname=l.lam||''; el.dataset.lcost=l.lamCost; el.dataset.sname=l.sub||'None'; el.dataset.scost=l.subCost; });
+  }catch(e){}
   noteIssuedNum(projNum,estDigits(estNo));
   const rawList=JSON.parse(localStorage.getItem(SAVED_KEY)||'[]');
   if(existing>=0){rawList[existing]=entry;}
@@ -7223,7 +7296,7 @@ function savePricerProject(){
   if(!alreadySeeded){
     try{
       const pd=JSON.parse(state.form.pricerData);
-      const rates=getRates(), vinyl=getVinyl(), laminate=getLaminate(), substrate=getSubstrate();
+      const rates=jobRates(pd), vinyl=getVinyl(), laminate=getLaminate(), substrate=getSubstrate();
       let rawMat=0, designHrs=0, installCostBasisTotal=0;
       (pd.lines||[]).forEach(l=>{
         const calc=calcSavedLine(l,pd.jobType,rates,vinyl,laminate,substrate);
@@ -7622,6 +7695,7 @@ function printTaxReport(){
 
 // ── PDF generation (Estimate + Invoice) ─────────────────────────────────
 function gatherPricerPDFData(){
+  const rates=pricerRates();
   const lineEls=Array.from(document.querySelectorAll('.line-item'));
   const lineData=lineEls.map(el=>{
     const {sqft,matTotal,designCost,installCost}=calcLine(el);
@@ -7635,33 +7709,20 @@ function gatherPricerPDFData(){
     if(vehicleInfo)desc+=' — '+vehicleInfo;
     return {desc,sqft,matTotal,designCost,installCost};
   });
-  const totalMat=lineData.reduce((s,l)=>s+l.matTotal,0);
-  const totalInstall=lineData.reduce((s,l)=>s+l.installCost,0);
-  const designTotal=lineData.reduce((s,l)=>s+l.designCost,0);
-  const rates=getRates();
   const setupHrsTotal=nonNeg(document.getElementById('setupHrs')?.value)+
     nonNeg(document.getElementById('setupMins')?.value)/60;
-  const setupTotal=setupHrsTotal*rates.setupRate;
-  const hardwareTotal=nonNeg(document.getElementById('pricerHardware')?.value)+
-    nonNeg(document.getElementById('pricerSubs')?.value);
-  const sub=totalMat+designTotal+totalInstall+setupTotal+hardwareTotal;
   const dtype=document.getElementById('discType')?.value||'none';
   const dval=shownDiscountVal(dtype,document.getElementById('discVal')?.value);
-  const disc=discountAmount(dtype,dval,sub);
-  let taxable=sub-disc;
-  const minChargeOn=document.getElementById('minChargeChk')?.checked;
-  const minChargeVal=nonNeg(document.getElementById('minChargeVal')?.value);
-  let minChargeAdj=0;
-  if(minChargeOn&&taxable<minChargeVal){minChargeAdj=minChargeVal-taxable;taxable=minChargeVal;}
-  const taxExempt=document.getElementById('taxExemptChk')?.checked;
+  const minChargeOn=!!document.getElementById('minChargeChk')?.checked;
+  const taxExempt=!!document.getElementById('taxExemptChk')?.checked;
   const taxRate=pricerState.taxRate??getRates().taxRate;
-  const tax=taxExempt?0:taxable*taxRate/100;
-  // Card processing fee — manual, opt-in per job (checked by default),
-  // applied on top of tax+taxable so it reflects what actually gets run
-  // through the card, not just the pre-tax price.
-  const processingFeeOn=document.getElementById('processingFeeChk')?.checked;
-  const processingFee=processingFeeOn?(taxable+tax)*(rates.processingFeeRate/100):0;
-  const total=taxable+tax+processingFee;
+  // Card processing fee — opt-in per job (checked by default), charged on
+  // top of taxable + tax: it's what actually gets run through the card.
+  const processingFeeOn=!!document.getElementById('processingFeeChk')?.checked;
+  const m=priceJob(lineData,{setupTotal:setupHrsTotal*rates.setupRate,
+    hardware:nonNeg(document.getElementById('pricerHardware')?.value),subs:nonNeg(document.getElementById('pricerSubs')?.value),
+    dtype,dval,minCharge:minChargeOn,minChargeVal:nonNeg(document.getElementById('minChargeVal')?.value),
+    taxExempt,taxRate,feeOn:processingFeeOn,feeRate:rates.processingFeeRate});
 
   const jobName=(document.getElementById('pricerJobName')?.value||'').trim()||'Untitled Job';
   const notes=(document.getElementById('pricerNotes')?.value||'').trim();
@@ -7678,9 +7739,8 @@ function gatherPricerPDFData(){
   const clientCityLine=client?[[client.city,client.state].filter(Boolean).join(', '),client.zip].filter(Boolean).join(' '):'';
   const clientPhone=client?client.phone||'':'';
 
-  return{lineData,totalMat,totalInstall,designTotal,setupTotal,hardwareTotal,sub,dtype,dval,disc,taxable,tax,total,taxExempt,minChargeApplied:minChargeOn,minChargeAdj,
-    processingFee,processingFeeOn,taxRate,
-    validUntil:typeof validUntil==='string'?validUntil:'',validDays:typeof validDays==='number'?validDays:0,
+  return{...m,dtype,dval,taxExempt,minChargeApplied:minChargeOn,processingFeeOn,taxRate,
+    validUntil:'',validDays:0,
     jobName,jobDesc,notes,terms,date,estNo,invNo,clientName,clientAddr,clientCityLine,clientPhone};
 }
 
@@ -7700,45 +7760,25 @@ function textWidthTracked(doc,text,charSpace){
 // the live pricer DOM, so a job can be viewed/reprinted without reopening it.
 function gatherPricerPDFDataFromSaved(p){
   const f=p.state?.form||{};
-  const rates=getRates(), vinyl=getVinyl(), laminate=getLaminate(), substrate=getSubstrate();
-  let lineData=[], dtype='none', dval=0, hardwareTotal=0, setupTotal=0, taxExempt=false, minCharge=false, minChargeVal=0, processingFeeOn=false;
-
-  let taxRate=8.25; // jobs saved before the setting existed were priced at 8.25%
+  let pd={}; if(f.pricerData){ try{ pd=JSON.parse(f.pricerData); }catch(e){ pd={}; } }
+  const rates=jobRates(pd), vinyl=getVinyl(), laminate=getLaminate(), substrate=getSubstrate();
+  let taxRate=pd.taxRate!=null?pd.taxRate:8.25; // jobs saved before the setting existed were priced at 8.25%
   let validUntil='', validDays=0;
-  if(f.pricerData){
-    const pd=JSON.parse(f.pricerData);
-    if(pd.taxRate!=null)taxRate=pd.taxRate;
-    if(pd.quotedAt&&pd.validDays){ validDays=pd.validDays; validUntil=estimateValidUntil(pd.quotedAt,pd.validDays); }
-    dtype=pd.discType||'none';
-    dval=shownDiscountVal(dtype,pd.discVal);
-    taxExempt=!!pd.taxExempt;
-    minCharge=!!pd.minCharge;
-    // Defaults to false for jobs saved before this feature existed —
-    // never silently add a fee to a job that was priced without it.
-    processingFeeOn=!!pd.processingFeeOn;
-    minChargeVal=nonNeg(pd.minChargeVal);
-    hardwareTotal=nonNeg(pd.hardware)+nonNeg(pd.subs);
-    const setupHrsTotal=nonNeg(pd.setupHrs)+nonNeg(pd.setupMins)/60;
-    setupTotal=setupHrsTotal*rates.setupRate;
-    lineData=(pd.lines||[]).map(l=>{
-      const calc=calcSavedLine(l,pd.jobType,rates,vinyl,laminate,substrate);
-      let desc=calc.subLabel?calc.desc+' + '+calc.subLabel:calc.desc;
-      if(l.vehicleInfo)desc+=' — '+l.vehicleInfo;
-      return {...calc,desc};
-    });
-  }
-
-  const totalMat=lineData.reduce((s,l)=>s+l.matTotal,0);
-  const totalInstall=lineData.reduce((s,l)=>s+l.installCost,0);
-  const designTotal=lineData.reduce((s,l)=>s+l.designCost,0);
-  const sub=totalMat+designTotal+totalInstall+setupTotal+hardwareTotal;
-  const disc=discountAmount(dtype,dval,sub);
-  let taxable=sub-disc;
-  let minChargeAdj=0;
-  if(minCharge&&taxable<minChargeVal){minChargeAdj=minChargeVal-taxable;taxable=minChargeVal;}
-  const tax=taxExempt?0:taxable*taxRate/100;
-  const processingFee=processingFeeOn?(taxable+tax)*(rates.processingFeeRate/100):0;
-  const total=taxable+tax+processingFee;
+  if(pd.quotedAt&&pd.validDays){ validDays=pd.validDays; validUntil=estimateValidUntil(pd.quotedAt,pd.validDays); }
+  const dtype=pd.discType||'none';
+  const dval=shownDiscountVal(dtype,pd.discVal);
+  const lineData=(pd.lines||[]).map(l=>{
+    const calc=calcSavedLine(l,pd.jobType,rates,vinyl,laminate,substrate);
+    let desc=calc.subLabel?calc.desc+' + '+calc.subLabel:calc.desc;
+    if(l.vehicleInfo)desc+=' — '+l.vehicleInfo;
+    return {...calc,desc};
+  });
+  const setupHrsTotal=nonNeg(pd.setupHrs)+nonNeg(pd.setupMins)/60;
+  // Defaults to false for jobs saved before this feature existed —
+  // never silently add a fee to a job that was priced without it.
+  const processingFeeOn=!!pd.processingFeeOn, taxExempt=!!pd.taxExempt, minCharge=!!pd.minCharge;
+  const m=priceJob(lineData,{setupTotal:setupHrsTotal*rates.setupRate,hardware:nonNeg(pd.hardware),subs:nonNeg(pd.subs),
+    dtype,dval,minCharge,minChargeVal:nonNeg(pd.minChargeVal),taxExempt,taxRate,feeOn:processingFeeOn,feeRate:rates.processingFeeRate});
 
   const clients=getClients();
   const client=f.clientId?clients.find(c=>c.id===f.clientId):null;
@@ -7747,9 +7787,8 @@ function gatherPricerPDFDataFromSaved(p){
   const clientCityLine=client?[[client.city,client.state].filter(Boolean).join(', '),client.zip].filter(Boolean).join(' '):'';
   const clientPhone=client?client.phone||'':'';
 
-  return{lineData,totalMat,totalInstall,designTotal,setupTotal,hardwareTotal,sub,dtype,dval,disc,taxable,tax,total,taxExempt,minChargeApplied:minCharge,minChargeAdj,
-    processingFee,processingFeeOn,taxRate,
-    validUntil:typeof validUntil==='string'?validUntil:'',validDays:typeof validDays==='number'?validDays:0,
+  return{...m,dtype,dval,taxExempt,minChargeApplied:minCharge,processingFeeOn,taxRate,
+    validUntil,validDays,
     jobName:f.jobName||'Untitled Job',
     jobDesc:f.jobDesc||'',
     notes:f.notes||'',
@@ -8367,6 +8406,7 @@ function drawTotalsBlock(doc,W,M,y,d,onNewPage){
         <input type="text" id="pricerJobDesc" maxlength="80" placeholder="e.g. Ford F-150 partial wrap" style="width:100%;background:var(--dark);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;font-family:'DM Sans',sans-serif;outline:none"/>
       </div>
 
+      <div id="pricerRatesNotice" class="rates-notice" style="display:none"></div>
       <!-- Regular line items -->
       <div id="regularLines">
         <div class="line-items" id="lineItemsContainer"></div>
